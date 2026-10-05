@@ -802,6 +802,9 @@ const REASONS_READ_BY_A_PAGE = new Map([
   ['ATTACHMENT_CHANGE_REFUSED', 'pages/calendar.js'],
   ['ATTACHMENT_UPLOAD_REFUSED', 'pages/calendar.js'],
   ['FOLDER_DOCUMENTS_NOT_MANAGEABLE', 'utils/document-folder-delete.js'],
+  // Installieren und Loeschen eines Moduls mit einem API-Token: beide Blaetter
+  // (Eigenes Modul hinzufuegen, Aktive Module) nehmen den Satz aus dieser Datei.
+  ['module_session_required', 'settings/module-install-errors.js'],
 ]);
 
 const REASONS_WITHOUT_SENTENCE = new Set([
