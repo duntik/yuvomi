@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not change what anyone else in the household sees, and only applies to the tile: the
   today sheet, the wall and the menu keep counting every list.
 
+- **A profile picture can be fetched from Gravatar once.** Settings → Account has a third button
+  next to upload and remove: it asks gravatar.com for the picture that belongs to the saved email
+  address and stores it exactly like an upload, in `avatar_data`, so nothing is fetched again
+  afterwards - not on sign-in, not in the background - and the browser never loads from
+  gravatar.com itself. What leaves the server is a SHA-256 hash of the lowercased address and the
+  server's IP, never the address or the name; the fetch goes through the SSRF-guarded client with
+  an 8 second limit, a 512 KiB cap and a signature check that the answer really is a PNG, JPEG or
+  WebP. An uploaded picture wins because both write the same field and the latest action is the
+  stored one. The button waits until an email address is saved, and an operator switches the
+  feature off by setting `GRAVATAR_BASE_URL` to an empty string (set to another https base, the
+  same variable points the fetch at a Libravatar mirror).
+
 ### Changed
 
 - **Rows show fewer buttons.** Lists no longer carry a pencil and a bin on every line. Editing,

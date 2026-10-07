@@ -18,6 +18,7 @@ import { SESSION_MAX_AGE_MS, sessionCookieRefreshDue } from './utils/session-lif
 import { collectErrors, date as validateDate, str, MAX_SHORT, MAX_TITLE } from './middleware/validate.js';
 import { createLogger } from './logger.js';
 import { memberEmail } from './services/member-email.js';
+import { GravatarError, fetchGravatar } from './services/gravatar.js';
 import {
   accessScopeSql, activeAccountSql, deactivatedAtColumnSql, householdMemberSql, isActiveAccount,
   memberOrderSql, memberPositionSql,
@@ -474,6 +475,22 @@ const sessionRevokeLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Zu viele Anfragen. Bitte warte kurz.', code: 429 },
+});
+
+// Eigener Limiter fuer den Gravatar-Import. Jeder Aufruf ist ein Abruf bei
+// einem fremden Dienst mit dem Hash der eigenen Adresse; zehn in zehn Minuten
+// reichen fuer jeden ehrlichen Klick und halten einen Schleifenlauf vom
+// Spiegel fern. Je Mitglied gezaehlt, aus demselben Grund wie eine Zeile
+// darueber: hinter einem Proxy ohne `trust proxy` teilt der Haushalt eine IP.
+// Mit `reason`, damit die Oberflaeche den Fall benennen kann statt den Text
+// durchzureichen.
+const gravatarLimiter = rateLimit({
+  windowMs: 10 * 60_000,
+  max: 10,
+  keyGenerator: (req) => `user:${req.authUserId}`,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many Gravatar requests. Please wait a few minutes.', code: 429, reason: 'gravatar_rate_limited' },
 });
 
 // Wie lange ein bestandenes Passwort auf den zweiten Faktor warten darf.
@@ -3674,6 +3691,90 @@ router.patch('/me/profile', requireAuth, csrfMiddleware, (req, res) => {
     res.status(500).json({ error: 'Internal server error.', code: 500 });
   }
 });
+
+// Status je Grund aus services/gravatar.js. Ein Grund, der hier fehlt, ist ein
+// Betreiberfehler (gravatar_bad_base_url) und faellt auf 500 - absichtlich
+// laut, nicht als "abgeschaltet" getarnt: eine falsch gesetzte Variable soll
+// im Log stehen, nicht als Produktentscheidung durchgehen.
+const GRAVATAR_STATUS = {
+  no_email: 400,
+  gravatar_disabled: 404,
+  gravatar_unreachable: 502,
+  gravatar_too_large: 413,
+  gravatar_not_image: 415,
+};
+
+/**
+ * POST /api/v1/auth/me/avatar/gravatar
+ * Holt das Gravatar zur eigenen gespeicherten Adresse EINMAL und legt es wie
+ * einen Upload ab: derselbe Weg wie PATCH /me/profile mit `avatar_data`
+ * (normalizeAvatarData, users.avatar_data, Geburtstagsfoto-Spiegel). Danach
+ * wird nichts mehr nachgeladen; ein spaeterer Upload ueberschreibt es, ein
+ * spaeterer Import den Upload - es gewinnt, was zuletzt gespeichert wurde.
+ *
+ * Nur fuer sich selbst: die Adresse gehoert dem Mitglied, und der Abruf bei
+ * einem fremden Dienst ist sein sichtbarer Akt (DECISIONS.md §1). Ein
+ * Wandtablett weist der Riegel des Routers ab (403 display_account), wie jede
+ * andere Schreibroute hier.
+ * Response: { data: User } | { error, code, reason } mit reason aus
+ *   no_email, gravatar_disabled, gravatar_not_found, gravatar_unreachable,
+ *   gravatar_too_large, gravatar_not_image, gravatar_rate_limited.
+ *
+ * Als Builder wie buildResetRoutes(): die Suite reicht einen Abruf ohne Netz
+ * hinein und prueft den Rest - Riegel, Limiter, Speicherung, Spiegel - gegen
+ * den echten Handler.
+ */
+export function buildGravatarRoute(targetRouter, { fetch = fetchGravatar, limiter = gravatarLimiter } = {}) {
+  targetRouter.post('/me/avatar/gravatar', requireAuth, csrfMiddleware, limiter, async (req, res) => {
+    try {
+      const existing = db.get().prepare('SELECT id FROM users WHERE id = ?').get(req.authUserId);
+      if (!existing) return res.status(404).json({ error: 'User not found.', code: 404 });
+
+      const email = memberEmail(req.authUserId);
+      let fetched;
+      try {
+        fetched = await fetch(email);
+      } catch (err) {
+        if (!(err instanceof GravatarError)) throw err;
+        const status = GRAVATAR_STATUS[err.reason] ?? 500;
+        // Ohne Hash und ohne URL: das Log soll sagen, WAS schiefging, nicht WER
+        // gefragt wurde. Von der `cause` nur der Code (ENOTFOUND, ECONNRESET),
+        // nicht die Meldung - die traegt bei einem DNS-Fehler den Host der
+        // Basis-URL. Ein Betreiberfehler (500) bekommt nach aussen einen
+        // neutralen Satz; der genaue steht im Log, wo der Betreiber liest.
+        log.info('Gravatar import refused', { userId: req.authUserId, reason: err.reason, cause: err.cause?.code ?? err.cause?.name, detail: status >= 500 ? err.message : undefined });
+        const error = status >= 500 ? 'Gravatar import is misconfigured on this server.' : err.message;
+        return res.status(status).json({ error, code: status, reason: err.reason });
+      }
+      if (!fetched) {
+        log.info('Gravatar import: no picture', { userId: req.authUserId });
+        return res.status(404).json({ error: 'gravatar.com has no picture for your email address.', code: 404, reason: 'gravatar_not_found' });
+      }
+
+      // Derselbe Filter wie beim Upload. Er kann hier nur noch an der Laenge
+      // scheitern, und auch das nicht, solange MAX_GRAVATAR_BYTES in Base64
+      // unter MAX_AVATAR_DATA_LENGTH bleibt - geprueft wird trotzdem, damit die
+      // Zusicherung an der Stelle steht, an der sie gilt.
+      const avatarData = normalizeAvatarData(fetched.dataUrl);
+      if (avatarData?.error) {
+        return res.status(415).json({ error: avatarData.error, code: 415, reason: 'gravatar_not_image' });
+      }
+
+      db.transaction(() => {
+        db.get().prepare('UPDATE users SET avatar_data = ? WHERE id = ?').run(avatarData, req.authUserId);
+        syncFamilyMemberArtifacts(db.get(), req.authUserId, { avatarData, actorUserId: req.authUserId });
+      });
+
+      log.info('Gravatar imported', { userId: req.authUserId, contentType: fetched.contentType, bytes: fetched.bytes });
+      const updated = db.get().prepare(`SELECT ${USER_PUBLIC_COLUMNS} FROM users WHERE id = ?`).get(req.authUserId);
+      res.json({ data: publicUser(updated) });
+    } catch (err) {
+      log.error('Gravatar import error:', err);
+      res.status(500).json({ error: 'Internal server error.', code: 500 });
+    }
+  });
+}
+buildGravatarRoute(router);
 
 /**
  * PATCH /api/v1/auth/me/password

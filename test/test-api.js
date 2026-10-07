@@ -855,6 +855,11 @@ const REASONS_PASSED_THROUGH = new Map([
   ['routes/split-expenses.js: err.reason', { sites: 1, at403: [],
     why: 'Refusal: ein Grund nur an 409 (email_in_use); die 403 dort tragen keinen' }],
   ['auth.js: err.code', { sites: 1, at403: [], why: 'feste 409 (2FA)' }],
+  // Gravatar-Import: GravatarError traegt seinen Grund, die Route schlaegt den
+  // Status nach (400/404/413/415/502, 500 bei falsch gesetzter GRAVATAR_BASE_URL)
+  // - eine 403 baut sie nie; die des Wandtabletts kommt mit Literal vom Riegel.
+  // Die zweite Stelle ist die Logzeile daneben, keine Antwort.
+  ['auth.js: err.reason', { sites: 2, at403: [], why: 'Gravatar-Import: 400/404/413/415/502 oder 500, nie 403' }],
   ['routes/notes.js: result.reason', { sites: 1, at403: [], why: 'feste 409' }],
   ['routes/family.js: problem.reason', { sites: 1, at403: [], why: 'memberOrderProblem: feste 400; die 403 daneben traegt ein Literal' }],
   ['routes/tasks.js: result.reason', { sites: 1, at403: [], why: 'feste 409' }],

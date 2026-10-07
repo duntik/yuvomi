@@ -680,6 +680,19 @@ encrypted at rest when `DB_ENCRYPTION_KEY` is enabled. See the dedicated
 [Immich screensaver guide](immich-screensaver.md) for setup, Docker networking, preview behavior,
 security, and troubleshooting.
 
+### Gravatar Profile Picture (Optional)
+
+A member can fetch the picture that gravatar.com holds for their saved email address under
+**Settings → Account → Use my Gravatar**. The server fetches it once, on that click, and stores it
+exactly like an uploaded picture; nothing is fetched again later. Only a SHA-256 hash of the
+lowercased address, this server's IP and its User-Agent reach the service, never the address
+itself. The fetch uses HTTPS only, follows at most five redirects, refuses private network
+targets, times out after 8 seconds and accepts at most 512 KiB of PNG, JPEG or WebP.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `GRAVATAR_BASE_URL` | Base URL the avatar hash is appended to. Point it at a Libravatar-compatible mirror (`https://` and a public host) or set it to an **empty string** to switch the button off; the route then answers `404` with `reason: "gravatar_disabled"` | `https://gravatar.com/avatar/` | No |
+
 ### Database & Storage
 
 | Variable | Description | Default | Required |

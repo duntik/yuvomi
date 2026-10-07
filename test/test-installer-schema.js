@@ -161,6 +161,17 @@ const INTENTIONALLY_NOT_IN_INSTALLER = {
     + 'Formular nennt den Schalter, wenn es eine private Adresse ablehnt.',
   IMMICH_API_KEY: 'Geheimnis, das in der App gesetzt und dort auch getestet wird.',
   IMMICH_SCREENSAVER_ALBUM_ID: 'Optionale Album-Einschränkung, in der App wählbar.',
+  // Der Default (gravatar.com) ist fuer jede vom Wizard erzeugte Installation
+  // der richtige Wert - dieselbe Lage wie bei DMS_ALLOW_PRIVATE_NETWORK oben.
+  // Die Variable gibt es nur fuer zwei Betreiber-Entscheidungen danach: einen
+  // Libravatar-Spiegel eintragen oder den Knopf abschalten (leerer Wert). Ein
+  // Wizard-Feld fuer eine URL, die fast niemand aendert, waere eine Frage mehr
+  // vor der ersten Anmeldung - und ein leeres Feld laese sich dort nicht von
+  // "nicht ausgefuellt" unterscheiden.
+  GRAVATAR_BASE_URL:
+    'Basis-URL des Gravatar-Imports; der Default ist fuer jede Wizard-Installation richtig, '
+    + 'und ein leerer Wert (= abgeschaltet) liesse sich im Wizard nicht von "nicht ausgefuellt" '
+    + 'unterscheiden. Wer abschaltet oder spiegelt, fasst die .env bewusst an.',
 
   // Betriebs-Feinjustage, keine Installationsentscheidung.
   LOG_LEVEL: 'Betriebs-Feinjustage.',

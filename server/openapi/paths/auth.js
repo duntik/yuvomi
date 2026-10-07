@@ -435,6 +435,43 @@ export function authPaths() {
         },
       }),
     },
+    '/api/v1/auth/me/avatar/gravatar': {
+      post: op({
+        summary: 'Fetch the Gravatar for the calling account once and store it as the profile picture',
+        tag: 'Auth',
+        stateChanging: true,
+        requestBody: jsonBody(null, 'Empty body'),
+        description: 'A one-shot import, not a live provider: the server hashes the account\'s stored email address '
+          + '(SHA-256 of the trimmed, ASCII-lowercased address), fetches the picture from the configured Gravatar base '
+          + 'URL once (HTTPS only, at most five redirects, private network targets refused, 8 s timeout, at most 512 KiB '
+          + 'of PNG, JPEG or WebP whose bytes match the declared type) and stores it exactly like an upload through '
+          + '`PATCH /api/v1/auth/me/profile`: into `avatar_data`, mirrored to the account\'s birthday photo. Nothing is '
+          + 'fetched again later; a later upload overwrites the import and a later import overwrites the upload. Self '
+          + 'only; a paired wall display is refused like every other account write. Only the hash, the server\'s IP and '
+          + 'its User-Agent reach the service, never the address. Limited to 10 calls per account per 10 minutes.',
+        responses: {
+          200: {
+            description: 'The picture was stored; the updated account',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { data: { $ref: '#/components/schemas/User' } },
+                },
+              },
+            },
+          },
+          400: { description: 'The account has no single stored email address (`reason: "no_email"`)' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          404: { description: 'The operator switched the feature off with an empty `GRAVATAR_BASE_URL` (`reason: "gravatar_disabled"`), or the service has no picture for the address (`reason: "gravatar_not_found"`)' },
+          413: { description: 'The picture exceeds 512 KiB (`reason: "gravatar_too_large"`)' },
+          415: { description: 'The response is not a PNG, JPEG or WebP image, by type or by content (`reason: "gravatar_not_image"`)' },
+          429: { description: 'More than 10 calls in 10 minutes for this account (`reason: "gravatar_rate_limited"`)' },
+          500: { $ref: '#/components/responses/InternalServerError' },
+          502: { description: 'The service could not be reached: timeout, DNS, a target refused by the SSRF guard, or a non-2xx answer other than 404 (`reason: "gravatar_unreachable"`)' },
+        },
+      }),
+    },
     '/api/v1/auth/users': {
       get: op({
         summary: 'List family users',

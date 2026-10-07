@@ -21,7 +21,27 @@ function avatarHtml(user, className = 'settings-avatar') {
   `;
 }
 
+/**
+ * Gravatar ist ein einmaliger Import, kein Anbieter: der Server holt das Bild
+ * zur GESPEICHERTEN Adresse und legt es wie einen Upload in avatar_data ab.
+ * Deshalb zaehlt hier die geladene Adresse, nicht das Eingabefeld - was im
+ * Feld steht, kennt der Server noch nicht.
+ * @param {{ email?: string|null }|null|undefined} user
+ * @returns {boolean}
+ */
+// Dieselbe Regel wie memberEmail() auf dem Server (singleAddress in
+// member-email.js): GENAU eine Adresse, kein Trenner, kein zweites @. Eine
+// Liste aus CardDAV ("a@x, b@y") steht zwar im Feld, aber der Server weist sie
+// als no_email ab - der Knopf soll dann gar nicht erst aktiv sein.
+export function hasSavedEmail(user) {
+  const raw = typeof user?.email === 'string' ? user.email.trim() : '';
+  if (!raw || /[,;\s]/.test(raw)) return false;
+  const at = raw.indexOf('@');
+  return at > 0 && raw.indexOf('@', at + 1) === -1;
+}
+
 function avatarEditorHtml(user) {
+  const gravatarReady = hasSavedEmail(user);
   return `
     <div class="settings-avatar-editor">
       <button type="button" class="settings-avatar-button" id="profile-avatar-preview" aria-label="${t('settings.profilePictureLabel')}">
@@ -35,9 +55,23 @@ function avatarEditorHtml(user) {
         <button type="button" class="settings-avatar-action settings-avatar-action--danger" id="profile-avatar-remove" aria-label="${t('settings.profilePictureRemove')}" title="${t('settings.profilePictureRemove')}">
           <i data-lucide="trash-2" aria-hidden="true"></i>
         </button>
+        <button type="button" class="settings-avatar-action" id="profile-avatar-gravatar" aria-label="${t('settings.gravatarUse')}" title="${t('settings.gravatarUse')}" aria-describedby="profile-gravatar-hint"${gravatarReady ? '' : ' aria-disabled="true"'}>
+          <i data-lucide="cloud-download" aria-hidden="true"></i>
+        </button>
       </div>
     </div>
   `;
+}
+
+/**
+ * Die Hinweiszeile unter dem Bild-Editor: ohne gespeicherte Adresse nennt sie
+ * den Grund, warum der Gravatar-Knopf gesperrt ist; mit Adresse sagt sie, was
+ * den Server beim Klick verlaesst (nur ein Hash der Adresse und die Server-IP).
+ * @param {{ email?: string|null }|null|undefined} user
+ * @returns {string}
+ */
+function gravatarHintText(user) {
+  return hasSavedEmail(user) ? t('settings.gravatarHint') : t('settings.gravatarNeedsEmail');
 }
 
 function showError(element, message) {
@@ -369,6 +403,36 @@ export function logoutOthersErrorText(err) {
 }
 
 /**
+ * Grund -> Schluessel fuer den Gravatar-Abruf (POST /auth/me/avatar/gravatar).
+ * Der Server nennt den Grund in `reason`; jede Antwort, die er geben kann,
+ * steht hier, damit die Seite nie am englischen Text haengt. `no_email` ist
+ * derselbe Satz wie die Hinweiszeile: die Adresse fehlt, speichern hilft.
+ */
+export const GRAVATAR_REASON_KEYS = Object.freeze({
+  no_email:              'settings.gravatarNeedsEmail',
+  gravatar_disabled:     'settings.gravatarErrorDisabled',
+  gravatar_not_found:    'settings.gravatarErrorNotFound',
+  gravatar_unreachable:  'settings.gravatarErrorUnreachable',
+  gravatar_too_large:    'settings.gravatarErrorTooLarge',
+  gravatar_not_image:    'settings.gravatarErrorNotImage',
+  gravatar_rate_limited: 'settings.gravatarErrorRateLimited',
+});
+
+/**
+ * Fehlertext fuer den Gravatar-Abruf. Ein 429 ohne `reason` (etwa vom
+ * allgemeinen Limit davor) liest sich ebenfalls als "zu oft", nicht als
+ * Fehlschlag; alles Unbekannte faellt auf den Servertext zurueck.
+ * @param {{ status?: number, data?: { reason?: string }, message?: string }} err
+ * @returns {string}
+ */
+export function gravatarErrorText(err) {
+  const key = GRAVATAR_REASON_KEYS[err?.data?.reason];
+  if (key) return t(key);
+  if (err?.status === 429) return t('settings.gravatarErrorRateLimited');
+  return err?.message || t('common.errorGeneric');
+}
+
+/**
  * Uebersetzt einen Fehler der 2FA-Routen. Der Server nennt den Grund in
  * `reason`, damit die Oberflaeche nicht am englischen Text hangeln muss.
  * @param {any} err
@@ -509,6 +573,7 @@ function renderPage(container, user, refreshFailed, accessNotice, oidcState, oid
               </div>
             </div>
           </div>
+          <p class="form-hint" id="profile-gravatar-hint">${gravatarHintText(user)}</p>
           <fieldset class="settings-fieldset">
             <legend class="settings-fieldset__legend">${t('settings.contactDetailsLegend')}</legend>
             <div class="modal-grid modal-grid--2">
@@ -653,6 +718,58 @@ function bindEvents(container, user, profileState) {
     updatePreview();
   });
 
+  // Gravatar holen. Der Server speichert das Bild selbst (wie PATCH /me/profile
+  // es taete), darum ist nach der Antwort nichts mehr zu sichern: Vorschau und
+  // Seitenleiste ziehen mit, das Formular bleibt, wie es war - ein Klick auf
+  // diesen Knopf ist kein `input` und weckt den Verlassen-Schutz nicht
+  // (dirty-guard.js). Gesperrt per aria-disabled statt disabled, damit der
+  // Knopf per Tastatur erreichbar bleibt und die Hinweiszeile den Grund nennt.
+  const gravatarButton = container.querySelector('#profile-avatar-gravatar');
+  const gravatarHint   = container.querySelector('#profile-gravatar-hint');
+  let gravatarBusy = false;
+  const syncGravatarButton = () => {
+    if (!gravatarButton) return;
+    if (hasSavedEmail(user) && !gravatarBusy) gravatarButton.removeAttribute('aria-disabled');
+    else gravatarButton.setAttribute('aria-disabled', 'true');
+    if (gravatarHint) gravatarHint.textContent = gravatarHintText(user);
+  };
+  const labelGravatarButton = (label) => {
+    gravatarButton.setAttribute('aria-label', label);
+    gravatarButton.title = label;
+  };
+  gravatarButton?.addEventListener('click', async () => {
+    if (gravatarBusy || !hasSavedEmail(user)) return;
+    clearError(profileError);
+    gravatarBusy = true;
+    gravatarButton.setAttribute('aria-disabled', 'true');
+    labelGravatarButton(t('settings.gravatarFetching'));
+    try {
+      const { data } = await api.post('/auth/me/avatar/gravatar', {}) ?? {};
+      if (data) {
+        Object.assign(user, data);
+        profileState.avatarData = data.avatar_data ?? null;
+        updatePreview();
+        window.dispatchEvent(new CustomEvent('yuvomi:profile-changed', { detail: {
+          display_name: data.display_name,
+          avatar_color: data.avatar_color,
+          avatar_data: data.avatar_data ?? null,
+        } }));
+      }
+      window.yuvomi?.showToast(t('settings.gravatarDone'), 'success');
+    } catch (error) {
+      // Der Fehlerbereich des Formulars liegt unter den Kontaktfeldern - auf
+      // dem Telefon eine Bildschirmhoehe unter dem Knopf, der gedrueckt wurde.
+      // Deshalb zusaetzlich der Toast: er steht dort, wo der Finger ist. Die
+      // Zeile mit role="alert" bleibt fuer die Vorlesehilfe und den Desktop.
+      showError(profileError, gravatarErrorText(error));
+      window.yuvomi?.showToast(gravatarErrorText(error), 'danger');
+    } finally {
+      gravatarBusy = false;
+      labelGravatarButton(t('settings.gravatarUse'));
+      syncGravatarButton();
+    }
+  });
+
   const profileForm = container.querySelector('#profile-form');
   profileForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -679,6 +796,8 @@ function bindEvents(container, user, profileState) {
         Object.assign(user, response.user);
         profileState.avatarData = response.user.avatar_data ?? null;
         updatePreview();
+        // Eine eben gespeicherte Adresse schaltet den Gravatar-Knopf frei.
+        syncGravatarButton();
         // Die Kontozeile der Seitenleiste zeigt Name und Avatar (router.js,
         // syncSidebarAccount) und zieht mit, ohne dass die Shell neu baut.
         window.dispatchEvent(new CustomEvent('yuvomi:profile-changed', { detail: {
@@ -822,4 +941,4 @@ export async function render(container, { user }) {
 
 // Der Avatar als Programm (test:initials): welche Zeichen ohne Bild auf der
 // Scheibe stehen.
-export const __test = { avatarHtml };
+export const __test = { avatarHtml, avatarEditorHtml, gravatarHintText };
