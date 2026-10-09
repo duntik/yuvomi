@@ -40,7 +40,16 @@ export function hasSavedEmail(user) {
   return at > 0 && raw.indexOf('@', at + 1) === -1;
 }
 
-function avatarEditorHtml(user) {
+/**
+ * Der Bild-Editor. Den Gravatar-Knopf gibt es nur, wenn der Server ihn
+ * anbietet (`gravatarAvailable` aus GET /auth/me: der Betreiber hat
+ * GRAVATAR_BASE_URL gesetzt, und das Konto ist ein Haushaltsmitglied). Sonst
+ * steht er gar nicht erst da - kein Knopf, der erst nach dem Klick mit 404
+ * sagt, dass es ihn nicht gibt.
+ * @param {object} user
+ * @param {{ gravatarAvailable?: boolean }} [options]
+ */
+function avatarEditorHtml(user, { gravatarAvailable = false } = {}) {
   const gravatarReady = hasSavedEmail(user);
   return `
     <div class="settings-avatar-editor">
@@ -55,9 +64,9 @@ function avatarEditorHtml(user) {
         <button type="button" class="settings-avatar-action settings-avatar-action--danger" id="profile-avatar-remove" aria-label="${t('settings.profilePictureRemove')}" title="${t('settings.profilePictureRemove')}">
           <i data-lucide="trash-2" aria-hidden="true"></i>
         </button>
-        <button type="button" class="settings-avatar-action" id="profile-avatar-gravatar" aria-label="${t('settings.gravatarUse')}" title="${t('settings.gravatarUse')}" aria-describedby="profile-gravatar-hint"${gravatarReady ? '' : ' aria-disabled="true"'}>
+        ${gravatarAvailable ? `<button type="button" class="settings-avatar-action" id="profile-avatar-gravatar" aria-label="${t('settings.gravatarUse')}" title="${t('settings.gravatarUse')}" aria-describedby="profile-gravatar-hint"${gravatarReady ? '' : ' aria-disabled="true"'}>
           <i data-lucide="cloud-download" aria-hidden="true"></i>
-        </button>
+        </button>` : ''}
       </div>
     </div>
   `;
@@ -65,13 +74,40 @@ function avatarEditorHtml(user) {
 
 /**
  * Die Hinweiszeile unter dem Bild-Editor: ohne gespeicherte Adresse nennt sie
- * den Grund, warum der Gravatar-Knopf gesperrt ist; mit Adresse sagt sie, was
- * den Server beim Klick verlaesst (nur ein Hash der Adresse und die Server-IP).
+ * den Grund, warum der Gravatar-Knopf gesperrt ist; mit Adresse NENNT sie die
+ * Adresse, die gehasht wird - sie steht auf einer Kontaktkarte, die auch andere
+ * Mitglieder bearbeiten koennen - und sagt, was den Server beim Klick verlaesst
+ * (nur ein Hash der Adresse und die Server-IP).
+ *
+ * Reiner Text, nie HTML: er geht nur ueber textContent auf die Seite
+ * (fillGravatarHint), deshalb hier kein esc() - das ergaebe `&amp;` im Satz.
  * @param {{ email?: string|null }|null|undefined} user
  * @returns {string}
  */
 function gravatarHintText(user) {
-  return hasSavedEmail(user) ? t('settings.gravatarHint') : t('settings.gravatarNeedsEmail');
+  return hasSavedEmail(user)
+    ? t('settings.gravatarHint', { email: user.email.trim() })
+    : t('settings.gravatarNeedsEmail');
+}
+
+/**
+ * Das leere Element der Hinweiszeile - nur, wenn der Knopf angeboten wird.
+ * Gefuellt wird es erst in bindEvents() ueber fillGravatarHint().
+ * @param {boolean} gravatarAvailable
+ * @returns {string}
+ */
+function gravatarHintHtml(gravatarAvailable) {
+  return gravatarAvailable ? '<p class="form-hint" id="profile-gravatar-hint"></p>' : '';
+}
+
+/**
+ * Schreibt den Hinweis als Text in das Element. Die Adresse kommt aus einer
+ * Kontaktkarte und darf `<` oder `&` enthalten; sie erscheint woertlich.
+ * @param {{ textContent: string }|null|undefined} element
+ * @param {{ email?: string|null }|null|undefined} user
+ */
+function fillGravatarHint(element, user) {
+  if (element) element.textContent = gravatarHintText(user);
 }
 
 function showError(element, message) {
@@ -407,15 +443,19 @@ export function logoutOthersErrorText(err) {
  * Der Server nennt den Grund in `reason`; jede Antwort, die er geben kann,
  * steht hier, damit die Seite nie am englischen Text haengt. `no_email` ist
  * derselbe Satz wie die Hinweiszeile: die Adresse fehlt, speichern hilft.
+ * Die Schluessel stehen in Anfuehrungszeichen, weil test:api die 403-Gruende
+ * (not_a_household_member) woertlich in der Seite sucht, die sie liest.
  */
 export const GRAVATAR_REASON_KEYS = Object.freeze({
-  no_email:              'settings.gravatarNeedsEmail',
-  gravatar_disabled:     'settings.gravatarErrorDisabled',
-  gravatar_not_found:    'settings.gravatarErrorNotFound',
-  gravatar_unreachable:  'settings.gravatarErrorUnreachable',
-  gravatar_too_large:    'settings.gravatarErrorTooLarge',
-  gravatar_not_image:    'settings.gravatarErrorNotImage',
-  gravatar_rate_limited: 'settings.gravatarErrorRateLimited',
+  'no_email':               'settings.gravatarNeedsEmail',
+  'gravatar_disabled':      'settings.gravatarErrorDisabled',
+  'gravatar_not_found':     'settings.gravatarErrorNotFound',
+  'gravatar_unreachable':   'settings.gravatarErrorUnreachable',
+  'gravatar_too_large':     'settings.gravatarErrorTooLarge',
+  'gravatar_not_image':     'settings.gravatarErrorNotImage',
+  'gravatar_rate_limited':  'settings.gravatarErrorRateLimited',
+  'gravatar_stale':         'settings.gravatarErrorStale',
+  'not_a_household_member': 'settings.gravatarErrorNotMember',
 });
 
 /**
@@ -531,7 +571,7 @@ function bindSetupForm(card, reload) {
   });
 }
 
-function renderPage(container, user, refreshFailed, accessNotice, oidcState, oidcNotice, twoFactorState) {
+function renderPage(container, user, refreshFailed, accessNotice, oidcState, oidcNotice, twoFactorState, gravatarAvailable = false) {
   container.replaceChildren();
   container.insertAdjacentHTML('beforeend', `
     ${accessNotice ? `
@@ -554,7 +594,7 @@ function renderPage(container, user, refreshFailed, accessNotice, oidcState, oid
         <h3 class="settings-card__title">${t('settings.profileCardTitle')}</h3>
         <form id="profile-form" class="settings-form">
           <div class="settings-profile-editor">
-            ${avatarEditorHtml(user)}
+            ${avatarEditorHtml(user, { gravatarAvailable })}
             <div class="settings-profile-editor__fields">
               <div class="settings-name-color-row">
                 <div class="form-group settings-name-color-row__name">
@@ -573,7 +613,7 @@ function renderPage(container, user, refreshFailed, accessNotice, oidcState, oid
               </div>
             </div>
           </div>
-          <p class="form-hint" id="profile-gravatar-hint">${gravatarHintText(user)}</p>
+          ${gravatarHintHtml(gravatarAvailable)}
           <fieldset class="settings-fieldset">
             <legend class="settings-fieldset__legend">${t('settings.contactDetailsLegend')}</legend>
             <div class="modal-grid modal-grid--2">
@@ -728,11 +768,14 @@ function bindEvents(container, user, profileState) {
   const gravatarHint   = container.querySelector('#profile-gravatar-hint');
   let gravatarBusy = false;
   const syncGravatarButton = () => {
+    fillGravatarHint(gravatarHint, user);
     if (!gravatarButton) return;
     if (hasSavedEmail(user) && !gravatarBusy) gravatarButton.removeAttribute('aria-disabled');
     else gravatarButton.setAttribute('aria-disabled', 'true');
-    if (gravatarHint) gravatarHint.textContent = gravatarHintText(user);
   };
+  // Die Hinweiszeile kommt leer aus dem HTML und wird hier zum ersten Mal
+  // gefuellt - als Text, damit die Adresse woertlich dasteht.
+  syncGravatarButton();
   const labelGravatarButton = (label) => {
     gravatarButton.setAttribute('aria-label', label);
     gravatarButton.title = label;
@@ -744,7 +787,9 @@ function bindEvents(container, user, profileState) {
     gravatarButton.setAttribute('aria-disabled', 'true');
     labelGravatarButton(t('settings.gravatarFetching'));
     try {
-      const { data } = await api.post('/auth/me/avatar/gravatar', {}) ?? {};
+      // Die Adresse, die der Hinweis nennt: hat sie sich auf dem Server
+      // inzwischen geaendert, sagt die Route 409 statt eine fremde zu hashen.
+      const { data } = await api.post('/auth/me/avatar/gravatar', { email: user.email.trim() }) ?? {};
       if (data) {
         Object.assign(user, data);
         profileState.avatarData = data.avatar_data ?? null;
@@ -796,7 +841,8 @@ function bindEvents(container, user, profileState) {
         Object.assign(user, response.user);
         profileState.avatarData = response.user.avatar_data ?? null;
         updatePreview();
-        // Eine eben gespeicherte Adresse schaltet den Gravatar-Knopf frei.
+        // Eine eben gespeicherte Adresse schaltet den Gravatar-Knopf frei und
+        // steht ab jetzt im Hinweis.
         syncGravatarButton();
         // Die Kontozeile der Seitenleiste zeigt Name und Avatar (router.js,
         // syncSidebarAccount) und zieht mit, ohne dass die Shell neu baut.
@@ -894,11 +940,15 @@ function bindEvents(container, user, profileState) {
 export async function render(container, { user }) {
   let currentUser = user || {};
   let refreshFailed = false;
+  // Ohne frische Antwort kein Gravatar-Knopf: ob der Betreiber ihn
+  // eingeschaltet hat, weiss nur der Server.
+  let gravatarAvailable = false;
 
   try {
     const response = await auth.me();
     if (response?.user && user) Object.assign(user, response.user);
     else if (response?.user) currentUser = response.user;
+    gravatarAvailable = response?.gravatarAvailable === true;
   } catch {
     refreshFailed = true;
   }
@@ -924,7 +974,7 @@ export async function render(container, { user }) {
   }
 
   try {
-    renderPage(container, currentUser, refreshFailed, accessNotice, oidcState, oidcNotice, twoFactorState);
+    renderPage(container, currentUser, refreshFailed, accessNotice, oidcState, oidcNotice, twoFactorState, gravatarAvailable);
     bindEvents(container, currentUser, {
       avatarData: currentUser?.avatar_data ?? null,
     });
@@ -941,4 +991,4 @@ export async function render(container, { user }) {
 
 // Der Avatar als Programm (test:initials): welche Zeichen ohne Bild auf der
 // Scheibe stehen.
-export const __test = { avatarHtml, avatarEditorHtml, gravatarHintText };
+export const __test = { avatarHtml, avatarEditorHtml, gravatarHintText, gravatarHintHtml, fillGravatarHint };

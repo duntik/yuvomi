@@ -16,8 +16,15 @@
  *          - text/html und ein falsch deklariertes Bild -> 415
  *          - Body ueber 512 KiB, gestreamt ohne Content-Length -> 413
  *          - vom Guard abgewiesene (private) Adresse, Timeout -> 502
+ *          - AUS, solange GRAVATAR_BASE_URL nicht gesetzt ist: 404
+ *            gravatar_disabled ohne Abruf, und GET /auth/me meldet
+ *            gravatarAvailable: false
  *          - keine Adresse, mehrere Adressen -> 400; Basis leer -> 404
  *            gravatar_disabled; elfter Aufruf -> 429; Wandtablett -> 403
+ *          - Split-Gast -> 403 not_a_household_member, ohne Abruf
+ *          - aendert sich waehrend des Abrufs das Bild, die Adresse oder das
+ *            Konto, wird nichts geschrieben (409 gravatar_stale); eine reine
+ *            Gross-/Kleinschreibungs-Aenderung der Adresse ist keine Aenderung
  *          - Reihenfolge: Upload nach Import ueberschreibt, zweiter Import den
  *            Upload (es gewinnt, was zuletzt gespeichert wurde)
  *          - Fehlerantworten tragen weder Hash noch Basis-URL
@@ -27,6 +34,10 @@
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-secret';
 process.env.DB_PATH = ':memory:';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'warn';
+// Der Import ist ab Werk AUS. Die Suite schaltet ihn ein, wie ein Betreiber es
+// taete; die Tests fuer "aus" nehmen die Variable je Aufruf wieder weg.
+const GRAVATAR_BASE = 'https://gravatar.com/avatar/';
+process.env.GRAVATAR_BASE_URL = GRAVATAR_BASE;
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,7 +49,7 @@ import express from 'express';
 const dbmod = await import('../server/db.js');
 const db = dbmod.get();
 const {
-  DEFAULT_GRAVATAR_BASE_URL, GravatarError, MAX_GRAVATAR_BYTES, fetchGravatar, gravatarBaseUrl, gravatarHash, gravatarUrl,
+  GravatarError, MAX_GRAVATAR_BYTES, fetchGravatar, gravatarBaseUrl, gravatarEnabled, gravatarHash, gravatarUrl,
 } = await import('../server/services/gravatar.js');
 const { createGuardedLookup } = await import('../server/utils/ssrf.js');
 const { safeRequest, resolveRedirect } = await import('../server/utils/http.js');
@@ -117,11 +128,19 @@ test('die Basis-URL: leer heisst abgeschaltet, http/intern/Query heisst falsch g
   }
 });
 
-test('gravatarBaseUrl liest GRAVATAR_BASE_URL: ungesetzt -> gravatar.com, leer -> aus, sonst getrimmt', () => {
-  assert.equal(gravatarBaseUrl({}), DEFAULT_GRAVATAR_BASE_URL);
+test('ab Werk AUS: ungesetzt oder leer heisst abgeschaltet, kein eingebauter Dienst', () => {
+  assert.equal(gravatarBaseUrl({}), '', 'kein Default auf gravatar.com');
   assert.equal(gravatarBaseUrl({ GRAVATAR_BASE_URL: '' }), '');
   assert.equal(gravatarBaseUrl({ GRAVATAR_BASE_URL: '  ' }), '');
   assert.equal(gravatarBaseUrl({ GRAVATAR_BASE_URL: ' https://seccdn.libravatar.org/avatar/ ' }), 'https://seccdn.libravatar.org/avatar/');
+  assert.equal(gravatarEnabled({}), false);
+  assert.equal(gravatarEnabled({ GRAVATAR_BASE_URL: '' }), false);
+  assert.equal(gravatarEnabled({ GRAVATAR_BASE_URL: '   ' }), false);
+  assert.equal(gravatarEnabled({ GRAVATAR_BASE_URL: GRAVATAR_BASE }), true);
+  // Ein gesetzter, aber falscher Wert ist EIN: der Betreiber wollte die
+  // Funktion, und der Fehler soll laut werden (500), nicht als "aus" verschwinden.
+  assert.equal(gravatarEnabled({ GRAVATAR_BASE_URL: 'http://gravatar.com/avatar/' }), true);
+  assert.throws(() => gravatarUrl(EMAIL, { base: gravatarBaseUrl({}) }), (err) => err.reason === 'gravatar_disabled');
 });
 
 // --------------------------------------------------------------------------
@@ -354,7 +373,21 @@ async function call(method, path, session, payload) {
   return { status: res.status, body: await res.json() };
 }
 
-const importGravatar = (session) => call('POST', '/t/me/avatar/gravatar', session, {});
+const importGravatar = (session, payload = {}) => call('POST', '/t/me/avatar/gravatar', session, payload);
+const gravatarFlag = async (session) => (await call('GET', '/me', session)).body.gravatarAvailable;
+
+/** Fuehrt fn mit GRAVATAR_BASE_URL = value aus (undefined = Variable entfernt). */
+async function withBase(value, fn) {
+  const previous = process.env.GRAVATAR_BASE_URL;
+  if (value === undefined) delete process.env.GRAVATAR_BASE_URL;
+  else process.env.GRAVATAR_BASE_URL = value;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.GRAVATAR_BASE_URL;
+    else process.env.GRAVATAR_BASE_URL = previous;
+  }
+}
 
 function addUser(id, username, { email, birthDate } = {}) {
   db.prepare("INSERT INTO users (id, username, display_name, password_hash, role) VALUES (?, ?, ?, 'x', 'member')").run(id, username, username);
@@ -374,6 +407,13 @@ addUser(302, 'bert');
 addUser(303, 'carla', { email: 'a@x.de, b@y.de' });
 addUser(304, 'dora', { email: 'dora@example.com' });
 addUser(305, 'erik', { email: 'erik@example.com' });
+addUser(307, 'gast', { email: 'gast@example.com' });
+// Ein Split-Gast, wie ihn die Gast-Suiten anlegen (test-household-members.js).
+db.prepare('INSERT INTO split_expense_guest_users (user_id, group_id, created_by) VALUES (?, NULL, ?)').run(307, 301);
+addUser(308, 'fiona', { email: 'fiona@example.com' });
+addUser(309, 'gerd', { email: 'gerd@example.com' });
+addUser(310, 'hanna', { email: 'hanna@example.com' });
+addUser(311, 'ines', { email: 'ines@example.com' });
 
 test('200 png: gespeichert wie ein Upload - users.avatar_data, GET /auth/me, Geburtstagsfoto', async () => {
   transport.reply = (url) => {
@@ -437,6 +477,11 @@ test('ohne Adresse und mit einer Adressliste -> 400 no_email, ohne Abruf', async
   const many = await importGravatar(await signIn(303));
   assert.equal(many.status, 400);
   assert.equal(many.body.reason, 'no_email');
+  // Die Seite schickt noch die alte Adresse, gespeichert ist keine mehr: der
+  // eigentliche Grund (keine Adresse) gewinnt, nicht ein 409.
+  const cleared = await importGravatar(await signIn(302), { email: 'alt@example.com' });
+  assert.equal(cleared.status, 400, JSON.stringify(cleared.body));
+  assert.equal(cleared.body.reason, 'no_email');
   assert.equal(calls, 0);
   assert.equal(avatarOf(302), null);
   assert.equal(avatarOf(303), null);
@@ -543,4 +588,146 @@ test('ohne Sitzung -> 401; ein Wandtablett -> 403 display_account am echten Rout
   assert.equal(res.status, 403);
   assert.equal(body.reason, 'display_account');
   assert.equal(avatarOf(306), null);
+});
+
+test('ab Werk AUS: GRAVATAR_BASE_URL ungesetzt -> 404 gravatar_disabled ohne Abruf, und /auth/me meldet false', async () => {
+  let calls = 0;
+  transport.reply = () => { calls += 1; return response(200, { 'Content-Type': 'image/png' }, PNG); };
+  const session = await signIn(308);
+  await withBase(undefined, async () => {
+    const res = await importGravatar(session);
+    assert.equal(res.status, 404);
+    assert.equal(res.body.reason, 'gravatar_disabled');
+    assert.equal(await gravatarFlag(session), false, 'kein Knopf, solange der Betreiber nichts gesetzt hat');
+    // Der Aus-Riegel steht VOR der Mitgliedspruefung: auch ein Split-Gast
+    // hoert "abgeschaltet" und nicht "kein Mitglied".
+    const guest = await importGravatar(await signIn(307));
+    assert.equal(guest.status, 404, JSON.stringify(guest.body));
+    assert.equal(guest.body.reason, 'gravatar_disabled');
+  });
+  await withBase('', async () => {
+    assert.equal(await gravatarFlag(session), false, 'leer ist dasselbe wie ungesetzt');
+  });
+  assert.equal(calls, 0, 'nichts geht hinaus, solange die Variable fehlt');
+  assert.equal(avatarOf(308), null);
+  assert.equal(await gravatarFlag(session), true, 'eingeschaltet und Mitglied: der Knopf darf erscheinen');
+  const me = await call('GET', '/me', session);
+  assert.ok(!JSON.stringify(me.body).includes('gravatar.com'), '/auth/me nennt die Basis-URL nie');
+});
+
+test('ein Split-Gast -> 403 not_a_household_member, bevor irgendetwas abgerufen wird', async () => {
+  let calls = 0;
+  transport.reply = () => { calls += 1; return response(200, { 'Content-Type': 'image/png' }, PNG); };
+  const session = await signIn(307);
+  const res = await importGravatar(session);
+  assert.equal(res.status, 403, JSON.stringify(res.body));
+  assert.equal(res.body.reason, 'not_a_household_member');
+  assert.equal(res.body.code, 403);
+  assert.equal(calls, 0, 'die Adresse eines Gasts tippt, wer die Gruppe verwaltet - sie wird nicht gehasht');
+  assert.equal(avatarOf(307), null);
+  assert.equal(await gravatarFlag(session), false, 'der Gast bekommt den Knopf gar nicht erst');
+});
+
+test('waehrend des Abrufs entfernt: 409 gravatar_stale, das Bild bleibt entfernt', async () => {
+  const session = await signIn(309);
+  const upload = `data:image/jpeg;base64,${JPEG.toString('base64')}`;
+  assert.equal((await call('PATCH', '/me/profile', session, { avatar_data: upload })).status, 200);
+  transport.reply = async () => {
+    const removed = await call('PATCH', '/me/profile', session, { avatar_data: null });
+    assert.equal(removed.status, 200);
+    return response(200, { 'Content-Type': 'image/png' }, PNG);
+  };
+  const res = await importGravatar(session);
+  assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.equal(res.body.reason, 'gravatar_stale');
+  assert.equal(avatarOf(309), null, 'die spaetere Handlung gewinnt');
+});
+
+test('waehrend des Abrufs eine andere Adresse: 409, nichts geschrieben - auch nicht das Geburtstagsfoto', async () => {
+  db.prepare("INSERT INTO birthdays (name, birth_date, created_by, family_user_id) VALUES ('hanna', '1991-02-03', 310, 310)").run();
+  const session = await signIn(310);
+  transport.reply = () => {
+    db.prepare('UPDATE contacts SET email = ? WHERE family_user_id = ?').run('neu@example.com', 310);
+    return response(200, { 'Content-Type': 'image/png' }, PNG);
+  };
+  const res = await importGravatar(session);
+  assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.equal(res.body.reason, 'gravatar_stale');
+  assert.equal(avatarOf(310), null, 'das Bild der alten Adresse wird nicht gespeichert');
+  assert.equal(birthdayPhotoOf(310) ?? null, null);
+});
+
+test('waehrend des Abrufs deaktiviert: 409, das fruehere Konto bleibt unangetastet', async () => {
+  db.prepare("INSERT INTO birthdays (name, birth_date, created_by, family_user_id) VALUES ('ines', '1992-03-04', 311, 311)").run();
+  const session = await signIn(311);
+  transport.reply = () => {
+    // Wie user-removal.js ein Konto stilllegt.
+    db.prepare('UPDATE users SET deactivated_at = ? WHERE id = ?').run(new Date().toISOString(), 311);
+    return response(200, { 'Content-Type': 'image/png' }, PNG);
+  };
+  const res = await importGravatar(session);
+  assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.equal(res.body.reason, 'gravatar_stale');
+  assert.equal(avatarOf(311), null);
+  assert.equal(birthdayPhotoOf(311) ?? null, null, 'auch das Geburtstagsfoto bleibt leer');
+});
+
+test('waehrend des Abrufs kein Mitglied mehr, Adresse unveraendert: 409 - die Mitgliedschaft wird selbst nachgeprueft', async () => {
+  // Deaktivieren nimmt auch die Adresse weg (memberEmail() kennt nur aktive
+  // Konten), dort faengt also schon der Adressvergleich. Hier bleibt die
+  // Adresse gleich und das Konto aktiv; nur die Mitgliedschaft endet - so
+  // greift allein der zweite Blick auf isHouseholdMember().
+  addUser(312, 'jonas', { email: 'jonas@example.com' });
+  const session = await signIn(312);
+  transport.reply = () => {
+    db.prepare('INSERT INTO split_expense_guest_users (user_id, group_id, created_by) VALUES (?, NULL, ?)').run(312, 301);
+    return response(200, { 'Content-Type': 'image/png' }, PNG);
+  };
+  const res = await importGravatar(session);
+  assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.equal(res.body.reason, 'gravatar_stale');
+  assert.equal(avatarOf(312), null);
+});
+
+test('Gegenprobe: dasselbe Bild und nur die Grossschreibung der Adresse geaendert -> 200, kein falsches 409', async () => {
+  const session = await signIn(308);
+  transport.reply = () => {
+    db.prepare('UPDATE contacts SET email = ? WHERE family_user_id = ?').run('FIONA@Example.COM', 308);
+    return response(200, { 'Content-Type': 'image/png' }, PNG);
+  };
+  const res = await importGravatar(session);
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(avatarOf(308), `data:image/png;base64,${PNG.toString('base64')}`);
+  // Und ein zweiter Import ueber einem vorhandenen Bild, das sich nicht
+  // aendert, ist ebenfalls kein Konflikt.
+  transport.reply = () => response(200, { 'Content-Type': 'image/jpeg' }, JPEG);
+  const again = await importGravatar(session);
+  assert.equal(again.status, 200, JSON.stringify(again.body));
+  assert.equal(avatarOf(308), `data:image/jpeg;base64,${JPEG.toString('base64')}`);
+});
+
+test('die Seite schickt die Adresse ihres Hinweises: weicht die gespeicherte ab -> 409 vor dem Abruf', async () => {
+  addUser(313, 'karl', { email: 'karl@example.com' });
+  let calls = 0;
+  transport.reply = () => { calls += 1; return response(200, { 'Content-Type': 'image/png' }, PNG); };
+  const session = await signIn(313);
+  // Ein anderes Mitglied hat den Kontakt geaendert, nachdem die Seite gerendert war.
+  const stale = await importGravatar(session, { email: 'alt@example.com' });
+  assert.equal(stale.status, 409, JSON.stringify(stale.body));
+  assert.equal(stale.body.reason, 'gravatar_stale');
+  assert.equal(calls, 0, 'es geht nichts hinaus: die Adresse, die das Mitglied nie gesehen hat, wird nicht gehasht');
+  assert.equal(avatarOf(313), null);
+
+  // Dieselbe Adresse, nur anders geschrieben: kein Konflikt (derselbe Schluessel wie der Hash).
+  const sameKey = await importGravatar(session, { email: '  KARL@Example.com ' });
+  assert.equal(sameKey.status, 200, JSON.stringify(sameKey.body));
+  assert.equal(calls, 1);
+  assert.equal(avatarOf(313), `data:image/png;base64,${PNG.toString('base64')}`);
+
+  // Ohne das Feld (API-Aufrufer) gilt die gespeicherte Adresse wie bisher.
+  transport.reply = () => { calls += 1; return response(200, { 'Content-Type': 'image/jpeg' }, JPEG); };
+  const noField = await importGravatar(session);
+  assert.equal(noField.status, 200, JSON.stringify(noField.body));
+  assert.equal(calls, 2);
+  assert.equal(avatarOf(313), `data:image/jpeg;base64,${JPEG.toString('base64')}`);
 });

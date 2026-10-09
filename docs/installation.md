@@ -682,16 +682,21 @@ security, and troubleshooting.
 
 ### Gravatar Profile Picture (Optional)
 
-A member can fetch the picture that gravatar.com holds for their saved email address under
+Off unless you set `GRAVATAR_BASE_URL`: while it is empty nothing is sent and the button is not
+shown. To opt in, set it to `https://gravatar.com/avatar/` or to a Libravatar mirror. A household
+member can then fetch the picture that the service holds for their saved email address under
 **Settings → Account → Use my Gravatar**. The server fetches it once, on that click, and stores it
-exactly like an uploaded picture; nothing is fetched again later. Only a SHA-256 hash of the
-lowercased address, this server's IP and its User-Agent reach the service, never the address
-itself. The fetch uses HTTPS only, follows at most five redirects, refuses private network
-targets, times out after 8 seconds and accepts at most 512 KiB of PNG, JPEG or WebP.
+exactly like an uploaded picture; nothing is fetched again later. Split-expense guests do not get
+the button. Only a SHA-256 hash of the lowercased address, this server's IP and its User-Agent
+reach the service, never the address itself. The fetch uses HTTPS only, follows at most five
+redirects, refuses private network targets, times out after 8 seconds and accepts at most 512 KiB
+of PNG, JPEG or WebP. Only A-Z is lowercased (the same key as the email matching,
+`emailMatchKey`), while Gravatar lowercases everything: an address with a non-ASCII capital
+letter hashes differently from Gravatar and gets "no picture".
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `GRAVATAR_BASE_URL` | Base URL the avatar hash is appended to. Point it at a Libravatar-compatible mirror (`https://` and a public host) or set it to an **empty string** to switch the button off; the route then answers `404` with `reason: "gravatar_disabled"` | `https://gravatar.com/avatar/` | No |
+| `GRAVATAR_BASE_URL` | Base URL the avatar hash is appended to, e.g. `https://gravatar.com/avatar/` or a Libravatar-compatible mirror (`https://` and a public host). Unset or empty switches the import off: no button, and the route answers `404` with `reason: "gravatar_disabled"` | (empty = off) | No |
 
 ### Database & Storage
 

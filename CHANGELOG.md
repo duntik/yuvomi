@@ -28,17 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not change what anyone else in the household sees, and only applies to the tile: the
   today sheet, the wall and the menu keep counting every list.
 
-- **A profile picture can be fetched from Gravatar once.** Settings → Account has a third button
-  next to upload and remove: it asks gravatar.com for the picture that belongs to the saved email
-  address and stores it exactly like an upload, in `avatar_data`, so nothing is fetched again
-  afterwards - not on sign-in, not in the background - and the browser never loads from
-  gravatar.com itself. What leaves the server is a SHA-256 hash of the lowercased address and the
-  server's IP, never the address or the name; the fetch goes through the SSRF-guarded client with
-  an 8 second limit, a 512 KiB cap and a signature check that the answer really is a PNG, JPEG or
-  WebP. An uploaded picture wins because both write the same field and the latest action is the
-  stored one. The button waits until an email address is saved, and an operator switches the
-  feature off by setting `GRAVATAR_BASE_URL` to an empty string (set to another https base, the
-  same variable points the fetch at a Libravatar mirror).
+- **A profile picture can be fetched from Gravatar once, if the operator turns it on.** Off by
+  default: while `GRAVATAR_BASE_URL` is unset or empty nothing is sent and Settings → Account shows
+  no button. An operator opts in by setting it to `https://gravatar.com/avatar/` or a Libravatar
+  mirror; a household member can then fetch the picture for their saved address, named in the
+  hint, and it is stored exactly like an upload, never fetched again. Split-expense guests are
+  refused. Only a SHA-256 hash of the address and the server's IP leave the server, through the
+  SSRF-guarded client with an 8 second limit, a 512 KiB cap and a signature check. If the
+  picture, the address or the account changes while the fetch runs, nothing is stored (409).
 
 ### Changed
 

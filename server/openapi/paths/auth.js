@@ -440,15 +440,34 @@ export function authPaths() {
         summary: 'Fetch the Gravatar for the calling account once and store it as the profile picture',
         tag: 'Auth',
         stateChanging: true,
-        requestBody: jsonBody(null, 'Empty body'),
+        requestBody: {
+          required: false,
+          description: 'Optional. The settings page sends the address its hint showed.',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  email: {
+                    type: 'string',
+                    description: 'The address the page showed; a mismatch answers 409 gravatar_stale',
+                  },
+                },
+              },
+            },
+          },
+        },
         description: 'A one-shot import, not a live provider: the server hashes the account\'s stored email address '
           + '(SHA-256 of the trimmed, ASCII-lowercased address), fetches the picture from the configured Gravatar base '
           + 'URL once (HTTPS only, at most five redirects, private network targets refused, 8 s timeout, at most 512 KiB '
           + 'of PNG, JPEG or WebP whose bytes match the declared type) and stores it exactly like an upload through '
           + '`PATCH /api/v1/auth/me/profile`: into `avatar_data`, mirrored to the account\'s birthday photo. Nothing is '
-          + 'fetched again later; a later upload overwrites the import and a later import overwrites the upload. Self '
-          + 'only; a paired wall display is refused like every other account write. Only the hash, the server\'s IP and '
-          + 'its User-Agent reach the service, never the address. Limited to 10 calls per account per 10 minutes.',
+          + 'fetched again later; a later upload overwrites the import and a later import overwrites the upload. Off '
+          + 'unless the operator sets `GRAVATAR_BASE_URL` (nothing is sent while it is unset; `GET /api/v1/auth/me` '
+          + 'reports `gravatarAvailable`). Self only and household members only; a paired wall display is refused like '
+          + 'every other account write. If the picture, the address or the account changes while the fetch runs, nothing '
+          + 'is stored (409). Only the hash, the server\'s IP and its User-Agent reach the service, never the address. '
+          + 'Limited to 10 calls per account per 10 minutes.',
         responses: {
           200: {
             description: 'The picture was stored; the updated account',
@@ -463,7 +482,9 @@ export function authPaths() {
           },
           400: { description: 'The account has no single stored email address (`reason: "no_email"`)' },
           401: { $ref: '#/components/responses/Unauthorized' },
-          404: { description: 'The operator switched the feature off with an empty `GRAVATAR_BASE_URL` (`reason: "gravatar_disabled"`), or the service has no picture for the address (`reason: "gravatar_not_found"`)' },
+          403: { description: 'The account is not a household member, e.g. a split-expense guest (`reason: "not_a_household_member"`); nothing is fetched. A paired wall display gets `reason: "display_account"`' },
+          404: { description: 'The feature is not configured: `GRAVATAR_BASE_URL` is unset or empty (`reason: "gravatar_disabled"`), or the service has no picture for the address (`reason: "gravatar_not_found"`)' },
+          409: { description: 'The `email` sent does not match the stored address (refused before anything is fetched), or the picture, the stored address or the account changed while the picture was being fetched; nothing was stored (`reason: "gravatar_stale"`)' },
           413: { description: 'The picture exceeds 512 KiB (`reason: "gravatar_too_large"`)' },
           415: { description: 'The response is not a PNG, JPEG or WebP image, by type or by content (`reason: "gravatar_not_image"`)' },
           429: { description: 'More than 10 calls in 10 minutes for this account (`reason: "gravatar_rate_limited"`)' },

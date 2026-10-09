@@ -12,9 +12,12 @@
  * `emailMatchKey()`), die IP dieses Servers und der User-Agent aus
  * server/utils/http.js. Nie die Adresse selbst, nie der Name.
  *
- * WARUM DIESELBE HAERTUNG WIE BEI DER ABO-LOGO-SUCHE: das Ziel ist zwar fest
- * (gravatar.com), aber der Betreiber darf es per GRAVATAR_BASE_URL auf einen
- * Libravatar-Spiegel umbiegen - und ein Spiegel kann umleiten. Deshalb laeuft
+ * AUS, SOLANGE GRAVATAR_BASE_URL NICHT GESETZT IST: dann geht nichts hinaus,
+ * und die Kontoseite zeigt weder Knopf noch Hinweis (gravatarEnabled()).
+ *
+ * WARUM DIESELBE HAERTUNG WIE BEI DER ABO-LOGO-SUCHE: das Ziel waehlt der
+ * Betreiber per GRAVATAR_BASE_URL (gravatar.com oder ein Libravatar-Spiegel) -
+ * und ein Spiegel kann umleiten. Deshalb laeuft
  * der Abruf durch safeRequest() mit dem Anti-Rebinding-Lookup aus ssrf.js,
  * mit Timeout, mit Groessengrenze und mit Signaturpruefung des Inhalts: ein
  * `Content-Type: image/png` aus einer fremden Antwort beweist nichts.
@@ -29,7 +32,6 @@ import { createGuardedLookup, isBlockedHostname } from '../utils/ssrf.js';
 import { contentMatchesMime } from '../utils/file-signature.js';
 import { emailMatchKey } from '../utils/email-match.js';
 
-export const DEFAULT_GRAVATAR_BASE_URL = 'https://gravatar.com/avatar/';
 export const DEFAULT_GRAVATAR_SIZE = 256;
 // 512 KiB. Ein 256px-Avatar liegt weit darunter; die Grenze ist eine
 // Prozessgrenze gegen einen Spiegel, der etwas anderes liefert. Als data-URL
@@ -56,14 +58,29 @@ export class GravatarError extends Error {
 }
 
 /**
- * Die konfigurierte Basis-URL. Nicht gesetzt -> gravatar.com; leer (nach trim)
- * -> die Funktion ist abgeschaltet. Zur Laufzeit gelesen, damit Tests
- * process.env vor dem Aufruf setzen koennen (wie readPrivateNetworkOptIn).
+ * Die konfigurierte Basis-URL, getrimmt. Nicht gesetzt oder leer -> '' -> die
+ * Funktion ist AUS. Es gibt keinen eingebauten Default: ein Abruf bei einem
+ * oeffentlichen Dienst mit einem stabilen Kennzeichen einer Person kann nicht
+ * die Voreinstellung sein (docs/SCOPE.md, Geocoder-Eintrag und #656) - der
+ * Betreiber schaltet ihn ein, indem er die Variable setzt (gravatar.com oder
+ * ein Libravatar-Spiegel). Zur Laufzeit gelesen, damit Tests process.env vor
+ * dem Aufruf setzen koennen (wie readPrivateNetworkOptIn).
  */
 export function gravatarBaseUrl(env = process.env) {
   const raw = env.GRAVATAR_BASE_URL;
-  if (raw === undefined) return DEFAULT_GRAVATAR_BASE_URL;
-  return String(raw).trim();
+  return raw === undefined || raw === null ? '' : String(raw).trim();
+}
+
+/**
+ * Ist der Import eingeschaltet? Genau dann, wenn GRAVATAR_BASE_URL einen
+ * nicht leeren Wert traegt. Ein gesetzter, aber falscher Wert zaehlt als
+ * eingeschaltet: der Betreiber wollte die Funktion, und der Fehler soll laut
+ * werden (500 gravatar_bad_base_url im Log), nicht als "aus" verschwinden.
+ * Die Route fragt hier zuerst, GET /auth/me reicht die Antwort als
+ * `gravatarAvailable` an die Kontoseite - nie die URL selbst.
+ */
+export function gravatarEnabled(env = process.env) {
+  return gravatarBaseUrl(env) !== '';
 }
 
 /**

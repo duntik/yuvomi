@@ -208,7 +208,13 @@ test('Gravatar: der Knopf steht im Bild-Editor, gesperrt ohne gespeicherte Adres
   }
 
   const buttonOf = (html) => html.match(/<button[^>]*id="profile-avatar-gravatar"[^>]*>/)?.[0] ?? '';
-  const locked = buttonOf(avatarEditorHtml({ display_name: 'Ada', email: null }));
+  // Ohne gravatarAvailable vom Server (Betreiber hat GRAVATAR_BASE_URL nicht
+  // gesetzt, Konto ist kein Mitglied, oder /auth/me schlug fehl) gibt es den
+  // Knopf nicht - auch nicht gesperrt.
+  assert.doesNotMatch(avatarEditorHtml({ display_name: 'Ada', email: 'ada@example.org' }), /profile-avatar-gravatar/);
+  assert.doesNotMatch(avatarEditorHtml({ email: 'ada@example.org' }, { gravatarAvailable: false }), /profile-avatar-gravatar/);
+  const on = { gravatarAvailable: true };
+  const locked = buttonOf(avatarEditorHtml({ display_name: 'Ada', email: null }, on));
   assert.ok(locked, 'der Knopf existiert');
   assert.match(locked, /aria-disabled="true"/);
   assert.match(locked, /aria-label="settings\.gravatarUse"/);
@@ -216,14 +222,46 @@ test('Gravatar: der Knopf steht im Bild-Editor, gesperrt ohne gespeicherte Adres
   assert.doesNotMatch(locked, /\sdisabled[\s>]/, 'aria-disabled statt disabled: erreichbar bleiben');
   assert.equal(gravatarHintText({ email: null }), 'settings.gravatarNeedsEmail');
 
-  const free = buttonOf(avatarEditorHtml({ display_name: 'Ada', email: 'ada@example.org' }));
+  const free = buttonOf(avatarEditorHtml({ display_name: 'Ada', email: 'ada@example.org' }, on));
   assert.ok(free);
   assert.doesNotMatch(free, /aria-disabled/);
-  assert.equal(gravatarHintText({ email: 'ada@example.org' }), 'settings.gravatarHint');
+  // Der Hinweis nennt die Adresse, die gehasht wird (der Stub von t() haengt
+  // die Parameter als JSON an).
+  assert.equal(gravatarHintText({ email: ' ada@example.org ' }), 'settings.gravatarHint{"email":"ada@example.org"}');
 
   // Dieselbe Familie wie Hochladen und Entfernen daneben, mit Icon.
   assert.match(free, /class="settings-avatar-action"/);
-  assert.match(avatarEditorHtml({ email: 'ada@example.org' }), /id="profile-avatar-gravatar"[^]*?data-lucide="cloud-download"/);
+  assert.match(avatarEditorHtml({ email: 'ada@example.org' }, on), /id="profile-avatar-gravatar"[^]*?data-lucide="cloud-download"/);
+});
+
+test('Gravatar: die Hinweiszeile kommt leer aus dem HTML und wird als Text gefuellt - die Adresse steht woertlich da', async () => {
+  const { __test } = await import('/settings/pages/personal-account.js');
+  const { gravatarHintHtml, fillGravatarHint } = __test;
+  assert.equal(gravatarHintHtml(false), '', 'ohne Freigabe keine Hinweiszeile');
+  assert.equal(gravatarHintHtml(true), '<p class="form-hint" id="profile-gravatar-hint"></p>', 'leer: gefuellt wird nur ueber textContent');
+
+  // Die Adresse kommt von einer Kontaktkarte, die andere Mitglieder bearbeiten
+  // koennen. Sie darf nie als HTML gelesen werden - und auch nicht doppelt
+  // escapet als "&amp;" im Satz stehen.
+  const element = { textContent: '' };
+  fillGravatarHint(element, { email: '<b>&x@y.de' });
+  assert.ok(element.textContent.includes('<b>&x@y.de'), element.textContent);
+  assert.doesNotMatch(element.textContent, /&amp;|&lt;/);
+  fillGravatarHint(element, { email: null });
+  assert.equal(element.textContent, 'settings.gravatarNeedsEmail');
+  fillGravatarHint(null, { email: 'a@b.de' }); // ohne Element kein Fehler
+
+  // Die Verdrahtung: render() liest gravatarAvailable aus auth.me() und nur
+  // bei true; die Seite schreibt den Hinweis nie per innerHTML, und nach dem
+  // Speichern des Profils zieht er mit (syncGravatarButton).
+  const source = await readFile(new URL('../public/settings/pages/personal-account.js', import.meta.url), 'utf8');
+  assert.match(source, /gravatarAvailable = response\?\.gravatarAvailable === true;/);
+  assert.match(source, /\$\{gravatarHintHtml\(gravatarAvailable\)\}/);
+  assert.match(source, /\$\{avatarEditorHtml\(user, \{ gravatarAvailable \}\)\}/);
+  assert.doesNotMatch(source, /gravatarHint[A-Za-z]*\.innerHTML|esc\(gravatarHintText/);
+  const sync = source.slice(source.indexOf('const syncGravatarButton = () => {'), source.indexOf('const labelGravatarButton'));
+  assert.match(sync, /fillGravatarHint\(gravatarHint, user\)/);
+  assert.match(sync, /\n  syncGravatarButton\(\);/, 'beim Binden einmal gefuellt');
 });
 
 test('Gravatar: jeder Grund, den die Route nennen kann, hat seinen Satz, 429 liest sich als zu oft', async () => {
@@ -233,6 +271,7 @@ test('Gravatar: jeder Grund, den die Route nennen kann, hat seinen Satz, 429 lie
   const reasons = [
     'no_email', 'gravatar_disabled', 'gravatar_not_found', 'gravatar_unreachable',
     'gravatar_too_large', 'gravatar_not_image', 'gravatar_rate_limited',
+    'gravatar_stale', 'not_a_household_member',
   ];
   assert.deepEqual(Object.keys(GRAVATAR_REASON_KEYS).sort(), [...reasons].sort());
 
@@ -261,7 +300,11 @@ test('Gravatar: jeder Grund, den die Route nennen kann, hat seinen Satz, 429 lie
   const end = source.indexOf("const profileForm = container.querySelector('#profile-form')");
   assert.ok(start > 0 && end > start, 'der Handler steht vor dem Formular-Submit');
   const handler = source.slice(start, end);
-  assert.match(handler, /api\.post\('\/auth\/me\/avatar\/gravatar', \{\}\)/);
+  // Mitgeschickt wird die Adresse, die der Hinweis nennt (gravatarHintText:
+  // user.email.trim()) - die Route sagt 409, wenn der Server inzwischen eine
+  // andere fuehrt.
+  assert.match(handler, /api\.post\('\/auth\/me\/avatar\/gravatar', \{ email: user\.email\.trim\(\) \}\)/);
+  assert.match(source, /t\('settings\.gravatarHint', \{ email: user\.email\.trim\(\) \}\)/, 'Hinweis und Anfrage nennen dieselbe Adresse');
   assert.match(handler, /showError\(profileError, gravatarErrorText\(error\)\)/);
   assert.match(handler, /profileState\.avatarData = data\.avatar_data \?\? null/);
   assert.match(handler, /new CustomEvent\('yuvomi:profile-changed'/);
