@@ -777,14 +777,15 @@ export async function installFilesUnlocked(files, opts = {}) {
       // so the page never asks "replace?" for something it would then refuse.
       // An unreadable record counts as none here too (readInstallMeta gives
       // null): only the server can fix it, and readModule says so.
-      if (!(await readInstallMeta(target))) {
+      const installed = await readInstallMeta(target);
+      if (!installed) {
         throw new InstallError('not_web_installed',
           `modules/${id} was copied to the server by hand and is not replaced from Settings. Remove the folder on the server first, then install again.`);
       }
       if (!opts.overwrite) {
         const current = await readExistingManifest(target);
         throw new InstallError('exists', `A module with the id "${id}" is already installed.`, {
-          existing: { id, name: current.name, version: current.version, install: await readInstallMeta(target) },
+          existing: { id, name: current.name, version: current.version, install: installed },
           incoming: {
             id,
             name: typeof rawManifest.name === 'string' ? rawManifest.name.slice(0, 80) : '',
