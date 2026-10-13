@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry as "not found", as standard CalDAV and CardDAV servers do. Such an entry now counts as gone.
   Any other refusal still stops the sync with its HTTP status, and an entry the server sends
   without its content is an error, not an empty contact or event.
+- **Installing a custom module from Settings copes with more of what can go wrong.** When GitHub
+  slows down a server that asks too often in a short time, the page now says GitHub's limit is
+  reached, with the time to try again where GitHub names one, instead of "GitHub answered with
+  status 403".
 
 ## [2.77.0] - 2026-10-14
 

@@ -1461,7 +1461,7 @@ export const schemas = {
                 required: ['path'],
               },
             },
-            resetAt: { type: 'string', format: 'date-time', description: 'With `rate_limited` from GitHub: when the limit resets.' },
+            resetAt: { type: 'string', format: 'date-time', description: 'With `rate_limited` from GitHub, when GitHub names a time: when to try again (from `retry-after` for its secondary limit, otherwise from `x-ratelimit-reset`). Left out when GitHub names none.' },
           },
           required: ['error', 'code'],
         },

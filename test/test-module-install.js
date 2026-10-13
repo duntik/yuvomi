@@ -52,6 +52,8 @@
  *            Schalters: ein frischer Import je Wert (ungesetzt, yes, "TRUE ",
  *            leer, false, 0 → aus; true, 1, " 1 " → an) haelt fest, dass die
  *            Umgebung gelesen wird und nicht eine Konstante.
+ *          - Nach dem Merge: GitHubs sekundaeres Limit (429, 403 mit retry-after)
+ *            ist rate_limited, ein nacktes 403 bleibt github_failed.
  *
  *        Kein Netz: der GitHub-Transport ist ein Fake (__setGithubRequestForTests /
  *        createGithubInstaller({ request })). MODULES_DIR zeigt auf einen
@@ -1074,6 +1076,50 @@ test('Rate-Limit von GitHub (403, remaining 0) → 429 rate_limited mit resetAt'
   const other = fakeTransport({ [`${API}/o/r/releases/latest`]: fakeResponse(500) });
   await assert.rejects(github.createGithubInstaller({ request: other.request }).resolve('o/r'),
     (e) => e.reason === 'github_failed' && e.status === 502);
+});
+
+test('sekundaeres Rate-Limit von GitHub (429, 403 mit retry-after) → 429 rate_limited; nacktes 403 bleibt github_failed', async () => {
+  const resolveWith = (res) => github.createGithubInstaller({
+    request: fakeTransport({ [`${API}/o/r/releases/latest`]: res }).request,
+  }).resolve('o/r');
+
+  // 429 ganz ohne Kopfzeilen: zu oft, nur ohne Zeitpunkt.
+  await assert.rejects(resolveWith(fakeResponse(429)), (e) => {
+    assert.equal(e.reason, 'rate_limited');
+    assert.equal(e.status, 429);
+    assert.equal(e.extra.resetAt, undefined);
+    return true;
+  });
+
+  // 403 mit retry-after und remaining > 0: das sekundaere Limit. Der Zeitpunkt
+  // kommt aus retry-after, nicht aus x-ratelimit-reset (Ende des Stundenfensters).
+  const before = Date.now();
+  await assert.rejects(resolveWith(fakeResponse(403, {
+    headers: { 'retry-after': '60', 'x-ratelimit-remaining': '4999', 'x-ratelimit-reset': '1900000000' },
+  })), (e) => {
+    assert.equal(e.reason, 'rate_limited');
+    assert.equal(e.status, 429);
+    const at = Date.parse(e.extra.resetAt);
+    assert.ok(at >= before + 60_000 && at <= Date.now() + 60_000, e.extra.resetAt);
+    assert.match(e.message, /^GitHub is limiting requests from this server\./);
+    return true;
+  });
+
+  // Ein leeres oder unlesbares retry-after ist kein Zeitpunkt (Number('') waere 0, "jetzt").
+  for (const value of ['', 'soon', '-5']) {
+    await assert.rejects(resolveWith(fakeResponse(403, { headers: { 'retry-after': value } })), (e) => {
+      assert.equal(e.reason, 'rate_limited', JSON.stringify(value));
+      assert.equal(e.extra.resetAt, undefined, JSON.stringify(value));
+      return true;
+    });
+  }
+
+  // 403 ohne beide Kopfzeilen (gesperrtes Repo, DMCA): kein Limit, sondern eine Absage.
+  await assert.rejects(resolveWith(fakeResponse(403, { headers: { 'x-ratelimit-remaining': '4999' } })), (e) => {
+    assert.equal(e.reason, 'github_failed');
+    assert.equal(e.status, 502);
+    return true;
+  });
 });
 
 test('Download ueber der Grenze → too_large (Content-Length und gestreamt)', async () => {

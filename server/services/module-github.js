@@ -145,11 +145,33 @@ function isAllowedHop(url) {
   return url.protocol === 'https:' && !url.port && ALLOWED_DOWNLOAD_HOSTS.has(url.hostname.toLowerCase());
 }
 
+/**
+ * Whether an answer is one of GitHub's two rate limits. The primary limit says
+ * 403 or 429 with `x-ratelimit-remaining: 0`. The secondary limit (too many
+ * requests in a short time, too many at once) leaves `remaining` above zero and
+ * sends `retry-after` instead - or nothing but a 429. A 403 with neither header
+ * is a real refusal (a blocked or DMCA'd repository) and stays github_failed.
+ */
+function isRateLimited(res) {
+  if (res.status === 429) return true;
+  if (res.status !== 403) return false;
+  return res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after') !== null;
+}
+
 function rateLimitError(res) {
+  // retry-after first: GitHub's own rule for the secondary limit, whose
+  // x-ratelimit-reset names the end of the hourly window, not the wait. Only
+  // whole seconds count: an empty header would be Number('') === 0, "now".
+  const retryHeader = res.headers.get('retry-after');
   const reset = Number(res.headers.get('x-ratelimit-reset'));
-  const resetAt = Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000).toISOString() : null;
+  let resetAt = null;
+  if (retryHeader !== null && /^\s*\d+\s*$/.test(retryHeader)) {
+    resetAt = new Date(Date.now() + Number(retryHeader) * 1000).toISOString();
+  } else if (res.headers.get('x-ratelimit-remaining') === '0' && Number.isFinite(reset) && reset > 0) {
+    resetAt = new Date(reset * 1000).toISOString();
+  }
   return new InstallError('rate_limited',
-    `GitHub's rate limit for this server is used up.${resetAt ? ` Try again after ${resetAt}.` : ' Try again later.'}`,
+    `GitHub is limiting requests from this server.${resetAt ? ` Try again after ${resetAt}.` : ' Try again later.'}`,
     resetAt ? { resetAt } : {});
 }
 
@@ -225,7 +247,7 @@ export function createGithubInstaller({
         }
         continue;
       }
-      if ((status === 403 || status === 429) && res.headers.get('x-ratelimit-remaining') === '0') {
+      if (isRateLimited(res)) {
         discardBody(res);
         throw rateLimitError(res);
       }

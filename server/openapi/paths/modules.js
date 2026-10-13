@@ -117,7 +117,7 @@ export function modulesPaths() {
         requestBody: jsonBody('#/components/schemas/ModuleInstallGithubRequest'),
         responses: installResponses({
           404: { description: 'Repository (`repo_not_found`) or ref (`ref_not_found`) not found', content: errorContent() },
-          429: { description: 'Install rate limit reached (`install_rate_limited`: 10 installs or 30 attempts in 10 minutes), or the GitHub API rate limit is used up (`rate_limited`, with `resetAt`)', content: errorContent() },
+          429: { description: 'Install rate limit reached (`install_rate_limited`: 10 installs or 30 attempts in 10 minutes), or GitHub is limiting requests from this server, by its hourly or its secondary rate limit (`rate_limited`, with `resetAt` when GitHub names a time)', content: errorContent() },
           502: { description: 'GitHub could not be reached or answered unexpectedly (`github_failed`), including a redirect to a non-GitHub host', content: errorContent() },
         }),
       })),
