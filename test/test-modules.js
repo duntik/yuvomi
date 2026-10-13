@@ -286,7 +286,9 @@ test('jedes zugesagte capabilities-Feld kommt beim Modul auch an', async () => {
       },
     },
     'contract-mod',
-    '/nowhere',
+    // Absolut auf jedem System: unter Windows macht path.resolve aus '/nowhere'
+    // 'C:\nowhere', und der Widget-Eintrag laege scheinbar ausserhalb.
+    path.resolve('/nowhere'),
     (id, rel) => `/api/v1/modules/assets/${id}/${rel}`,
     async () => true,        // jede Datei existiert
     () => true,              // jeder Pfad ist sicher
