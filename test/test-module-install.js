@@ -56,6 +56,7 @@
  *            ist rate_limited, ein nacktes 403 bleibt github_failed. Ein Ersetzen,
  *            das ein Neustart abgeschnitten hat, holt der Start zurueck
  *            (recoverInterruptedInstalls: Sperre, schreibgeschuetzt, zweimal).
+ *            Eine id mit Pfadteilen wird abgewiesen, ohne dass etwas entsteht.
  *
  *        Kein Netz: der GitHub-Transport ist ein Fake (__setGithubRequestForTests /
  *        createGithubInstaller({ request })). MODULES_DIR zeigt auf einen
@@ -398,6 +399,20 @@ test('kaputtes Manifest → 400 bad_manifest (entry fehlt, id ungueltig, manifes
   assert.match(future.body.error, /manifestVersion 2/, 'die Meldung des Loaders kommt durch');
   assert.ok(!fs.existsSync(path.join(MODULES_DIR, 'future-mod')));
   assert.deepEqual(stagingLeftovers(), []);
+});
+
+test('eine id mit Pfadteilen → 400 bad_manifest, nichts entsteht in modules/ oder darueber', async () => {
+  const listing = (dir) => fs.readdirSync(dir).sort();
+  const modulesBefore = listing(MODULES_DIR);
+  const parentBefore = listing(TMP_ROOT);
+  for (const id of ['../evil', 'a/b', 'a\\b', '..', '../../evil-two']) {
+    const r = await postZip(makeZip(moduleFiles(id)));
+    assert.equal(r.status, 400, `${JSON.stringify(id)} → ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.reason, 'bad_manifest', JSON.stringify(id));
+  }
+  assert.deepEqual(listing(MODULES_DIR), modulesBefore, 'kein Ordner in modules/, auch kein Staging');
+  assert.deepEqual(listing(TMP_ROOT), parentBefore, 'nichts neben modules/');
+  assert.ok(!fs.existsSync(path.join(path.dirname(TMP_ROOT), 'evil-two')), 'nichts zwei Ebenen darueber');
 });
 
 test('nicht erlaubte Dateien werden uebersprungen und gemeldet', async () => {

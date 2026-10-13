@@ -739,6 +739,16 @@ export async function installFilesUnlocked(files, opts = {}) {
 
   const stagingRoot = path.join(MODULES_DIR, `.install-${randomBytes(8).toString('hex')}`);
   const stageDir = path.join(stagingRoot, id);
+  // The second lock on the id, as writeStaged has one on each file name: the
+  // id rule in readManifest already keeps `/`, `\` and `.` out, but if it is
+  // ever loosened, `../x` must not decide where the staging folder or the
+  // module lands. Both have to be direct children of their root; the target
+  // comes from moduleFolderPath, the one path every other id request uses.
+  const target = moduleFolderPath(id);
+  if (!target || path.dirname(target) !== MODULES_DIR
+    || path.dirname(path.resolve(stageDir)) !== path.resolve(stagingRoot)) {
+    throw new InstallError('bad_manifest', 'module.json must define an id that names a single folder inside modules/.');
+  }
   try {
     await fs.mkdir(stagingRoot, { mode: 0o755 });
     await writeStaged(stageDir, keep, meta);
@@ -750,7 +760,6 @@ export async function installFilesUnlocked(files, opts = {}) {
       throw new InstallError('bad_manifest', `The module is not valid: ${err?.message || 'unknown error'}`);
     }
 
-    const target = path.join(MODULES_DIR, id);
     const existing = await lstatOrNull(target);
     let replaced = false;
     if (existing) {
