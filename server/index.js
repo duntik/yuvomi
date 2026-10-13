@@ -89,6 +89,7 @@ import housekeepingRouter from './routes/housekeeping.js';
 import wasteRouter from './routes/waste/index.js';
 import modulesRouter from './routes/modules.js';
 import { listModules } from './services/modules.js';
+import { recoverInterruptedInstalls } from './services/module-install.js';
 import pushRouter from './routes/push.js';
 import emailRouter from './routes/email.js';
 import notificationsRouter from './routes/notifications.js';
@@ -855,6 +856,10 @@ async function runSync() {
 // drops unknown ext:* rows, and moduleAccessVerdict is a deny-list — a missing
 // key means allow. Starting the scan inside the listen callback left that window
 // open until the first GET /api/v1/modules (or /permissions/catalog).
+// Davor: ein Ersetzen, das ein Neustart zwischen seinen zwei Umbenennungen
+// abgeschnitten hat, holt die alte Fassung aus `.backup-<id>-*` zurueck, damit
+// schon die erste Liste das Modul wieder kennt. Wirft nie.
+await recoverInterruptedInstalls();
 try {
   await listModules({ admin: true });
 } catch (err) {

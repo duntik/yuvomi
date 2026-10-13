@@ -24,7 +24,8 @@
  * filesystem, so the final step is a rename), validated with loadModuleDir(), and only
  * then moved into place. A replace moves the old folder aside first and puts it back
  * if anything fails. listModules() ignores dot-entries, so a half-written staging
- * folder is never mistaken for a module.
+ * folder is never mistaken for a module. A replace cut short by a restart is
+ * finished at the next start (recoverInterruptedInstalls).
  */
 
 import fs from 'node:fs/promises';
@@ -44,7 +45,9 @@ import {
   loadModuleDir,
   moduleFolderPath,
   readInstallMeta,
+  readInstallRecord,
   setModuleDisabledFlag,
+  writeInstallApproval,
 } from './modules.js';
 
 const log = createLogger('ModuleInstall');
@@ -155,6 +158,7 @@ export class InstallError extends Error {
 const fsOps = {
   access: (p, mode) => fs.access(p, mode),
   rename: (from, to) => fs.rename(from, to),
+  rm: (p, opts) => fs.rm(p, opts),
   writeFile: (p, data, opts) => fs.writeFile(p, data, opts),
 };
 
@@ -515,8 +519,8 @@ async function lstatOrNull(p) {
 
 /**
  * Removes staging folders a crashed install left behind. Only `.install-*`:
- * a `.backup-*` folder exists only if a rollback itself failed, and then it may
- * be the last copy of the admin's module - that one is left for a human.
+ * a `.backup-*` folder may be the last copy of the admin's module, and only
+ * recoverInterruptedInstalls() at startup decides what happens to it.
  */
 export async function cleanupStaleStaging(now = Date.now()) {
   let entries = [];
@@ -534,6 +538,131 @@ export async function cleanupStaleStaging(now = Date.now()) {
         await fs.rm(full, { recursive: true, force: true });
       }
     } catch { /* best effort */ }
+  }
+}
+
+// `.backup-<id>-<Date.now()>`, as installFilesUnlocked names it. The id may
+// contain hyphens; the greedy group leaves the last `-<digits>` to the time.
+const BACKUP_NAME_RE = /^\.backup-([a-z0-9-]+)-(\d+)$/;
+
+/**
+ * The backups a replace left in modules/, as `Map<id, { target, list }>` with
+ * the newest first. Only what a replace makes counts: a folder (no link, no
+ * file) with a backup name for a valid id that carries an install record. A
+ * hand-made folder under such a name has no record, and without one the
+ * loader would run it as enabled - it is the operator's, logged and left.
+ */
+async function collectBackups(entries, onlyId = null) {
+  const byId = new Map();
+  for (const name of entries) {
+    const match = BACKUP_NAME_RE.exec(name);
+    if (!match || (onlyId !== null && match[1] !== onlyId)) continue;
+    // moduleFolderPath: the same id rule and prefix check as every other
+    // path built from an id; a name it refuses is not ours and stays.
+    const target = moduleFolderPath(match[1]);
+    if (!target) continue;
+    const full = path.join(MODULES_DIR, name);
+    const st = await lstatOrNull(full);
+    if (!st) continue;
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      log.warn(`Skipped ${name}: a link or a file, not a folder a replace left behind. Left for the operator.`);
+      continue;
+    }
+    if (!(await readInstallRecord(full))) {
+      log.warn(`Skipped ${name}: it has no install record, so Settings did not put it there. Left for the operator.`);
+      continue;
+    }
+    if (!byId.has(match[1])) byId.set(match[1], { target, list: [] });
+    byId.get(match[1]).list.push({ name, time: Number(match[2]) });
+  }
+  for (const { list } of byId.values()) list.sort((a, b) => b.time - a.time);
+  return byId;
+}
+
+/**
+ * Startup only: finishes what a replace cut short. A replace renames
+ * modules/<id> to `.backup-<id>-*` and then the staged folder to modules/<id>;
+ * if the process dies in between, modules/<id> is gone and the old version
+ * sits in a dot-folder that listModules() never shows - the module vanished
+ * from the page with nothing to explain it. Here, before the first scan:
+ *  - every `.install-*` staging folder is removed (no install runs yet, so
+ *    none of them is in use, whatever its age);
+ *  - for an id whose modules/<id> is missing, the newest backup is renamed
+ *    back, switched OFF first (`approved: false` in its record): like every
+ *    replace, nothing comes back live without an admin looking at it;
+ *  - backups of an id whose modules/<id> exists are removed: the swap went
+ *    through and only the clean-up after it was lost.
+ * Only backups with an install record are touched (collectBackups). Never
+ * throws: a missing or read-only modules folder is logged, and the server
+ * starts as before. Takes the install lock, so even a later call can never
+ * pull a folder from under a running install. The lock is per process: this
+ * assumes one Yuvomi per modules folder (two containers sharing a modules
+ * volume during a rolling update could remove each other's staging).
+ *
+ * @returns {Promise<{ removedStaging: string[], restored: string[], removedBackups: string[] }>}
+ */
+export async function recoverInterruptedInstalls() {
+  const result = { removedStaging: [], restored: [], removedBackups: [] };
+  const release = acquireInstallLock();
+  if (!release) return result;
+  try {
+    let entries;
+    try {
+      entries = await fs.readdir(MODULES_DIR);
+    } catch (err) {
+      if (err?.code !== 'ENOENT') log.warn('Could not read the modules folder to clean up after an interrupted install:', err?.message);
+      return result;
+    }
+
+    for (const name of entries) {
+      if (!name.startsWith('.install-')) continue;
+      try {
+        const st = await fs.lstat(path.join(MODULES_DIR, name));
+        if (!st.isDirectory()) continue;
+        await fsOps.rm(path.join(MODULES_DIR, name), { recursive: true, force: true });
+        result.removedStaging.push(name);
+        log.info(`Removed the staging folder ${name}, left over from an interrupted install.`);
+      } catch (err) {
+        log.warn(`Could not remove the staging folder ${name}:`, err?.message);
+      }
+    }
+
+    for (const [id, { target, list }] of await collectBackups(entries)) {
+      try {
+        let rest = list;
+        const current = await lstatOrNull(target);
+        if (current && (current.isSymbolicLink() || !current.isDirectory())) {
+          // A link or a file at modules/<id> is the operator's doing; whether
+          // the backup is still the only real copy cannot be told from here.
+          log.warn(`Skipped the backups of modules/${id}: it is a link or a file, not a module folder. Left for the operator.`);
+          continue;
+        }
+        if (!current) {
+          const from = path.join(MODULES_DIR, list[0].name);
+          // Off first, then back in place: if the record cannot be written,
+          // the backup stays where it is rather than returning switched on.
+          await writeInstallApproval(from, false);
+          await fsOps.rename(from, target);
+          result.restored.push(id);
+          log.warn(`modules/${id} was missing after an interrupted replace; restored the previous version from ${list[0].name}. `
+            + 'It is switched off until an admin approves it again in Settings.');
+          rest = list.slice(1);
+        }
+        for (const { name } of rest) {
+          await fsOps.rm(path.join(MODULES_DIR, name), { recursive: true, force: true });
+          result.removedBackups.push(name);
+          log.warn(`Removed ${name}, left over from an interrupted replace of modules/${id}.`);
+        }
+      } catch (err) {
+        log.warn(`Could not clean up after an interrupted replace of modules/${id}:`, err?.message);
+      }
+    }
+    return result;
+  } catch (err) {
+    log.warn('Cleaning up after an interrupted install failed:', err?.message);
+    return result;
+  } finally {
+    release();
   }
 }
 
@@ -752,6 +881,16 @@ export function deleteModule(id, { userId } = {}) {
         `modules/${id} was not installed from Settings. Remove the folder on the server.`);
     }
     await fs.rm(target, { recursive: true, force: true });
+    // A backup an earlier replace could not remove (its last step only logs)
+    // would otherwise bring the deleted module back at the next start.
+    const leftovers = (await collectBackups(await fs.readdir(MODULES_DIR).catch(() => []), id)).get(id)?.list || [];
+    for (const { name } of leftovers) {
+      try {
+        await fsOps.rm(path.join(MODULES_DIR, name), { recursive: true, force: true });
+      } catch (err) {
+        log.warn(`Could not remove backup folder ${name} of the deleted module ${id}:`, err?.message);
+      }
+    }
     // The household switch is cleared so that a later reinstall of the same id
     // is judged by its own record, not by a stale entry.
     setModuleDisabledFlag(id, false);

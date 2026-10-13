@@ -53,7 +53,9 @@
  *            leer, false, 0 → aus; true, 1, " 1 " → an) haelt fest, dass die
  *            Umgebung gelesen wird und nicht eine Konstante.
  *          - Nach dem Merge: GitHubs sekundaeres Limit (429, 403 mit retry-after)
- *            ist rate_limited, ein nacktes 403 bleibt github_failed.
+ *            ist rate_limited, ein nacktes 403 bleibt github_failed. Ein Ersetzen,
+ *            das ein Neustart abgeschnitten hat, holt der Start zurueck
+ *            (recoverInterruptedInstalls: Sperre, schreibgeschuetzt, zweimal).
  *
  *        Kein Netz: der GitHub-Transport ist ein Fake (__setGithubRequestForTests /
  *        createGithubInstaller({ request })). MODULES_DIR zeigt auf einen
@@ -828,6 +830,125 @@ test('veraltete Staging-Ordner werden aufgeraeumt, Sicherungen nicht', async () 
   assert.ok(!fs.existsSync(stale));
   assert.ok(fs.existsSync(backup), 'eine Sicherung kann die letzte Kopie sein');
   fs.rmSync(backup, { recursive: true });
+});
+
+// Ein Modulordner, wie ihn ein Ersetzen beiseitestellt: mit Installationsdatei
+// (record: true) - oder ohne, wie ein von Hand angelegter Ordner gleichen Namens.
+function seedModuleDir(dir, id, version, { approved = true, record = true } = {}) {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, content] of Object.entries(moduleFiles(id, { version }))) fs.writeFileSync(path.join(dir, name), content);
+  if (!record) return;
+  fs.writeFileSync(path.join(dir, '.yuvomi-install.json'),
+    JSON.stringify({ source: 'zip', installedAt: '2026-10-01T00:00:00.000Z', installedBy: 1, approved }));
+}
+const NOTHING_DONE = { removedStaging: [], restored: [], removedBackups: [] };
+
+test('Neustart mitten im Ersetzen: der Start holt die alte Fassung AUSGESCHALTET zurueck und raeumt auf', async () => {
+  const at = (name) => path.join(MODULES_DIR, name);
+  const versionOf = (id) => JSON.parse(fs.readFileSync(path.join(MODULES_DIR, id, 'module.json'), 'utf8')).version;
+
+  // Abgebrochen zwischen den Umbenennungen: modules/lost-mod fehlt, zwei Sicherungen.
+  seedModuleDir(at('.backup-lost-mod-1000'), 'lost-mod', '1.0.0');
+  seedModuleDir(at('.backup-lost-mod-2000'), 'lost-mod', '2.0.0');
+  // Abgebrochen nach dem Tausch, vor dem Aufraeumen: modules/kept-mod ist die neue Fassung.
+  seedModuleDir(at('kept-mod'), 'kept-mod', '5.0.0', { approved: false });
+  seedModuleDir(at('.backup-kept-mod-3000'), 'kept-mod', '4.0.0');
+  // Staging, frisch (juenger als die Stunde von cleanupStaleStaging): beim Start trotzdem weg.
+  fs.mkdirSync(at('.install-abc/kept-mod'), { recursive: true });
+  // Kein Name aus einem Ersetzen (keine gueltige Id): bleibt fuer den Betreiber.
+  fs.mkdirSync(at('.backup-x-1'));
+  // Von Hand angelegt, ohne Installationsdatei: weder zurueckgeholt (ohne Datei
+  // liefe es eingeschaltet) noch geloescht, ob modules/<id> fehlt oder da ist.
+  seedModuleDir(at('.backup-hand-mod-123'), 'hand-mod', '1.0.0', { record: false });
+  seedModuleDir(at('.backup-hand-two-456'), 'hand-two', '1.0.0', { record: false });
+  seedModuleDir(at('hand-two'), 'hand-two', '2.0.0', { record: false });
+  // modules/flat-mod ist eine Datei (vom Betreiber): die Sicherung mit Datei bleibt.
+  seedModuleDir(at('.backup-flat-mod-7000'), 'flat-mod', '1.0.0');
+  fs.writeFileSync(at('flat-mod'), 'not a folder');
+  const handMade = ['.backup-flat-mod-7000', '.backup-hand-mod-123', '.backup-hand-two-456'];
+
+  // Waehrend eine Installation die Sperre haelt, wird nichts angefasst.
+  const release = modulesSvc.acquireInstallLock();
+  assert.deepEqual(await install.recoverInterruptedInstalls(), NOTHING_DONE);
+  release();
+  assert.ok(fs.existsSync(at('.backup-lost-mod-2000')) && fs.existsSync(at('.install-abc')));
+
+  // Schreibgeschuetzt: geloggt, nichts wirft, nichts ist halb erledigt.
+  const readOnly = () => { throw Object.assign(new Error('read-only file system'), { code: 'EROFS' }); };
+  const restoreOps = install.__setInstallFsOpsForTests({ rename: readOnly, rm: readOnly });
+  const restoreModOps = modulesSvc.__setModulesFsOpsForTests({ writeFile: readOnly });
+  try {
+    assert.deepEqual(await install.recoverInterruptedInstalls(), NOTHING_DONE);
+  } finally {
+    restoreModOps();
+    restoreOps();
+  }
+  assert.ok(!fs.existsSync(at('lost-mod')));
+
+  // Nur die Installationsdatei ist nicht schreibbar: erst AUS, dann zurueck -
+  // die Sicherung bleibt liegen, statt eingeschaltet zurueckzukommen.
+  const restoreWrite = modulesSvc.__setModulesFsOpsForTests({ writeFile: readOnly });
+  try {
+    const r = await install.recoverInterruptedInstalls();
+    assert.deepEqual(r.restored, []);
+  } finally {
+    restoreWrite();
+  }
+  assert.ok(!fs.existsSync(at('lost-mod')), 'ohne geschriebene Freigabe kein Zurueckholen');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(at('.backup-lost-mod-2000'), '.yuvomi-install.json'), 'utf8')).approved, true);
+  // Dieser Lauf hat Staging und die Sicherung von kept-mod schon entfernt.
+  fs.mkdirSync(at('.install-abc/kept-mod'), { recursive: true });
+  seedModuleDir(at('.backup-kept-mod-3000'), 'kept-mod', '4.0.0');
+  assert.deepEqual(stagingLeftovers().sort(),
+    ['.backup-flat-mod-7000', '.backup-hand-mod-123', '.backup-hand-two-456', '.backup-kept-mod-3000', '.backup-lost-mod-1000', '.backup-lost-mod-2000',
+      '.backup-x-1', '.install-abc']);
+
+  const result = await install.recoverInterruptedInstalls();
+  assert.deepEqual(result.restored, ['lost-mod']);
+  assert.deepEqual(result.removedStaging, ['.install-abc']);
+  assert.deepEqual(result.removedBackups.sort(), ['.backup-kept-mod-3000', '.backup-lost-mod-1000']);
+  assert.equal(versionOf('lost-mod'), '2.0.0', 'die NEUESTE Sicherung kommt zurueck');
+  assert.equal(recordOf('lost-mod').source, 'zip', 'samt ihrer eigenen Installationsdatei');
+  assert.equal(recordOf('lost-mod').approved, false, 'aber ausgeschaltet, wie jedes Ersetzen');
+  assert.equal(versionOf('kept-mod'), '5.0.0', 'ein vorhandener Ordner bleibt, wie er ist');
+  assert.equal(recordOf('kept-mod').approved, false);
+  assert.ok(!fs.existsSync(at('hand-mod')), 'ein Ordner ohne Installationsdatei wird nicht zurueckgeholt');
+  assert.equal(versionOf('hand-two'), '2.0.0');
+  assert.equal(fs.readFileSync(at('flat-mod'), 'utf8'), 'not a folder');
+  assert.deepEqual(stagingLeftovers().sort(), [...handMade, '.backup-x-1']);
+  const listed = await adminListed('lost-mod');
+  assert.equal(listed?.install?.source, 'zip', 'die Liste kennt das Modul wieder');
+  assert.equal(listed.enabled, false, 'und es ist aus, bis ein Admin es freigibt');
+
+  // Ein zweiter Start findet nichts mehr zu tun.
+  assert.deepEqual(await install.recoverInterruptedInstalls(), NOTHING_DONE);
+  assert.equal(versionOf('lost-mod'), '2.0.0');
+  assert.deepEqual(stagingLeftovers().sort(), [...handMade, '.backup-x-1']);
+
+  for (const name of ['lost-mod', 'kept-mod', 'hand-two', 'flat-mod', '.backup-x-1', ...handMade]) fs.rmSync(at(name), { recursive: true, force: true });
+});
+
+test('Loeschen nimmt liegengebliebene Sicherungen mit: das Modul kommt beim Start nicht zurueck', async () => {
+  assert.equal((await postZip(makeZip(moduleFiles('gone-mod')))).status, 201);
+  // Ein frueheres Ersetzen konnte seine Sicherung nicht entfernen (nur geloggt).
+  seedModuleDir(path.join(MODULES_DIR, '.backup-gone-mod-1000'), 'gone-mod', '0.9.0');
+  // Ohne Installationsdatei gehoert sie dem Betreiber und bleibt.
+  seedModuleDir(path.join(MODULES_DIR, '.backup-gone-mod-500'), 'gone-mod', '0.5.0', { record: false });
+  const r = await call('DELETE', '/gone-mod');
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(stagingLeftovers(), ['.backup-gone-mod-500']);
+  assert.deepEqual(await install.recoverInterruptedInstalls(), NOTHING_DONE);
+  assert.ok(!fs.existsSync(path.join(MODULES_DIR, 'gone-mod')), 'geloescht bleibt geloescht');
+  fs.rmSync(path.join(MODULES_DIR, '.backup-gone-mod-500'), { recursive: true, force: true });
+});
+
+test('der Server ruft die Wiederherstellung beim Start auf, vor der ersten Modulliste', () => {
+  // server/index.js startet beim Import den Server; hier genuegt sein Text.
+  const src = fs.readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+  const recover = src.indexOf('await recoverInterruptedInstalls();');
+  const firstScan = src.indexOf('await listModules({ admin: true });');
+  assert.ok(recover > 0, 'recoverInterruptedInstalls() wird beim Start aufgerufen');
+  assert.ok(firstScan > recover, 'und zwar vor dem ersten listModules()');
 });
 
 // ── GitHub ──────────────────────────────────────────────────────────────────
