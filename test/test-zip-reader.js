@@ -19,6 +19,9 @@
  *        ueberlappende Eintraege, Signaturfehler, kein ZIP, Pfadtiefe (Runde 3:
  *        das 4-MB-Archiv mit 2000 x 510 Segmenten, das die Praefixmenge auf
  *        eine Million Schluessel trieb, wird in Millisekunden abgewiesen).
+ *        Nach der Freigabe: die Einzelregel des Verhaeltnisses mit einem Archiv,
+ *        das nur an ihr scheitert, und wo mehrere Schranken denselben Code
+ *        werfen, auch die Meldung - so steht jede Schranke fuer sich.
  * Ausführen: node --test test/test-zip-reader.js
  */
 
@@ -59,7 +62,8 @@ function makeZip(entries, { comment = '', patchEocd } = {}) {
     local.writeUInt16LE(nameBuf.length, 26);
     local.writeUInt16LE(0, 28);
     let desc = Buffer.alloc(0);
-    if (dd) {
+    // descriptor: false setzt Bit 3, laesst den Descriptor selbst aber weg.
+    if (dd && e.descriptor !== false) {
       desc = Buffer.alloc(16);
       desc.writeUInt32LE(0x08074b50, 0);
       desc.writeUInt32LE(crc, 4);
@@ -99,13 +103,20 @@ function makeZip(entries, { comment = '', patchEocd } = {}) {
   return Buffer.concat([...locals, cd, eocd, commentBuf]);
 }
 
-function rejectsWith(code, buf, limits) {
+// `message` dort, wo mehrere Schranken denselben Code werfen: ohne ihn bliebe
+// der Test gruen, wenn eine Schranke fehlt und die naechste mit demselben Code
+// einspringt - geprueft waere dann nur, DASS abgelehnt wird, nicht WO.
+function rejectsWith(code, buf, limits, message) {
   assert.throws(() => readZip(buf, limits), (err) => {
     assert.ok(err instanceof ZipError, `expected ZipError, got ${err?.name}: ${err?.message}`);
     assert.equal(err.code, code, `expected code ${code}, got ${err.code} (${err.message})`);
+    if (message) assert.match(err.message, message);
     return true;
   });
 }
+
+// Offset des zentralen Verzeichnisses laut Endsatz (ohne Archivkommentar).
+const cdOffsetOf = (zip) => zip.readUInt32LE(zip.length - 22 + 16);
 
 const UNIX_FILE = (mode) => ({ madeBy: (3 << 8) | 20, externalAttr: (mode << 16) >>> 0 });
 
@@ -173,8 +184,50 @@ test('Signatur-Fehler im lokalen Header → corrupt', () => {
   rejectsWith('corrupt', makeZip([{ name: 'x.js', data: 'x', localSig: 0x12345678 }]));
 });
 
+// Die drei Schranken des zentralen Verzeichnisses werfen denselben Satz; jede
+// hat ihr eigenes Archiv, das NUR an ihr scheitert.
+test('Signatur-Fehler im zentralen Verzeichnis → corrupt', () => {
+  const zip = makeZip([{ name: 'x.js', data: 'x' }]);
+  zip.writeUInt32LE(0x12345678, cdOffsetOf(zip));
+  rejectsWith('corrupt', zip, undefined, /directory is damaged/);
+});
+
+test('ein Name, der ueber das Ende des Verzeichnisses hinausreicht → corrupt, bevor er gelesen wird', () => {
+  // Vier Bytes zu lang: der Name griffe in den Endsatz (PK\x05\x06) hinein.
+  const zip = makeZip([{ name: 'x.js', data: 'x' }]);
+  const cd = cdOffsetOf(zip);
+  zip.writeUInt16LE(zip.readUInt16LE(cd + 28) + 4, cd + 28);
+  rejectsWith('corrupt', zip, undefined, /directory is damaged/);
+});
+
+test('Bytes hinter dem letzten Verzeichniseintrag → corrupt', () => {
+  // Das Verzeichnis ist 8 Bytes groesser als seine Eintraege, und der Endsatz
+  // sagt das auch: es endet weiter genau vor ihm, nur steht darin etwas, das
+  // kein Eintrag ist - Platz fuer das, was ein anderes Werkzeug anders liest.
+  const plain = makeZip([{ name: 'x.js', data: 'x' }]);
+  const eocd = plain.length - 22;
+  const zip = Buffer.concat([plain.subarray(0, eocd), Buffer.alloc(8), plain.subarray(eocd)]);
+  zip.writeUInt32LE(plain.readUInt32LE(eocd + 12) + 8, eocd + 8 + 12);
+  rejectsWith('corrupt', zip, undefined, /directory is damaged/);
+});
+
 test('stored mit csize ≠ usize → corrupt', () => {
-  rejectsWith('corrupt', makeZip([{ name: 'x.js', data: 'abc', method: 0, usize: 4 }]));
+  // Die Meldung zaehlt: ohne diese Schranke fiele dasselbe Archiv erst beim
+  // Entpacken auf, ebenfalls als corrupt.
+  rejectsWith('corrupt', makeZip([{ name: 'x.js', data: 'abc', method: 0, usize: 4 }]), undefined, /inconsistent sizes/);
+});
+
+test('Daten, die in das Verzeichnis hineinreichen → corrupt', () => {
+  // Stored, csize = usize = 20, aber nur 3 Bytes Daten: die 20 Bytes laufen in
+  // das zentrale Verzeichnis. Ohne die Schranke wuerden dessen Bytes als Inhalt
+  // gelesen (und fielen erst an der CRC auf).
+  rejectsWith('corrupt', makeZip([{ name: 'x.js', data: 'abc', method: 0, csize: 20, usize: 20 }]), undefined,
+    /Entry data runs past the archive directory/);
+});
+
+test('Data-Descriptor angekuendigt (Bit 3), aber nicht da → corrupt', () => {
+  rejectsWith('corrupt', makeZip([{ name: 'x.js', data: 'x', flags: 0x0008, descriptor: false }]), undefined,
+    /Data descriptor runs past the archive directory/);
 });
 
 test('Mehrteiliges Archiv → corrupt', () => {
@@ -211,6 +264,34 @@ test('Zip-Slip in jeder Form → unsafe_path', () => {
     'LONGFI~1.JS', 'dir~2/x.js',
   ]) {
     rejectsWith('unsafe_path', makeZip([{ name, data: 'x' }]));
+  }
+});
+
+// Alle Namensschranken werfen unsafe_path, und mehrere decken sich: ein
+// fuehrender Schraegstrich ist zugleich ein leeres Segment, ein `.` zugleich
+// ein Punkt am Ende. Erst der Grund in der Meldung zeigt, dass die gemeinte
+// Schranke greift und nicht die naechste.
+test('Zip-Slip: jede Namensschranke nennt ihren eigenen Grund', () => {
+  const a = (n) => 'a'.repeat(n);
+  // 3 x 255 + 254 + 1 Zeichen in fuenf Segmenten, dazu vier Schraegstriche:
+  // genau 1024. Kein Segment ueber 255, keine 16 Ordner - nur die Laenge.
+  const longest = [a(255), a(255), a(255), a(254), 'b'].join('/');
+  assert.equal(longest.length, 1024);
+  assert.equal(readZip(makeZip([{ name: longest, data: 'x' }])).length, 1, '1024 Zeichen gehen durch');
+  for (const [name, why] of [
+    ['', /empty name/],
+    [`${longest}b`, /name too long/],
+    [[a(255), a(255), a(255), a(255), a(255)].join('/'), /name too long/],
+    ['/etc/passwd', /absolute path/],
+    ['//server/share/evil.js', /absolute path/],
+    ['\\evil.js', /absolute path/],
+    ['a/./b.js', /empty or relative segment/],
+    ['./b.js', /empty or relative segment/],
+    ['../evil.js', /empty or relative segment/],
+    ['a/../../evil.js', /empty or relative segment/],
+    ['a//b.js', /empty or relative segment/],
+  ]) {
+    rejectsWith('unsafe_path', makeZip([{ name, data: 'x' }]), undefined, why);
   }
 });
 
@@ -312,6 +393,19 @@ test('Verschluesselung (Bit 0 und Bit 6) → encrypted', () => {
   rejectsWith('encrypted', makeZip([{ name: 'x.js', data: 'x', flags: 0x0040 }]));
 });
 
+test('Verschluesselung nur im Verzeichnis oder nur im lokalen Header → encrypted', () => {
+  // Der Leser traut fuer die Dateiliste dem Verzeichnis, liest aber die Daten
+  // ab dem lokalen Header: jede der beiden Stellen allein reicht fuer die Absage.
+  for (const flag of [0x0001, 0x0040]) {
+    const central = makeZip([{ name: 'x.js', data: 'x' }]);
+    central.writeUInt16LE(flag, cdOffsetOf(central) + 8);
+    rejectsWith('encrypted', central);
+    const local = makeZip([{ name: 'x.js', data: 'x' }]);
+    local.writeUInt16LE(flag, 6);
+    rejectsWith('encrypted', local);
+  }
+});
+
 test('Methode 12 (bzip2) → method', () => {
   rejectsWith('method', makeZip([{ name: 'x.js', data: 'x', method: 12, compressed: Buffer.from('BZh9') }]));
 });
@@ -326,6 +420,11 @@ test('ZIP64-Marker in EOCD oder Eintrag → zip64', () => {
   rejectsWith('zip64', makeZip([{ name: 'x.js', data: 'x' }], { patchEocd: (b) => b.writeUInt32LE(0xffffffff, 16) }));
   rejectsWith('zip64', makeZip([{ name: 'x.js', data: 'x', csize: 0xffffffff }]));
   rejectsWith('zip64', makeZip([{ name: 'x.js', data: 'x', localOffset: 0xffffffff }]));
+  // Jedes 16-Bit-Feld des Endsatzes einzeln: Disk-Nummer und Verzeichnis-Disk
+  // fielen ohne ihre Pruefung erst als Mehrteiler (corrupt) auf.
+  for (const at of [4, 6, 8, 10]) {
+    rejectsWith('zip64', makeZip([{ name: 'x.js', data: 'x' }], { patchEocd: (b) => b.writeUInt16LE(0xffff, at) }));
+  }
 });
 
 // ── Duplikate ───────────────────────────────────────────────────────────────
@@ -341,6 +440,10 @@ test('Datei, die zugleich Ordner-Praefix einer anderen ist → duplicate', () =>
   rejectsWith('duplicate', makeZip([{ name: 'lib', data: 'x' }, { name: 'lib/a.js', data: 'y' }]));
   rejectsWith('duplicate', makeZip([{ name: 'lib/a.js', data: 'y' }, { name: 'LIB', data: 'x' }]));
   rejectsWith('duplicate', makeZip([{ name: 'lib/', data: '', method: 0 }, { name: 'lib', data: 'x' }]));
+  // Umgekehrte Reihenfolge: erst die Datei, dann der gleichnamige Ordnereintrag.
+  rejectsWith('duplicate', makeZip([{ name: 'lib', data: 'x' }, { name: 'lib/', data: '', method: 0 }]), undefined,
+    /both a file and a folder: lib$/);
+  rejectsWith('duplicate', makeZip([{ name: 'Lib', data: 'x' }, { name: 'lib/', data: '', method: 0 }]));
 });
 
 // ── Grenzen ─────────────────────────────────────────────────────────────────
@@ -364,6 +467,21 @@ test('Bombe: Verhaeltnis > 200:1 ueber 1 MiB → bomb', () => {
   // Unter der Schwelle zaehlt das Verhaeltnis nicht: kleine, gut komprimierbare
   // Dateien sind normal.
   assert.equal(readZip(makeZip([{ name: 'zeros.bin', data: Buffer.alloc(512 * 1024) }])).length, 1);
+});
+
+// Aus der Freigabe von #1671: jede Bombe oben loest AUCH das Gesamtverhaeltnis
+// aus, die Einzelregel liess sich abschalten, ohne dass ein Test rot wurde.
+// Hier traegt das Archiv genug schlecht komprimierbare Daten, dass das Ganze
+// unauffaellig bleibt - nur die eine Datei nicht.
+test('Bombe: 10 MiB Nullen neben 1 MiB gespeichertem Zufall → bomb ueber das Einzelverhaeltnis allein', () => {
+  const zeros = { name: 'zeros.bin', data: Buffer.alloc(10 * 1024 * 1024) };
+  const noise = { name: 'noise.bin', data: randomBytes(1024 * 1024), method: 0 };
+  const zip = makeZip([zeros, noise]);
+  assert.equal(zeros.data.length, ZIP_LIMITS.maxFileSize, 'genau an der Dateigrenze, nicht darueber');
+  const whole = (zeros.data.length + noise.data.length) / zip.length;
+  assert.ok(whole < 20, `das Archiv als Ganzes steht bei ${whole.toFixed(1)}:1, weit unter ${ZIP_LIMITS.maxRatio}:1`);
+  rejectsWith('bomb', zip, undefined, /^Suspicious compression ratio for zeros\.bin\.$/);
+  assert.equal(readZip(makeZip([noise])).length, 1, 'der Zufall allein kommt durch');
 });
 
 test('Bombe: Summe der entpackten Groessen → bomb', () => {
@@ -400,11 +518,14 @@ test('zwei gueltige Endsaetze → corrupt (mehrdeutig), statt einen zu raten', (
   fake.writeUInt32LE(realPos + 22 - cdOffset, 12);
   fake.writeUInt32LE(cdOffset, 16);
   const zip = makeZip([{ name: 'x.js', data: 'x' }], { comment: fake.toString('latin1') });
-  rejectsWith('corrupt', zip);
+  // Ohne die Pruefung auf zwei Treffer fiele es als "passt nicht" durch - auch
+  // corrupt, aber nicht mehr als das, was es ist.
+  rejectsWith('corrupt', zip, undefined, /more than one end record/);
 });
 
 test('vorangestellte Daten ohne angepasste Offsets → corrupt: das Verzeichnis endet nicht am Endsatz', () => {
-  rejectsWith('corrupt', Buffer.concat([Buffer.alloc(100, 0x41), makeZip([{ name: 'x.js', data: 'x' }])]));
+  rejectsWith('corrupt', Buffer.concat([Buffer.alloc(100, 0x41), makeZip([{ name: 'x.js', data: 'x' }])]), undefined,
+    /does not line up/);
 });
 
 test('Bombe: viele kleine Dateien unter der Einzelschwelle → bomb ueber das Gesamtverhaeltnis', () => {
