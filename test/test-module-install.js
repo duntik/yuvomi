@@ -329,6 +329,49 @@ test('path ohne Treffer → 400 path_not_found; kein module.json → 400 no_mani
   assert.equal(none.body.reason, 'no_manifest');
 });
 
+// Nach der Freigabe von #1671: die Pfadwahl im Einzelnen.
+test('normalizeSubPath: Wurzel und Schreibweisen; Punkte, Doppelpunkt, leere Segmente und ueber 500 Zeichen → null', () => {
+  for (const [input, expected] of [
+    [undefined, ''], [null, ''], ['', ''], ['  /  ', ''],
+    ['  /mods/a/  ', 'mods/a'], ['mods\\a', 'mods/a'], ['a'.repeat(500), 'a'.repeat(500)],
+  ]) {
+    assert.equal(install.normalizeSubPath(input), expected, JSON.stringify(input));
+  }
+  for (const input of ['..', '.', 'a/..', 'mods/../x', './a', 'a//b', 'c:', 'mods/c:x', 'a'.repeat(501)]) {
+    assert.equal(install.normalizeSubPath(input), null, input.slice(0, 40));
+  }
+});
+
+test('path: ungueltig → path_not_found mit eigenem Satz; roher Ordnername eines selbstgebauten ZIPs; "" ohne Wurzelmodul → no_manifest', async () => {
+  const bad = await postZip(makeZip(moduleFiles('pathcheck-mod')), '?path=../etc');
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.reason, 'path_not_found');
+  assert.match(bad.body.error, /not a valid folder path/, 'nicht "kein module.json in ../etc"');
+
+  // Ein von Hand gepacktes ZIP mit Oberordner: der Admin sieht im Archiv
+  // "top/sub", die Kandidatenliste nennt "sub". Beides fuehrt zum Modul.
+  const zip = makeZip({ ...moduleFiles('raw-dir-a', { prefix: 'top/sub/' }), ...moduleFiles('raw-dir-b', { prefix: 'top/other/' }) });
+  const raw = await postZip(zip, '?path=top/sub');
+  assert.equal(raw.status, 201, JSON.stringify(raw.body));
+  assert.equal(raw.body.data.id, 'raw-dir-a');
+  assert.equal(raw.body.data.install.path, 'sub', 'gespeichert wird die Form ohne Oberordner');
+
+  // Leerer path heisst "das Modul an der Wurzel"; gibt es keines und auch
+  // sonst kein module.json, ist das no_manifest, nicht path_not_found "".
+  const none = await postZip(makeZip({ 'README.md': 'hi', 'docs/index.js': '' }), '?path=');
+  assert.equal(none.status, 400);
+  assert.equal(none.body.reason, 'no_manifest');
+});
+
+test('Oberordner nur, wenn ALLES darin liegt: eine Datei an der Wurzel oder ein zweiter Ordner → nichts abgestreift', async () => {
+  const rootFile = await postZip(makeZip({ 'README.md': '# repo', ...moduleFiles('top-rootfile-mod', { prefix: 'mod/' }) }));
+  assert.equal(rootFile.status, 201, JSON.stringify(rootFile.body));
+  assert.equal(rootFile.body.data.install.path, 'mod', 'README.md an der Wurzel: mod/ ist kein Oberordner');
+  const twoTops = await postZip(makeZip({ ...moduleFiles('top-first-mod', { prefix: 'first/' }), 'second/README.md': '# x' }));
+  assert.equal(twoTops.status, 201, JSON.stringify(twoTops.body));
+  assert.equal(twoTops.body.data.install.path, 'first', 'zwei Ordner an der Wurzel: keiner wird abgestreift');
+});
+
 test('kaputtes Manifest → 400 bad_manifest (entry fehlt, id ungueltig, manifestVersion 2, kein JSON)', async () => {
   const cases = [
     { 'module.json': JSON.stringify({ id: 'no-entry-file', entry: 'index.js' }) },
@@ -375,6 +418,17 @@ test('nicht erlaubte Dateien werden uebersprungen und gemeldet', async () => {
   assert.ok(fs.existsSync(path.join(dir, 'img', 'a.WEBP')), 'Endung ohne Ruecksicht auf Gross/Klein');
   assert.ok(!fs.existsSync(path.join(dir, 'build.sh')));
   assert.equal(r.body.data.install.source, 'zip', 'die Metadaten aus dem Archiv werden nie uebernommen');
+});
+
+test('ein Lizenz-Dateiname macht keine Endung erlaubt: LICENSE.sh und README.exe werden uebersprungen', async () => {
+  const r = await postZip(makeZip(moduleFiles('legal-mod', {
+    extra: { 'LICENSE.sh': '#!/bin/sh', 'README.exe': 'MZ', 'LICENSE.md': 'MIT', 'NOTICE': 'n', 'licence.TXT': 'l' },
+  })));
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.deepEqual(r.body.skipped, ['LICENSE.sh', 'README.exe']);
+  const dir = path.join(MODULES_DIR, 'legal-mod');
+  for (const kept of ['LICENSE.md', 'NOTICE', 'licence.TXT']) assert.ok(fs.existsSync(path.join(dir, kept)), kept);
+  assert.ok(!fs.existsSync(path.join(dir, 'LICENSE.sh')));
 });
 
 // ── Ersetzen ────────────────────────────────────────────────────────────────
@@ -559,6 +613,19 @@ test('DELETE /:id: ungueltige id → 400, Symlink wird verweigert', async (t) =>
   fs.unlinkSync(link);
 });
 
+test('DELETE /:id auf eine Datei statt eines Ordners → 400 not_a_module, die Datei bleibt', async () => {
+  const file = path.join(MODULES_DIR, 'plain-file-mod');
+  fs.writeFileSync(file, 'keep');
+  try {
+    const r = await call('DELETE', '/plain-file-mod');
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.equal(r.body.reason, 'not_a_module', 'nicht "nicht aus den Einstellungen installiert"');
+    assert.equal(fs.readFileSync(file, 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
 // Geprueft wurde `String(id)`, benutzt wurde `id`: ein Array wie ['typed-mod']
 // bestand die Id-Regel (String() macht daraus `typed-mod`) und lief dann
 // ungeprueft in path.join. Ueber HTTP ist `req.params.id` immer ein String,
@@ -672,6 +739,58 @@ test('leerer Body oder falscher Content-Type → 400 not_zip; Muell → not_zip'
   const junk = await postZip(Buffer.from('definitely not a zip file, sorry'));
   assert.equal(junk.status, 400);
   assert.equal(junk.body.reason, 'not_zip');
+});
+
+// Nach der Freigabe von #1671. Ein leerer Rumpf mit dem richtigen Typ wird an
+// der Route abgewiesen, mit ihrem Satz (der den Content-Type nennt) - der
+// Installer dahinter saehe dasselbe not_zip, aber nicht diesen Hinweis.
+test('leerer ZIP-Body mit richtigem Content-Type → not_zip mit dem Satz der Route; abgebrochener Upload → 400 corrupt', { timeout: 10000 }, async () => {
+  const empty = await postZip(Buffer.alloc(0));
+  assert.equal(empty.status, 400);
+  assert.equal(empty.body.reason, 'not_zip');
+  assert.match(empty.body.error, /Content-Type application\/zip/);
+
+  // Der Client kuendigt 100 Bytes an, schickt 10 und bricht die Verbindung ab.
+  // Lesen kann er die Antwort dann nicht mehr; was die Route sagt, haelt eine
+  // eigene kleine App fest, die res.json mitschreibt. Ohne den Zweig fuer
+  // request.aborted ginge die Ausnahme an Express' Fehlerseite (HTML, ohne
+  // reason), und res.json wuerde nie gerufen.
+  const net = await import('node:net');
+  let entered;
+  let answered;
+  const enteredP = new Promise((r) => { entered = r; });
+  const answeredP = new Promise((r) => { answered = r; });
+  const spyApp = express();
+  spyApp.use((req, res, next) => {
+    req.authUserId = 6060;
+    req.authRole = 'admin';
+    req.authMethod = 'session';
+    const json = res.json.bind(res);
+    res.json = (body) => { answered({ status: res.statusCode, body }); return json(body); };
+    // Abgebrochen wird erst, wenn der Body-Parser auf den Abbruch hoert.
+    const on = req.on.bind(req);
+    req.on = (event, fn) => {
+      if (event === 'aborted') entered();
+      return on(event, fn);
+    };
+    next();
+  });
+  spyApp.use('/', modulesRouter);
+  const spy = spyApp.listen(0, '127.0.0.1');
+  await new Promise((r) => spy.on('listening', r));
+  try {
+    const sock = net.connect(spy.address().port, '127.0.0.1');
+    sock.on('error', () => {});
+    sock.write(`POST /install/zip HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/zip\r\nContent-Length: 100\r\n\r\n${'PK'.padEnd(10, 'x')}`);
+    await enteredP;
+    sock.destroy();
+    let fallback;
+    const seen = await Promise.race([answeredP, new Promise((r) => { fallback = setTimeout(() => r(null), 2000); })]);
+    clearTimeout(fallback);
+    assert.deepEqual(seen, { status: 400, body: { error: 'The upload was incomplete.', code: 400, reason: 'corrupt' } });
+  } finally {
+    spy.close();
+  }
 });
 
 test('mehr als 20 MB Body → 413 too_large mit der richtigen Grenze', async () => {
@@ -1104,6 +1223,56 @@ test('POST /install/github haelt die Sperre waehrend des Downloads: parallele In
   }
 });
 
+test('POST /install/github: Commit nur aus einer SHA im ZIP-Kommentar (klein geschrieben), ref getrimmt', async () => {
+  const sha = 'ABCDEF0123456789ABCDEF0123456789ABCDEF01';
+  let comment = '';
+  github.__setGithubRequestForTests(async (url) => (url === `${API}/o/commit/zipball/main`
+    ? fakeResponse(200, { body: makeZip(moduleFiles('commit-mod'), { comment }) })
+    : fakeResponse(404)));
+  try {
+    for (const [c, expected] of [
+      [`  ${sha}\n`, sha.toLowerCase()],
+      ['release v1.2.3', null],
+      [sha.slice(0, 39), null],
+      [`${sha}0`, null],
+      [`${sha.slice(0, 39)}g`, null],
+      ['', null],
+    ]) {
+      comment = c;
+      const r = await call('POST', '/install/github', { json: { url: 'o/commit', ref: '  main  ', overwrite: true } });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      assert.equal(r.body.data.install.ref, 'main', 'die ref kommt getrimmt an');
+      assert.equal(r.body.data.install.commit, expected, JSON.stringify(c));
+      assert.equal(recordOf('commit-mod').commit ?? null, expected, 'so steht es auch in der Datei (ohne SHA: kein Feld)');
+    }
+  } finally {
+    github.__setGithubRequestForTests(null);
+  }
+});
+
+// Die Route prueft die url, bevor sie die Installationssperre nimmt. Der Satz
+// ist derselbe wie der des Parsers dahinter; was die Pruefung an der Route
+// ausmacht, zeigt sich, waehrend eine andere Installation laeuft: ohne URL
+// gibt es sofort 400, nicht 409 busy.
+test('POST /install/github ohne oder mit leerer url → 400 bad_url sofort, auch waehrend einer laufenden Installation', async () => {
+  let requests = 0;
+  github.__setGithubRequestForTests(async () => { requests += 1; return fakeResponse(404); });
+  const release = modulesSvc.acquireInstallLock();
+  assert.ok(release, 'die Sperre ist frei');
+  try {
+    for (const json of [{}, { url: '' }, { url: '   ' }, { url: 7 }, { url: null }]) {
+      const r = await call('POST', '/install/github', { json });
+      assert.equal(r.status, 400, `${JSON.stringify(json)} → ${JSON.stringify(r.body)}`);
+      assert.equal(r.body.reason, 'bad_url');
+      assert.match(r.body.error, /github\.com\/owner\/repo/);
+    }
+    assert.equal(requests, 0);
+  } finally {
+    release();
+    github.__setGithubRequestForTests(null);
+  }
+});
+
 // ── Review Runde 1 ──────────────────────────────────────────────────────────
 
 test('nur aus einer Browser-Sitzung: Token und Display → 403 module_session_required, vor Body und Limit', async () => {
@@ -1409,6 +1578,25 @@ test('ein Name, den das Dateisystem nicht schreiben kann → 400 unsafe_path sta
   assert.ok(!fs.existsSync(path.join(MODULES_DIR, 'fsname-mod')));
 });
 
+// Ein Fehler ohne reason ist ein roher Datei- oder Systemfehler, und seine
+// Meldung nennt den absoluten Pfad auf dem Server: der gehoert ins Log.
+test('ein unerwarteter Fehler beim Installieren → 500 mit festem Satz, ohne die rohe Meldung', async () => {
+  const restore = install.__setInstallFsOpsForTests({
+    rename: async (from, to) => {
+      throw Object.assign(new Error(`EIO: i/o error, rename '${from}' -> '${to}'`), { code: 'EIO' });
+    },
+  });
+  try {
+    const r = await postZip(makeZip(moduleFiles('raw500-mod')));
+    assert.equal(r.status, 500);
+    assert.deepEqual(r.body, { error: 'Module install failed.', code: 500 }, 'kein EIO, kein Serverpfad');
+  } finally {
+    restore();
+  }
+  assert.deepEqual(stagingLeftovers(), []);
+  assert.ok(!fs.existsSync(path.join(MODULES_DIR, 'raw500-mod')));
+});
+
 // ── Persistenz (isPersistent) ───────────────────────────────────────────────
 // Die /proc-Dateien sind injiziert; so laeuft dieselbe Tabelle unter Windows,
 // in einem Container und auf einem Linux-Host.
@@ -1466,6 +1654,13 @@ test('isPersistent: Volume auf dem Modulordner, nur Root-Overlay, Volume weiter 
   assert.equal(await probe({ realpath: async () => '/data/modules' }, mountinfo(root, ['/data', 'ext4'])), true);
   // Wirft nie, auch wenn realpath wirft.
   assert.equal(await probe({ realpath: async () => { throw new Error('ENOENT'); } }, mountinfo(root)), false);
+});
+
+test('isPersistent: ein Volume auf /data deckt /data2/modules nicht ab, /data/modules schon', async () => {
+  const root = ['/', 'overlay'];
+  assert.equal(await probe({ modulesDir: '/data2/modules' }, mountinfo(root, ['/data', 'ext4'])), false, 'Praefix ohne Schraegstrich zaehlt nicht');
+  assert.equal(await probe({ modulesDir: '/data/modules' }, mountinfo(root, ['/data', 'ext4'])), true);
+  assert.equal(await probe({ modulesDir: '/data' }, mountinfo(root, ['/data', 'ext4'])), true, 'genau der Mountpunkt');
 });
 
 test('parseMountinfo: Mountpunkt und Dateisystemtyp, optionale Felder, Escapes', () => {
@@ -1548,6 +1743,21 @@ test('Wurzelmodul mit verschachteltem Modul darunter: dessen Ordner kommt nicht 
   assert.ok(!fs.existsSync(path.join(dir, 'plugins', 'x')), 'das andere Modul wird nicht mitkopiert');
   assert.ok(!fs.existsSync(path.join(dir, 'a')), 'auch nicht eines, das zu tief zum Anbieten liegt');
   assert.ok(!r.body.skipped.some((p) => p.startsWith('plugins/x/')), 'ein anderes Modul ist nicht "uebersprungen"');
+});
+
+test('Wurzelmodul OHNE Oberordner mit verschachteltem Modul darunter: dessen Ordner kommt ebenso wenig mit', async () => {
+  // Wie oben, aber das Modul liegt an der Wurzel des Archivs selbst: der
+  // Modulordner ist '', und jedes andere module.json liegt darunter.
+  const zip = makeZip({
+    ...moduleFiles('bare-root-mod', { extra: { 'plugins/notes.md': 'kept' } }),
+    ...moduleFiles('bare-inner-mod', { prefix: 'plugins/x/' }),
+  });
+  const r = await postZip(zip, '?path=');
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.equal(r.body.data.id, 'bare-root-mod');
+  const dir = path.join(MODULES_DIR, 'bare-root-mod');
+  assert.ok(fs.existsSync(path.join(dir, 'plugins', 'notes.md')));
+  assert.ok(!fs.existsSync(path.join(dir, 'plugins', 'x')), 'das andere Modul wird nicht mitkopiert');
 });
 
 test('Install-Limit: 409 exists und 422 multiple zaehlen nicht, Fehlversuche schon (R4)', async () => {
