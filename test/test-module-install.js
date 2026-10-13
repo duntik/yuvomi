@@ -757,6 +757,33 @@ test('GitHub-URL-Parser: ungueltige Formen → bad_url', () => {
   }
 });
 
+// Nach der Freigabe von #1671: was der Parser neben Host und Form prueft, je
+// ein Fall - die Laenge, ein kaputtes %-Escape (das ohne die Absage als
+// URIError ohne reason durchschluege), ein Release-Tag, der kein Ref-Name ist.
+// isValidRef ist dieselbe Regel fuer Tag, ref-Angabe und tree-Kandidaten.
+test('GitHub-URL-Parser: Laenge, kaputte %-Escapes und Release-Tags, die kein Ref-Name sind → bad_url', () => {
+  const base = 'https://github.com/o/r/tree/main/';
+  const at2000 = `${base}${'a'.repeat(2000 - base.length)}`;
+  assert.equal(github.parseGithubUrl(at2000).kind, 'tree', '2000 Zeichen gehen durch');
+  for (const [input, why] of [
+    [`${at2000}a`, /repository URL/],
+    ['https://github.com/o/r/tree/%ZZ', /repository URL/],
+    ['https://github.com/o/r/tree/main/%E0%A4%A', /repository URL/],
+    ['https://github.com/o/r/releases/tag/v1%20beta', /release tag is not valid/],
+    ['https://github.com/o/r/releases/tag/a%2F%2Fb', /release tag is not valid/],
+    ['https://github.com/o/r/releases/tag/%2Fv1', /release tag is not valid/],
+    ['https://github.com/o/r/releases/tag/v1%2F', /release tag is not valid/],
+  ]) {
+    assert.throws(() => github.parseGithubUrl(input), (e) => e.reason === 'bad_url' && why.test(e.message), input.slice(0, 80));
+  }
+  for (const ref of ['/main', 'main/', 'feature//x', 'a/../b', './a', '..', 'v1 beta', '', 'x'.repeat(201), 7]) {
+    assert.equal(github.isValidRef(ref), false, JSON.stringify(ref));
+  }
+  for (const ref of ['main', 'feature/x', 'v1.2.3', 'release+1', 'a.b/c-d_e', 'x'.repeat(200)]) {
+    assert.equal(github.isValidRef(ref), true, ref);
+  }
+});
+
 // Fake-Transport: Tabelle URL → Antwort; jede Anfrage wird mitgeschrieben.
 function fakeResponse(status, { json, body, headers = {} } = {}) {
   const payload = json !== undefined ? Buffer.from(JSON.stringify(json)) : (body ?? Buffer.alloc(0));
@@ -830,6 +857,38 @@ test('Ref-Aufloesung: release tag und explizite ref/path ueberschreiben', async 
   await assert.rejects(gh.resolve('o/r', { ref: '../x' }), (e) => e.reason === 'bad_url');
 });
 
+test('Ref-Aufloesung: ungueltige ref, ungueltiger Pfad und ungueltige tree-Kandidaten fragen GitHub gar nicht erst', async () => {
+  const t = fakeTransport({ [`${API}/o/r/commits/main`]: fakeResponse(200, { body: Buffer.from('f'.repeat(40)) }) });
+  const gh = github.createGithubInstaller({ request: t.request });
+  for (const ref of ['/main', 'main/', 'feature//x']) {
+    await assert.rejects(gh.resolve('o/r', { ref }), (e) => e.reason === 'bad_url' && /ref is not a valid/.test(e.message), ref);
+  }
+  // Ein uebergebener Pfad und einer aus der tree-URL gehen durch dieselbe
+  // Pruefung (normalizeSubPath); die Tabelle dazu steht bei den Pfad-Tests.
+  await assert.rejects(gh.resolve('o/r', { ref: 'main', path: 'mods/../x' }),
+    (e) => e.reason === 'bad_url' && /module path is not a valid folder path/.test(e.message));
+  assert.equal(t.calls.length, 0, 'bis hier keine Anfrage');
+  await assert.rejects(gh.resolve('https://github.com/o/r/tree/main/a%2F%2Fb'),
+    (e) => e.reason === 'bad_url' && /module path is not a valid folder path/.test(e.message));
+  // Kein Praefix von "v1 beta/x/y" ist ein Ref-Name: nichts zu fragen.
+  const none = fakeTransport({});
+  await assert.rejects(github.createGithubInstaller({ request: none.request }).resolve('https://github.com/o/r/tree/v1%20beta/x/y'),
+    (e) => e.reason === 'ref_not_found');
+  assert.deepEqual(none.calls, [], 'ein ungueltiger Kandidat wird nicht als ref an die API geschickt');
+});
+
+test('Ref-Aufloesung: kaputtes JSON und ein Repo ohne brauchbaren default_branch → github_failed', async () => {
+  const html = fakeTransport({ [`${API}/o/r/releases/latest`]: fakeResponse(200, { body: Buffer.from('<html>rate limited</html>') }) });
+  await assert.rejects(github.createGithubInstaller({ request: html.request }).resolve('o/r'),
+    (e) => e.reason === 'github_failed' && /invalid JSON/.test(e.message));
+  assert.equal(html.calls.length, 1, 'kaputtes JSON ist keine fehlende Release: der Standardzweig wird nicht gefragt');
+  for (const repo of [{}, { default_branch: 7 }, { default_branch: '' }, { default_branch: 'a//b' }]) {
+    const t = fakeTransport({ [`${API}/o/r`]: fakeResponse(200, { json: repo }) });
+    await assert.rejects(github.createGithubInstaller({ request: t.request }).resolve('o/r'),
+      (e) => e.reason === 'github_failed' && /default branch/.test(e.message), JSON.stringify(repo));
+  }
+});
+
 test('tree/<a>/<b>/<pfad>: kuerzeste existierende ref gewinnt, Rest ist der Pfad', async () => {
   const t = fakeTransport({
     [`${API}/o/r/commits/feature/x`]: fakeResponse(200, { json: { sha: 'f'.repeat(40) } }),
@@ -861,6 +920,28 @@ test('Redirect auf einen Host ausserhalb der Allowlist wird verweigert', async (
     (e) => e.reason === 'github_failed');
 });
 
+test('Redirect ohne Location, im Kreis und auf einen fremden Port → github_failed', async () => {
+  const fetchMain = (t) => github.createGithubInstaller({ request: t.request }).fetchArchive('o/r', { ref: 'main' });
+  const noLocation = fakeTransport({ [`${API}/o/r/zipball/main`]: fakeResponse(302) });
+  await assert.rejects(fetchMain(noLocation), (e) => e.reason === 'github_failed' && /302 without a location/.test(e.message));
+  assert.equal(noLocation.calls.length, 1, 'kein Ziel geraten');
+
+  const loop = fakeTransport({
+    [`${API}/o/r/zipball/main`]: fakeResponse(302, { headers: { location: 'https://codeload.github.com/o/r/a' } }),
+    'https://codeload.github.com/o/r/a': fakeResponse(302, { headers: { location: '/o/r/b' } }),
+    'https://codeload.github.com/o/r/b': fakeResponse(302, { headers: { location: '/o/r/a' } }),
+  });
+  await assert.rejects(fetchMain(loop), (e) => e.reason === 'github_failed' && /redirected too often/.test(e.message));
+  assert.equal(loop.calls.length, 6, 'die erste Anfrage und fuenf Weiterleitungen, dann ist Schluss');
+
+  // Der Host stimmt, der Port nicht: auch das ist nicht GitHub.
+  const port = fakeTransport({
+    [`${API}/o/r/zipball/main`]: fakeResponse(302, { headers: { location: 'https://codeload.github.com:8443/o/r/legacy.zip/main' } }),
+  });
+  await assert.rejects(fetchMain(port), (e) => e.reason === 'github_failed' && /codeload\.github\.com:8443/.test(e.message));
+  assert.deepEqual(port.calls.map((c) => c.url), [`${API}/o/r/zipball/main`], 'der fremde Port wird nie angefragt');
+});
+
 test('Rate-Limit von GitHub (403, remaining 0) → 429 rate_limited mit resetAt', async () => {
   const t = fakeTransport({
     [`${API}/o/r/releases/latest`]: fakeResponse(403, { headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1900000000' } }),
@@ -886,6 +967,24 @@ test('Download ueber der Grenze → too_large (Content-Length und gestreamt)', a
   });
   await assert.rejects(github.createGithubInstaller({ request: streamed.request, maxBytes: 1024 }).fetchArchive('o/r', { ref: 'main' }),
     (e) => e.reason === 'too_large');
+});
+
+test('Content-Length ueber der Grenze: abgewiesen, bevor ein Byte gelesen ist; kein Archiv zur ref → ref_not_found', async () => {
+  // Der Rumpf ist klein, nur die Ansage ist zu gross: ohne die Pruefung der
+  // Ansage laese der Installer ihn und kaeme durch.
+  let pulled = 0;
+  const body = new Readable({ read() { pulled += 1; this.push(Buffer.alloc(10)); this.push(null); } });
+  const declared = fakeTransport({
+    [`${API}/o/r/zipball/main`]: () => ({ ...fakeResponse(200, { headers: { 'content-length': '2048' } }), body }),
+  });
+  await assert.rejects(github.createGithubInstaller({ request: declared.request, maxBytes: 1024 }).fetchArchive('o/r', { ref: 'main' }),
+    (e) => e.reason === 'too_large' && e.status === 413);
+  assert.equal(pulled, 0, 'kein Byte des Rumpfs gelesen');
+  assert.equal(body.destroyed, true, 'und die Verbindung geschlossen');
+
+  const none = fakeTransport({});
+  await assert.rejects(github.createGithubInstaller({ request: none.request }).fetchArchive('o/r', { ref: 'v9' }),
+    (e) => e.reason === 'ref_not_found' && e.status === 404 && /no archive for "v9"/.test(e.message));
 });
 
 test('Netzfehler und Timeout → github_failed, ohne die rohe Fehlermeldung', async () => {
