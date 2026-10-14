@@ -517,10 +517,23 @@ async function lstatOrNull(p) {
   }
 }
 
+// The two names an install makes in modules/, and the only ones the clean-up
+// touches. A prefix alone is not enough: `modules/.install-notes` or a copy
+// the operator made as `.backup-<id>-20261001` is theirs, and the web removes
+// only what it put there itself (docs/DECISIONS.md, entry 12).
+// Staging: `.install-` and randomBytes(8) as 16 lowercase hex characters.
+const STAGING_NAME_RE = /^\.install-[0-9a-f]{16}$/;
+const stagingName = () => `.install-${randomBytes(8).toString('hex')}`;
+// Backup: `.backup-<id>-<Date.now()>`, 13 digits (until the year 2286). The id
+// may contain hyphens; the greedy group leaves the last `-<digits>` to the time.
+const BACKUP_NAME_RE = /^\.backup-([a-z0-9-]+)-(\d{13})$/;
+const backupName = (id) => `.backup-${id}-${Date.now()}`;
+
 /**
- * Removes staging folders a crashed install left behind. Only `.install-*`:
- * a `.backup-*` folder may be the last copy of the admin's module, and only
- * recoverInterruptedInstalls() at startup decides what happens to it.
+ * Removes staging folders a crashed install left behind. Only staging names
+ * (STAGING_NAME_RE): a `.backup-*` folder may be the last copy of the admin's
+ * module, and only recoverInterruptedInstalls() at startup decides what
+ * happens to it.
  */
 export async function cleanupStaleStaging(now = Date.now()) {
   let entries = [];
@@ -530,7 +543,7 @@ export async function cleanupStaleStaging(now = Date.now()) {
     return;
   }
   for (const name of entries) {
-    if (!name.startsWith('.install-')) continue;
+    if (!STAGING_NAME_RE.test(name)) continue;
     const full = path.join(MODULES_DIR, name);
     try {
       const st = await fs.lstat(full);
@@ -541,14 +554,11 @@ export async function cleanupStaleStaging(now = Date.now()) {
   }
 }
 
-// `.backup-<id>-<Date.now()>`, as installFilesUnlocked names it. The id may
-// contain hyphens; the greedy group leaves the last `-<digits>` to the time.
-const BACKUP_NAME_RE = /^\.backup-([a-z0-9-]+)-(\d+)$/;
-
 /**
  * The backups a replace left in modules/, as `Map<id, { target, list }>` with
  * the newest first. Only what a replace makes counts: a folder (no link, no
- * file) with a backup name for a valid id that carries an install record. A
+ * file) under exactly the name backupName() gives, for a valid id, that
+ * carries an install record. Any other `.backup-*` name is logged and left. A
  * hand-made folder under such a name has no record, and without one the
  * loader would run it as enabled - it is the operator's, logged and left.
  */
@@ -556,7 +566,16 @@ async function collectBackups(entries, onlyId = null) {
   const byId = new Map();
   for (const name of entries) {
     const match = BACKUP_NAME_RE.exec(name);
-    if (!match || (onlyId !== null && match[1] !== onlyId)) continue;
+    if (!match) {
+      // For one id, only names that cannot belong to a longer id: deleting
+      // `web` must not report `.backup-web-mod-...`, which is web-mod's.
+      const prefix = onlyId === null ? '.backup-' : `.backup-${onlyId}-`;
+      if (name.startsWith(prefix) && (onlyId === null || !name.slice(prefix.length).includes('-'))) {
+        log.warn(`Skipped ${name}: not a name a replace makes. Left for the operator.`);
+      }
+      continue;
+    }
+    if (onlyId !== null && match[1] !== onlyId) continue;
     // moduleFolderPath: the same id rule and prefix check as every other
     // path built from an id; a name it refuses is not ours and stays.
     const target = moduleFolderPath(match[1]);
@@ -585,16 +604,19 @@ async function collectBackups(entries, onlyId = null) {
  * if the process dies in between, modules/<id> is gone and the old version
  * sits in a dot-folder that listModules() never shows - the module vanished
  * from the page with nothing to explain it. Here, before the first scan:
- *  - every `.install-*` staging folder is removed (no install runs yet, so
- *    none of them is in use, whatever its age);
+ *  - every staging folder is removed (no install runs yet, so none of them is
+ *    in use, whatever its age); only exact staging names, any other
+ *    `.install-*` is logged and left;
  *  - for an id whose modules/<id> is missing, the newest backup is renamed
  *    back, switched OFF first (`approved: false` in its record): like every
  *    replace, nothing comes back live without an admin looking at it;
  *  - backups of an id whose modules/<id> exists are removed: the swap went
  *    through and only the clean-up after it was lost.
- * Only backups with an install record are touched (collectBackups). Never
- * throws: a missing or read-only modules folder is logged, and the server
- * starts as before. Takes the install lock, so even a later call can never
+ * Only backups under an exact backup name with an install record are touched
+ * (collectBackups). This runs whether or not MODULES_ALLOW_WEB_INSTALL is set:
+ * a module that vanished comes back (off) even if the switch was closed after
+ * the crash. Never throws: a missing or read-only modules folder is logged,
+ * and the server starts as before. Takes the install lock, so even a later call can never
  * pull a folder from under a running install. The lock is per process: this
  * assumes one Yuvomi per modules folder (two containers sharing a modules
  * volume during a rolling update could remove each other's staging).
@@ -616,6 +638,10 @@ export async function recoverInterruptedInstalls() {
 
     for (const name of entries) {
       if (!name.startsWith('.install-')) continue;
+      if (!STAGING_NAME_RE.test(name)) {
+        log.warn(`Skipped ${name}: not a name an install makes. Left for the operator.`);
+        continue;
+      }
       try {
         const st = await fs.lstat(path.join(MODULES_DIR, name));
         if (!st.isDirectory()) continue;
@@ -737,7 +763,7 @@ export async function installFilesUnlocked(files, opts = {}) {
     approved: false,
   };
 
-  const stagingRoot = path.join(MODULES_DIR, `.install-${randomBytes(8).toString('hex')}`);
+  const stagingRoot = path.join(MODULES_DIR, stagingName());
   const stageDir = path.join(stagingRoot, id);
   // The second lock on the id, as writeStaged has one on each file name: the
   // id rule in readManifest already keeps `/`, `\` and `.` out, but if it is
@@ -797,7 +823,7 @@ export async function installFilesUnlocked(files, opts = {}) {
       // rename lands the new code is off - no switch to flip before the swap,
       // and nothing to put back when the swap fails and the old folder returns
       // with its own record.
-      const backup = path.join(MODULES_DIR, `.backup-${id}-${Date.now()}`);
+      const backup = path.join(MODULES_DIR, backupName(id));
       await fsOps.rename(target, backup);
       try {
         await fsOps.rename(stageDir, target);
@@ -892,14 +918,20 @@ export function deleteModule(id, { userId } = {}) {
     }
     await fs.rm(target, { recursive: true, force: true });
     // A backup an earlier replace could not remove (its last step only logs)
-    // would otherwise bring the deleted module back at the next start.
-    const leftovers = (await collectBackups(await fs.readdir(MODULES_DIR).catch(() => []), id)).get(id)?.list || [];
-    for (const { name } of leftovers) {
-      try {
-        await fsOps.rm(path.join(MODULES_DIR, name), { recursive: true, force: true });
-      } catch (err) {
-        log.warn(`Could not remove backup folder ${name} of the deleted module ${id}:`, err?.message);
+    // would otherwise bring the deleted module back at the next start. The
+    // module is gone at this point: a failure here is logged, never a 500, and
+    // the household switch below is still cleared.
+    try {
+      const leftovers = (await collectBackups(await fs.readdir(MODULES_DIR).catch(() => []), id)).get(id)?.list || [];
+      for (const { name } of leftovers) {
+        try {
+          await fsOps.rm(path.join(MODULES_DIR, name), { recursive: true, force: true });
+        } catch (err) {
+          log.warn(`Could not remove backup folder ${name} of the deleted module ${id}:`, err?.message);
+        }
       }
+    } catch (err) {
+      log.warn(`Could not look for backup folders of the deleted module ${id}:`, err?.message);
     }
     // The household switch is cleared so that a later reinstall of the same id
     // is judged by its own record, not by a stale entry.

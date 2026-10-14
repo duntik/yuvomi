@@ -158,6 +158,14 @@ function isRateLimited(res) {
   return res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after') !== null;
 }
 
+// A time far beyond what a Date can hold (`retry-after: 99999999999999999`)
+// is no time at all: toISOString() would throw a RangeError and turn the
+// answer into a 500. Without a usable time the message says "later".
+function isoOrNull(ms) {
+  const date = new Date(ms);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
 function rateLimitError(res) {
   // retry-after first: GitHub's own rule for the secondary limit, whose
   // x-ratelimit-reset names the end of the hourly window, not the wait. Only
@@ -166,9 +174,9 @@ function rateLimitError(res) {
   const reset = Number(res.headers.get('x-ratelimit-reset'));
   let resetAt = null;
   if (retryHeader !== null && /^\s*\d+\s*$/.test(retryHeader)) {
-    resetAt = new Date(Date.now() + Number(retryHeader) * 1000).toISOString();
+    resetAt = isoOrNull(Date.now() + Number(retryHeader) * 1000);
   } else if (res.headers.get('x-ratelimit-remaining') === '0' && Number.isFinite(reset) && reset > 0) {
-    resetAt = new Date(reset * 1000).toISOString();
+    resetAt = isoOrNull(reset * 1000);
   }
   return new InstallError('rate_limited',
     `GitHub is limiting requests from this server.${resetAt ? ` Try again after ${resetAt}.` : ' Try again later.'}`,
