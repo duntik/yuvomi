@@ -954,10 +954,14 @@ test('eine abgeschnittene Kopie mit richtigem Schluessel heisst beschaedigt, nic
 });
 
 const ALS_ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
+// Unter Windows setzt chmod nur den Schreibschutz: eine Datei bleibt lesbar
+// und ein Ordner beschreibbar, die Vorbedingung dieser Faelle entsteht nie.
+const OHNE_DATEIRECHTE = (ALS_ROOT && 'root ignoriert Dateirechte - der Fall ist so nicht herstellbar')
+  || (process.platform === 'win32' && 'chmod entzieht unter Windows keine Lese- oder Schreibrechte - der Fall ist so nicht herstellbar');
 
 test(
   'ein Datenverzeichnis ohne Schreibrecht nennt den Code und behauptet nichts ueber den Schluessel',
-  { skip: ALS_ROOT && 'root ignoriert Dateirechte - der Fall ist so nicht herstellbar' },
+  { skip: OHNE_DATEIRECHTE },
   async () => {
     const dir = tmpDir();
     const eigene = join(dir, 'yuvomi.db');
@@ -1004,7 +1008,7 @@ test(
 
 test(
   'ein Journal ohne Zugriffsrecht nennt den Code und behauptet nichts ueber den Schluessel',
-  { skip: ALS_ROOT && 'root ignoriert Dateirechte - der Fall ist so nicht herstellbar' },
+  { skip: OHNE_DATEIRECHTE },
   async () => {
     const dir = tmpDir();
     const eigene = join(dir, 'yuvomi.db');
@@ -1243,7 +1247,7 @@ function cliRestore(backupPath, { dbPath, key }) {
 for (const [fall, key] of [['mit Schluessel', KEY], ['ohne Schluessel', null]]) {
   test(
     `CLI-Restore ${fall}: eine Backup-Datei ohne Leserecht nennt den Code und behauptet nichts ueber den Schluessel`,
-    { skip: ALS_ROOT && 'root ignoriert Dateirechte - der Fall ist so nicht herstellbar' },
+    { skip: OHNE_DATEIRECHTE },
     async () => {
       const backupPath = await backupFromInstance(key);
       assert.equal(isPlaintext(backupPath), key === null, 'Vorbedingung: das Backup ist so verschluesselt wie seine Instanz');
