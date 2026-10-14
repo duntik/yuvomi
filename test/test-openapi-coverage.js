@@ -26,7 +26,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildOpenApiSpec } from '../server/openapi.js';
 
@@ -129,7 +129,7 @@ function routerSources(entry, prefix = '', seen = new Map()) {
   // Praefix des Elternrouters.
   for (const [, file] of imports) {
     if (mounted.has(file)) continue;
-    if (!file.includes(`${resolve(ROOT, 'server/routes')}/`)) continue;
+    if (!file.includes(`${resolve(ROOT, 'server/routes')}${sep}`)) continue;
     routerSources(file, prefix, seen);
   }
   return seen;
@@ -212,7 +212,7 @@ test('der Router-Verfolger sieht auch die aufgeteilten Module', () => {
   // weil er wie Abdeckung aussieht.
   const routes = allRoutes();
   for (const part of ['routes/calendar/', 'routes/budget/', 'routes/health/', 'routes/inventory/']) {
-    assert.ok(routes.some((r) => r.file.includes(part)),
+    assert.ok(routes.some((r) => r.file.split(sep).join('/').includes(part)),
       `keine Route aus ${part} gefunden - der Verfolger geht nicht in die Unterdateien`);
   }
 });

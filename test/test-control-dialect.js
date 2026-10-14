@@ -48,7 +48,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -73,10 +73,10 @@ function walk(dir, out = []) {
 const ALL_FILES = walk(PUBLIC);
 const JS = ALL_FILES
   .filter((f) => f.endsWith('.js') && !f.endsWith('.min.js'))
-  .map((f) => ({ file: relative(REPO, f), src: readFileSync(f, 'utf8') }));
+  .map((f) => ({ file: relative(REPO, f).split(sep).join('/'), src: readFileSync(f, 'utf8') }));
 const CSS = ALL_FILES
   .filter((f) => f.endsWith('.css'))
-  .map((f) => ({ file: relative(REPO, f), src: readFileSync(f, 'utf8') }));
+  .map((f) => ({ file: relative(REPO, f).split(sep).join('/'), src: readFileSync(f, 'utf8') }));
 
 const lineOf = (src, index) => src.slice(0, index).split('\n').length;
 

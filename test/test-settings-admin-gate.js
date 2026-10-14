@@ -32,7 +32,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { join, posix, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withoutCommentsKeepingLines } from './source-text.js';
 
@@ -94,7 +94,7 @@ function collectMounts() {
     for (const [sub, name] of nested) {
       const rel = local.get(name);
       if (!rel) continue;
-      expanded.push({ prefix: mount.prefix + sub, file: resolve('/' + dirname(mount.file), rel).slice(1) });
+      expanded.push({ prefix: mount.prefix + sub, file: posix.resolve('/' + posix.dirname(mount.file), rel).slice(1) });
     }
     // Ein Sammelrouter kann neben den Untermodulen eigene Routen halten.
     expanded.push(mount);
