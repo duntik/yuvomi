@@ -613,7 +613,7 @@ test('jeder stumme Grund hat einen eigenen Diagnosetext', () => {
   // an der Stelle, die die falsche Meldung ihm nennt. Genau so ist
   // `prompt-verworfen` am 18.09. entstanden, und niemand haette gemerkt, wenn
   // sein Text vergessen worden waere.
-  const quelle = readFileSync(new URL(SKRIPT, 'file:'), 'utf8');
+  const quelle = readFileSync(SKRIPT, 'utf8');
   const gruende = [...quelle.matchAll(/stumm\('([a-z-]+)'/g)].map((t) => t[1]);
   assert.ok(gruende.length >= 8, `nur ${gruende.length} Gruende gefunden - die Suche greift nicht mehr`);
   for (const grund of new Set(gruende)) {

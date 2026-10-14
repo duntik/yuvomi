@@ -20,7 +20,10 @@ import { tempDir } from './tmp-dir.js';
 // DB_PATH vor dem Import auf eine Wegwerf-Datei: db.js migriert beim Modul-Load.
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-secret';
 process.env.DB_PATH = join(tempDir('yuvomi-accmig-'), 'unused.db');
-const { MIGRATIONS } = await import('../server/db.js');
+const { MIGRATIONS, get } = await import('../server/db.js');
+// Die beim Import geoeffnete DB schliessen: unter Windows kann tempDir() sie
+// beim Prozessende sonst nicht loeschen (EPERM), und test:tmp-clean findet Reste.
+test.after(() => get().close());
 
 const V181 = MIGRATIONS.find((m) => m.version === 181);
 
