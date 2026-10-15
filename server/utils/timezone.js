@@ -41,8 +41,12 @@ export function isValidTimeZone(zone) {
 export function serverTimeZone() {
   const envTz = (process.env.TZ || '').trim();
   if (envTz && isValidTimeZone(envTz)) return envTz;
+  // Auch die System-Zone wird geprüft: ICU meldet für ein TZ, das es nicht
+  // kennt, je nach Plattform `Etc/Unknown` (Windows), und diesen Namen lehnt
+  // Intl.DateTimeFormat selbst als Zone ab.
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return isValidTimeZone(systemTz) ? systemTz : 'UTC';
   } catch { return 'UTC'; }
 }
 

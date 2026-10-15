@@ -88,6 +88,32 @@ test('serverTimeZone: ein ungueltiges TZ faellt auf die Systemzone', () => {
   } finally { process.env.TZ = prev; }
 });
 
+test('serverTimeZone: eine Systemzone, die keine ist, faellt auf UTC', () => {
+  // Windows-ICU meldet fuer ein unbekanntes TZ `Etc/Unknown`, das Linux-ICU
+  // nicht. Damit die CI den Zweig trotzdem sieht, liefert hier ein Stub die
+  // Systemzone; jeder Aufruf MIT Zone geht an das echte Intl.DateTimeFormat,
+  // isValidTimeZone urteilt also wie in Produktion.
+  const Real = Intl.DateTimeFormat;
+  const prev = process.env.TZ;
+  const withSystemZone = (systemTz, fn) => {
+    Intl.DateTimeFormat = function (locales, options) {
+      const real = new Real(locales, options);
+      if (options?.timeZone !== undefined) return real;
+      return { resolvedOptions: () => ({ ...real.resolvedOptions(), timeZone: systemTz }) };
+    };
+    try { return fn(); } finally { Intl.DateTimeFormat = Real; }
+  };
+  try {
+    process.env.TZ = 'Nicht/EineZone';
+    assert.equal(withSystemZone('Etc/Unknown', serverTimeZone), 'UTC');
+    assert.equal(withSystemZone(undefined, serverTimeZone), 'UTC');
+    // Gegenprobe: der Stub erreicht die Funktion wirklich. Ohne diese Zeile
+    // koennte der Test auf einem Rechner in UTC gruen sein, auch wenn der
+    // Stub nie greift.
+    assert.equal(withSystemZone('Asia/Tokyo', serverTimeZone), 'Asia/Tokyo');
+  } finally { process.env.TZ = prev; }
+});
+
 test('isValidTimeZone: kennt Aliase, weist Unsinn ab', () => {
   assert.ok(isValidTimeZone('Europe/Berlin'));
   assert.ok(isValidTimeZone('UTC'));

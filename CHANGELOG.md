@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A server whose `TZ` names an unknown time zone now runs in UTC.** Without a household time zone
+  in Settings, the server falls back to `TZ` and then to the zone the system reports. With `TZ` set
+  to a name the system does not know, some systems (Windows, for example) report `Etc/Unknown`,
+  which is not a time zone: Settings showed it as the effective zone, and the date helpers could not
+  use it and each fell back in its own way. In that case the server now uses UTC. A valid `TZ` and a
+  household time zone set in Settings work as before.
+
 - **Installing a custom module from Settings copes with more of what can go wrong.** When GitHub
   slows down a server that asks too often in a short time, the page now says GitHub's limit is
   reached, with the time to try again where GitHub names one, instead of "GitHub answered with
