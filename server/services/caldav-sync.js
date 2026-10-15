@@ -24,7 +24,7 @@ import { processPendingDeletions, processPendingUpdates, flushAccount, ObjectInd
 import { detachAccountRows } from './caldav-todo-outbound.js';
 import { runSerialized } from '../utils/sync-lock.js';
 import { toICSDatetime, escapeICSText } from '../utils/ics-format.js';
-import { eventDateTimeFields } from '../utils/ics-datetime.js';
+import { eventDateTimeFields, rruleForDtstart } from '../utils/ics-datetime.js';
 import { vtimezoneFor } from '../utils/vtimezone.js';
 import { householdTimeZone } from '../utils/timezone.js';
 import { createCalDAVClient, supportsComponent, createUploadGate, withAccountOrigin } from '../utils/caldav-client.js';
@@ -33,6 +33,7 @@ import { sameCredentialOrigin } from '../utils/credential-origin.js';
 import { rruleLine } from './recurrence.js';
 import { nearestIcalColorName } from '../utils/ical-color.js';
 import { authoredAfterInbound, outboundEvent } from './outbound-dtstart.js';
+import { icsReading, icsSnapshot, isEcho } from './outbound-echo.js';
 import { followInboundStartChange } from './calendar-occurrence-overrides.js';
 
 // Reused functions from apple-calendar.js
@@ -56,7 +57,7 @@ function buildCalDAVICS(event, householdZone = null) {
   // sondern eine Uhrzeit ohne Uhr.
   // Start/Ende mit der eigenen Wiederholungsregel in Einklang (#986); ein
   // importiertes DTSTART bleibt unberuehrt (#756).
-  const when = eventDateTimeFields(outboundEvent(event), householdZone);
+  const when = eventDateTimeFields(outboundEvent(event, { householdZone }), householdZone);
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -81,8 +82,10 @@ function buildCalDAVICS(event, householdZone = null) {
   const colorName = nearestIcalColorName(event.color);
   if (colorName) lines.push(`COLOR:${colorName}`);
 
+  // Ein reines Datum als UNTIL wird neben einem getimten DTSTART zum Ende des
+  // Ortstags in UTC (#1974, utils/rrule-until.js).
   if (event.recurrence_rule) {
-    lines.push(rruleLine(event.recurrence_rule));
+    lines.push(rruleLine(rruleForDtstart(event.recurrence_rule, when)));
   }
 
   lines.push('END:VEVENT', 'END:VCALENDAR');
@@ -942,8 +945,8 @@ async function runSync({ createClient } = {}) {
   // großen Kalendern spürbar Zeit und verkürzt damit das synchrone Verarbeitungsfenster.
   const conn = db.get();
   const selEventsWithUid = conn.prepare(`
-    SELECT id, outbound_dirty, calendar_ref_id, start_datetime, color, color_modified,
-           caldav_account_id, external_object_url, recurrence_rule, series_authored
+    SELECT id, outbound_dirty, calendar_ref_id, start_datetime, end_datetime, all_day, color, color_modified,
+           caldav_account_id, external_object_url, recurrence_rule, tzid, series_authored, outbound_snapshot
     FROM calendar_events
     WHERE external_calendar_id = ? AND external_source = 'caldav'
     ORDER BY id
@@ -1373,12 +1376,25 @@ async function runSync({ createClient } = {}) {
                 // anderer Start oder eine andere Regel in die Zeile kommt, als
                 // dort stand - auch der ausgerichtete Start, den Yuvomi selbst
                 // hinaufgegeben hat (services/outbound-dtstart.js).
-                // Geschrieben wird wie bisher.
+                //
+                // AUSSER BEIM ECHO DES EIGENEN PUSHS (#1956,
+                // services/outbound-echo.js): dann bleiben Start, Ende,
+                // ganztaegig, Regel und Zone wie eingegeben, die Marke bleibt,
+                // und die Erinnerungen wandern nicht (derselbe Start).
+                const echo = isEcho(existing, icsReading(ev));
+                const when = echo
+                  ? {
+                    dtstart: existing.start_datetime, dtend: existing.end_datetime, allDay: !!existing.all_day,
+                    rrule: existing.recurrence_rule, tzid: existing.tzid,
+                  }
+                  : ev;
                 const values = [
-                  ev.summary, ev.description, ev.dtstart, ev.dtend,
-                  ev.allDay ? 1 : 0, ev.location, ev.rrule, ev.tzid ?? null, evColor, calRefId,
+                  ev.summary, ev.description, when.dtstart, when.dtend,
+                  when.allDay ? 1 : 0, ev.location, when.rrule, when.tzid ?? null, evColor, calRefId,
                   obj.url ?? null,
-                  authoredAfterInbound(existing, { start_datetime: ev.dtstart, recurrence_rule: ev.rrule }),
+                  echo
+                    ? existing.series_authored
+                    : authoredAfterInbound(existing, { start_datetime: ev.dtstart, recurrence_rule: ev.rrule }),
                 ];
                 // `hasColor`, nicht `evColor`: auch eine COLOR-Zeile mit einem
                 // unlesbaren Wert (etwa #RRGGBBAA) sagt, dass der Server ueber
@@ -1393,7 +1409,7 @@ async function runSync({ createClient } = {}) {
                 changed = updEvent.run(...values, existing.id, ...values).changes > 0;
                 eventId = existing.id;
                 // Auf dem Server verschoben (#1377): die Erinnerungen ziehen mit.
-                if (changed) followInboundStartChange(conn, eventId, existing.start_datetime, ev.dtstart);
+                if (changed) followInboundStartChange(conn, eventId, existing.start_datetime, when.dtstart);
                 // Von einem Kalender in einen anderen verschoben (#1270): die
                 // unangetastete Standard-Zuweisung zieht mit um.
                 reassignDefaultOnCalendarMove(db.get(), eventId, {
@@ -1557,6 +1573,7 @@ async function runSync({ createClient } = {}) {
           const booked = outbound.bookEventUpload(event, {
             source: 'caldav', uid, objectUrl, calRefId, adopted, accountId: account.id,
             calendarUrl: event.target_caldav_calendar_url,
+            snapshot: icsSnapshot(event, icsData, uid, householdZone),
           });
           if (booked !== 'mirrored') continue;
 

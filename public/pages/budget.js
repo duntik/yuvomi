@@ -27,7 +27,7 @@ import { renderPlans, openAddPlan } from '/pages/budget-plans.js';
 import { toLocalDateKey, parseLocalDateKey, addLocalDays,
          monthPeriodKeys, defaultDateInPeriod,
         todayKey} from '/utils/date.js';
-import { formatMoney, formatSignedAmount, amountPlaceholder, amountStep, amountMin, applyAmountFormat, amountIsSavable, smallestUnitLabel } from '/utils/money.js';
+import { formatMoney, formatSignedAmount, amountPlaceholder, amountStep, amountMin, applyAmountFormat, amountIsSavable, smallestUnitLabel, sharePercent } from '/utils/money.js';
 import { budgetCategoryLabel } from '/utils/category-labels.js';
 import { trendMarkup, leadCardClass } from '/utils/metric-card.js';
 import { installPopoverMenus } from '/utils/popover-menu.js';
@@ -1699,6 +1699,11 @@ function blockTotal(rows) {
   return rows.reduce((sum, r) => sum + r.amount, 0);
 }
 
+/* Wie in der Statistik: der Anteil steht nur bei Ausgaben, leise hinter dem Betrag. */
+function shareHtml(part, total) {
+  return ` <span class="budget-bar-row__share">${esc(sharePercent(part, total))}</span>`;
+}
+
 // Screenreader-Zusammenfassung des Kategorie-Diagramms (Audit 1.7): je Block
 // Anzahl Kategorien + groesster Posten mit Anteil AM BLOCK - seit den
 // getrennten Skalen ist ein Anteil an Einnahmen plus Ausgaben keine Aussage
@@ -1894,6 +1899,7 @@ function renderCategoryBars(byCategory) {
     const rows = blocks[kind];
     // DAS EIGENE MAXIMUM DES BLOCKS (siehe categoryBlocks).
     const max = Math.max(...rows.map((r) => Math.abs(r.amount)), 1);
+    const total = blockTotal(rows);
     const titleId = `budget-chart-${kind}-title`;
     const lead = kind === leadKind;
     return `
@@ -1931,7 +1937,7 @@ function renderCategoryBars(byCategory) {
               <span class="budget-bar-row__track" style="--bar-visible:${r.amount !== 0 ? 1 : 0}">
                 <span class="budget-bar-row__fill budget-bar-row__fill--${kind}" style="--bar-scale:${scale.toFixed(4)}" data-bar-key="${kind}:${esc(String(r.category))}"></span>
               </span>
-              <span class="budget-bar-row__amount">${amountByRole(r.amount, 'flow').text}</span>
+              <span class="budget-bar-row__amount">${amountByRole(r.amount, 'flow').text}${kind === 'expenses' ? shareHtml(r.amount, total) : ''}</span>
             </button>`;
           }).join('')}
         </div>
@@ -1994,7 +2000,7 @@ function subcategoryRows(category, entries) {
                 style="--bar-scale:${scale}"></span>
         </span>
         <span class="budget-bar-row__amount">
-          ${amountByRole(row.amount, 'flow').text}
+          ${amountByRole(row.amount, 'flow').text}${kind === 'expenses' && row.amount !== 0 ? shareHtml(row.amount, categoryTotal) : ''}
         </span>
       </button>`;
   }).join('');

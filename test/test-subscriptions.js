@@ -444,8 +444,16 @@ try {
     assert.equal(renew2.body.data.enabled, false);
     assert.equal(renew2.body.data.occurrences_remaining, 0);
     assert.ok(renew2.body.data.completed_at, 'completed_at gesetzt');
-    // Abschluss entfernt Budget-Eintrag und Erinnerung.
-    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM budget_entries WHERE id = ?').get(countedEntryId).n, 0);
+    // Abschluss behaelt die letzte bezahlte Buchung (#2004, Entscheidung zu #2008):
+    // sie bleibt am bezahlten Tag stehen und ist nicht mehr verknuepft; eine
+    // naechste entsteht nicht. Die Erinnerung geht (#594).
+    assert.deepEqual(
+      { ...database.prepare('SELECT date, amount FROM budget_entries WHERE id = ?').get(countedEntryId) },
+      { date: '2027-02-15', amount: -100 },
+      'die letzte bezahlte Zahlung steht im Budget',
+    );
+    assert.equal(renew2.body.data.budget_entry_id, null, 'nicht mehr verknuepft');
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM budget_entries WHERE title = 'Rate' AND date > '2027-02-15'").get().n, 0, 'keine naechste Buchung');
     assert.equal(database.prepare("SELECT COUNT(*) AS n FROM reminders WHERE entity_type = 'subscription' AND entity_id = ?").get(countedId).n, 0);
 
     // Status-Filter: completed sieht das Abo, active nicht.
@@ -466,6 +474,115 @@ try {
     assert.equal(dated.body.data.end_type, 'on_date');
     const datedRenew = await jsonReq('POST', `/${dated.body.data.id}/renew`, {});
     assert.equal(datedRenew.body.data.status, 'completed');
+
+    // "Bezahlt" auf einem abgeschlossenen Abo (#2011): 409 mit seinem Grund,
+    // und nichts aendert sich - kein weiterer Zaehler, kein neuer Abschluss,
+    // kein weiter vorgerueckter Tag, keine Buchung. Vorher zaehlte jeder Klick
+    // eine Zahlung, die es nie gab, und ein spaeteres Reaktivieren begann zu spaet.
+    const subRow = (id) => ({ ...database.prepare(
+      'SELECT occurrences_done, completed_at, next_payment_date, enabled, budget_entry_id FROM budget_subscriptions WHERE id = ?',
+    ).get(id) });
+    const entryCount = () => database.prepare('SELECT COUNT(*) AS n FROM budget_entries').get().n;
+    const once = await jsonReq('POST', '', { ...endBase, name: 'Einmal', next_payment_date: '2027-01-20', end_type: 'after_count', occurrence_count: 1 });
+    assert.equal((await jsonReq('POST', `/${once.body.data.id}/renew`, {})).body.data.status, 'completed');
+    for (const id of [once.body.data.id, dated.body.data.id]) {
+      assert.ok(subRow(id).completed_at, `${id} ist abgeschlossen`);
+      // Ein frueherer Abschlusszeitpunkt, damit ein neu gesetztes completed_at
+      // auffiele (strftime hat Sekundenaufloesung).
+      database.prepare("UPDATE budget_subscriptions SET completed_at = '2020-01-01T00:00:00Z' WHERE id = ?").run(id);
+      const before = subRow(id);
+      const entriesBefore = entryCount();
+      const refused = await jsonReq('POST', `/${id}/renew`, {});
+      assert.equal(refused.status, 409, `abgeschlossen ${id}: ${JSON.stringify(refused.body)}`);
+      assert.equal(refused.body.reason, 'subscriptions_subscription_completed');
+      assert.deepEqual(subRow(id), before, `abgeschlossen ${id}: Zaehler, Abschluss und Datum unveraendert`);
+      assert.equal(entryCount(), entriesBefore, `abgeschlossen ${id}: keine Buchung`);
+      assert.equal(database.prepare("SELECT COUNT(*) AS n FROM reminders WHERE entity_type = 'subscription' AND entity_id = ?").get(id).n, 0, 'keine Erinnerung');
+    }
+
+    // Reaktivieren nach dem Abschluss (#2009): der bezahlte Tag ist bezahlt.
+    // Der Abschluss rueckte das Datum nicht vor, also buchte eine Reaktivierung
+    // den letzten bezahlten Tag ein zweites Mal - seit #2008 sichtbar, weil die
+    // letzte Buchung beim Abschluss stehen bleibt; davor zaehlte der Tag
+    // unsichtbar doppelt. Danach: genau eine Buchung je bezahltem Tag, und die
+    // erste neue faellt auf den naechsten Tag.
+    const paidDays = (name) => database.prepare(
+      'SELECT date, COUNT(*) AS n FROM budget_entries WHERE title = ? GROUP BY date ORDER BY date',
+    ).all(name).map((row) => [row.date, row.n]);
+    const reactivationCases = [
+      { name: 'Kurs 2009 count', create: { end_type: 'after_count', occurrence_count: 1 }, reactivate: { enabled: true, occurrence_count: 3 } },
+      { name: 'Kurs 2009 date', create: { end_type: 'on_date', end_date: '2028-01-20' }, reactivate: { enabled: true, end_date: '2028-03-31' } },
+      { name: 'Kurs 2009 never', create: { end_type: 'after_count', occurrence_count: 1 }, reactivate: { enabled: true, end_type: 'never' } },
+    ];
+    for (const { name, create, reactivate } of reactivationCases) {
+      const made = await jsonReq('POST', '', { ...endBase, name, next_payment_date: '2028-01-15', ...create });
+      assert.equal(made.status, 201, name);
+      const subId = made.body.data.id;
+      const done = await jsonReq('POST', `/${subId}/renew`, {});
+      assert.equal(done.body.data.status, 'completed', `${name}: die einzige Zahlung schliesst ab`);
+      assert.ok(done.body.data.completed_at, `${name}: completed_at`);
+      assert.equal(done.body.data.occurrences_done, 1, `${name}: eine Zahlung geleistet`);
+      assert.equal(done.body.data.next_payment_date, '2028-02-15', `${name}: der Abschluss rueckt hinter den bezahlten Tag vor`);
+      assert.equal(done.body.data.budget_entry_id, null, `${name}: keine verknuepfte naechste Buchung`);
+      assert.deepEqual(paidDays(name), [['2028-01-15', 1]], `${name}: die letzte bezahlte Buchung steht einmal`);
+      // Bearbeiten, ohne zu reaktivieren (Review-Runde 1 zu #2010): der Dialog
+      // schickt bei jedem Speichern ALLE Felder, hier mit nur einer neuen Notiz.
+      // Das vorgerueckte Datum liegt bei `on_date` nach dem Ende, der Zaehler
+      // bei `after_count` ist erreicht - beides darf das Speichern nicht
+      // ablehnen, solange das Abo abgeschlossen bleibt.
+      const row = done.body.data;
+      const dialogPayload = {
+        name: row.name, description: row.description, amount: row.amount, currency: row.currency,
+        billing_cycle: row.billing_cycle, cycle_interval: row.cycle_interval,
+        next_payment_date: row.next_payment_date, reminder_days: row.reminder_days,
+        reminder_enabled: row.reminder_enabled, category_id: row.category_id, payment_method_id: row.payment_method_id,
+        website_url: row.website_url, brand_color: row.brand_color || '#0F766E', logo_data: row.logo_data,
+        notes: 'nur die Notiz', account_username: row.account_username, enabled: false,
+        end_type: row.end_type, end_date: row.end_date, occurrence_count: row.occurrence_count,
+      };
+      const noted = await jsonReq('PUT', `/${subId}`, dialogPayload);
+      assert.equal(noted.status, 200, `${name}: eine Notiz am abgeschlossenen Abo: ${JSON.stringify(noted.body)}`);
+      assert.equal(noted.body.data.notes, 'nur die Notiz', name);
+      assert.equal(noted.body.data.status, 'completed', `${name}: bleibt abgeschlossen`);
+      assert.equal(noted.body.data.completed_at, row.completed_at, `${name}: der Abschlusstag bleibt`);
+      assert.equal(noted.body.data.next_payment_date, '2028-02-15', name);
+      assert.deepEqual(paidDays(name), [['2028-01-15', 1]], `${name}: das Bearbeiten bucht nichts`);
+      // Die Form der Felder gilt weiter: ein Zaehler ausserhalb 1..1200 bleibt 400.
+      if (create.end_type === 'after_count') {
+        assert.equal((await jsonReq('PUT', `/${subId}`, { ...dialogPayload, occurrence_count: 0 })).status, 400, `${name}: Zaehler 0`);
+      }
+      if (create.end_type === 'on_date') {
+        // Das vorgerueckte Datum liegt nach dem Ende. Daraus folgt keine Zahlung,
+        // und ohne spaeteres Ende laesst es sich nicht reaktivieren.
+        const plain = await jsonReq('PUT', `/${subId}`, { enabled: true });
+        assert.equal(plain.status, 400, `${name}: Reaktivieren ohne spaeteres Ende`);
+        assert.equal(plain.body.reason, 'subscriptions_end_before_next_payment');
+        const still = database.prepare('SELECT enabled, completed_at FROM budget_subscriptions WHERE id = ?').get(subId);
+        assert.ok(!still.enabled && still.completed_at, `${name}: bleibt abgeschlossen`);
+        assert.deepEqual(paidDays(name), [['2028-01-15', 1]], `${name}: die Absage bucht nichts`);
+      }
+      const back = await jsonReq('PUT', `/${subId}`, reactivate);
+      assert.equal(back.status, 200, `${name}: ${JSON.stringify(back.body)}`);
+      assert.equal(back.body.data.status, 'active', name);
+      assert.equal(back.body.data.completed_at, null, name);
+      assert.equal(back.body.data.next_payment_date, '2028-02-15', `${name}: die Reaktivierung beginnt nach dem bezahlten Tag`);
+      assert.equal(back.body.data.occurrences_done, 1, `${name}: der Zaehler bleibt`);
+      assert.deepEqual(paidDays(name), [['2028-01-15', 1], ['2028-02-15', 1]],
+        `${name}: genau eine Buchung je Tag, die erste neue am naechsten`);
+      const again = await jsonReq('POST', `/${subId}/renew`, {});
+      assert.equal(again.body.data.occurrences_done, 2, `${name}: der 15.02. ist die zweite Zahlung`);
+      assert.equal(again.body.data.next_payment_date, '2028-03-15', name);
+      assert.deepEqual(paidDays(name), [['2028-01-15', 1], ['2028-02-15', 1], ['2028-03-15', 1]], name);
+      if (reactivate.end_type !== 'never') {
+        // Die dritte Zahlung schliesst wieder ab - am richtigen Tag, mit dem richtigen Zaehler.
+        const last = await jsonReq('POST', `/${subId}/renew`, {});
+        assert.equal(last.body.data.status, 'completed', `${name}: die dritte Zahlung schliesst ab`);
+        assert.equal(last.body.data.occurrences_done, 3, name);
+        assert.equal(last.body.data.occurrences_remaining, reactivate.occurrence_count ? 0 : null, name);
+        assert.deepEqual(paidDays(name), [['2028-01-15', 1], ['2028-02-15', 1], ['2028-03-15', 1]],
+          `${name}: der Abschluss bucht keine vierte`);
+      }
+    }
 
     // --- account_username (#1004): Kontoangabe ohne das Geheimnis ---
     // Anders als im Inventar liegt das Feld hier in einer Zeile, die owner_id

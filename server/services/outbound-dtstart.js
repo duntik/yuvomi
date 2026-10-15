@@ -44,18 +44,19 @@
  * ohne sie geht die Serie Wort fuer Wort zurueck, auch nach einer Bearbeitung,
  * die weder Start noch Regel anfasst.
  *
- * DER ABRUF SCHREIBT WIE BISHER. Er uebernimmt, was beim Anbieter liegt - auch
- * den ausgerichteten Start, den Yuvomi selbst hinaufgegeben hat: aus dem 15.
- * in der Zeile wird der 31., und die Marke faellt dabei. Das schadet dem
- * ausgehenden Weg nicht: die Zeile traegt den ausgerichteten Start danach
- * selbst und geht Wort fuer Wort richtig hinaus, und die naechste Aenderung
- * von Start oder Regel in Yuvomi setzt die Marke wieder. Dass die Eingabe im
- * Abruf stehen bleibt, ist eine eigene Aufgabe (#1956) und hier nicht gebaut.
+ * DER ABRUF UND DAS ECHO. Der Abruf uebernimmt, was beim Anbieter liegt. Ist
+ * es genau das, was der letzte ausgerichtete Push gesendet hat, und hat sich
+ * die Zeile seitdem nicht geaendert, bleibt die Eingabe (der 15.) samt Marke
+ * stehen (#1956, services/outbound-echo.js). Sonst wird aus dem 15. in der
+ * Zeile der 31., und die Marke faellt (`authoredAfterInbound`). Das schadet
+ * dem ausgehenden Weg nicht: die Zeile traegt den ausgerichteten Start dann
+ * selbst und geht Wort fuer Wort richtig hinaus.
  */
 
 import { seriesStartFor } from './recurrence.js';
 import {
-  hasExplicitZone, isValidTimeZone, localToUTCPrecise, shiftDateKey, storedToInstantMsPrecise, utcToWall,
+  hasExplicitZone, isValidTimeZone, localToUTCPrecise, shiftDateKey,
+  storedDayDiffersFromSeriesDay, storedToInstantIso, storedToInstantMsPrecise, utcToWall,
 } from '../utils/timezone.js';
 
 /**
@@ -75,11 +76,9 @@ function istEigen(event) {
  * zurueck, deren UTC-Tag vom lokalen abweicht, und wenn zwei Stellen diese
  * Frage verschieden beantworten, liefern sie verschiedene erste Vorkommen.
  */
-function zonenUnsicher(event) {
-  if (!event?.tzid) return false;
-  const roh = String(event.start_datetime ?? '');
-  const wandUhr = utcToWall(roh, event.tzid);
-  return !(wandUhr && wandUhr.date === roh.slice(0, 10));
+function zonenUnsicher(event, householdZone) {
+  // Zonenlose Ziffern sind Wanduhr des Haushalts, nie der Prozesszone (#1993).
+  return storedDayDiffersFromSeriesDay(event?.start_datetime, event?.tzid, householdZone);
 }
 
 /**
@@ -91,8 +90,8 @@ function zonenUnsicher(event) {
  *   sonst derselbe Wert mit dem ersten Tag, den die Regel wirklich trifft.
  *   Uhrzeit und Format bleiben, `seriesStartFor` tauscht nur den Datumsteil.
  */
-export function outboundStartDatetime(event) {
-  return outboundDateRange(event).start_datetime;
+export function outboundStartDatetime(event, options) {
+  return outboundDateRange(event, options).start_datetime;
 }
 
 /**
@@ -171,20 +170,47 @@ function verschiebe(wert, tage) {
  * wie in der Expansion: die DAUER gehoert dem Termin, das Datum der Regel.
  *
  * @param {object} event
- * @param {{ zone?: string|null }} [options]  `zone`: die Zone, in der der
- *   Empfaenger die Serie rechnet, wenn es nicht die `tzid` der Zeile ist
- *   (Google). Gelesen wird sie nur fuer einen Start, der ein Zeitpunkt ist;
- *   eine zonenlose Wanduhrzeit meint ihren Tag selbst.
+ * @param {{ zone?: string|null, householdZone?: string|null }} [options]
+ *   `zone`: die Zone, in der der Empfaenger die Serie rechnet, wenn es nicht
+ *   die `tzid` der Zeile ist (Google). Gelesen wird sie nur fuer einen Start,
+ *   der ein Zeitpunkt ist; eine zonenlose Wanduhrzeit meint ihren Tag selbst.
+ *   `householdZone`: in ihr sind zonenlose Ziffern geschrieben (#1993).
+ *   Pflicht, sobald eine eigene Serie zonenlose Ziffern neben einer `tzid`
+ *   traegt; fehlt sie dort, wirft `storedToInstantIso`.
  * @returns {{ start_datetime: string, end_datetime: string|null }}
  */
-export function outboundDateRange(event, { zone = null } = {}) {
+export function outboundDateRange(event, { zone = null, householdZone = null } = {}) {
   const roh = event?.start_datetime;
   const ende = event?.end_datetime ?? null;
   const unveraendert = { start_datetime: roh, end_datetime: ende };
   if (!roh || !event?.recurrence_rule || !istEigen(event)) return unveraendert;
   const rechenZone = zone || event.tzid;
   if (hasExplicitZone(roh) && isValidTimeZone(rechenZone)) return zonedDateRange(event, rechenZone) ?? unveraendert;
-  const start = seriesStartFor(roh, event.recurrence_rule, { utcDiffersFromLocal: zonenUnsicher(event) });
+  /* ZONENLOSE ZIFFERN NEBEN EINER TZID, OHNE FREMDE RECHENZONE (#1993).
+   *
+   * CalDAV, iCloud und der Feed geben eine solche Serie mit `TZID=<tzid>`
+   * hinaus, der Empfaenger rechnet ihre Vorkommen also auf der Wanduhr der
+   * `tzid`. Ausgerichtet wird deshalb dort, nicht am Tag im Text: der ist der
+   * Haushaltstag und kann neben dem Ortstag liegen. 05:30 am 15. November in
+   * Berlin ist 20:30 am 14. in Los Angeles; am Text ausgerichtet ging
+   * `20351114T203000` hinaus, und der Anbieter zaehlte diesen Tag als eigenes
+   * Vorkommen neben den Monatsletzten. Also erst der Zeitpunkt (in der
+   * Haushaltszone gelesen), dann dieselbe Ausrichtung wie fuer jeden anderen
+   * Zeitpunkt. Ohne Verschiebung bleibt die Zeile Wort fuer Wort.
+   *
+   * Mit `zone` (Google) rechnet der Empfaenger in einer anderen Zone; dort
+   * bleibt es beim Weg darunter, und Google bekommt, was es bisher bekam. */
+  if (event.tzid && !event.all_day && !zone && isValidTimeZone(event.tzid)) {
+    const alsZeitpunkt = {
+      ...event,
+      start_datetime: storedToInstantIso(roh, householdZone),
+      end_datetime: ende ? storedToInstantIso(ende, householdZone) : ende,
+    };
+    return zonedDateRange(alsZeitpunkt, event.tzid) ?? unveraendert;
+  }
+  const start = seriesStartFor(roh, event.recurrence_rule, {
+    utcDiffersFromLocal: zonenUnsicher(event, householdZone),
+  });
   if (!start || start === roh) return unveraendert;
   const tage = tagesDifferenz(String(event.start_datetime).slice(0, 10), String(start).slice(0, 10));
   return { start_datetime: start, end_datetime: ende ? verschiebe(ende, tage) : ende };
@@ -212,12 +238,25 @@ export function outboundEvent(event, options) {
 /**
  * Eine Regel in der Form, in der zwei Schreibweisen derselben Regel gleich
  * sind: ohne `RRULE:`-Praefix (eingelesene Serien tragen es, hier angelegte
- * nicht), gross geschrieben, die Teile sortiert. Verglichen wird damit nur,
- * gespeichert nie.
+ * nicht), gross geschrieben, die Teile UND ihre Wertlisten sortiert
+ * (`BYDAY=TU,MO` ist `BYDAY=MO,TU`, #1957). Sonst nichts: ein anders
+ * geschriebenes UNTIL oder ein ausgeschriebener Standardwert bleibt eine
+ * andere Regel. Verglichen wird damit nur, gespeichert nie - von
+ * `startOrRuleChanged` und von der Echo-Erkennung (services/outbound-echo.js).
+ *
+ * @param {string|null|undefined} rule
+ * @returns {string}
  */
-function ruleKey(rule) {
+export function ruleKey(rule) {
   return String(rule ?? '').trim().replace(/^RRULE:/i, '')
-    .split(';').map((teil) => teil.trim().toUpperCase()).filter(Boolean).sort().join(';');
+    .split(';').map((teil) => teil.trim().toUpperCase()).filter(Boolean)
+    .map((teil) => {
+      const eq = teil.indexOf('=');
+      if (eq === -1) return teil;
+      const werte = teil.slice(eq + 1).split(',').map((wert) => wert.trim()).sort();
+      return `${teil.slice(0, eq)}=${werte.join(',')}`;
+    })
+    .sort().join(';');
 }
 
 /**
@@ -289,9 +328,11 @@ export function startOrRuleChanged(before, after, zone) {
  * Anbieter, und die Serie geht Wort fuer Wort zurueck (#756). Verglichen wird
  * der Text, der in die Spalte kommt, mit dem, der dort steht - dieselbe
  * Gleichheit, an der `followInboundStartChange` einen verlegten Start erkennt.
- * KEINE ECHO-ERKENNUNG: auch Yuvomis eigener ausgerichteter Start (der 31.
- * statt des eingegebenen 15.) ist ein anderer Start und nimmt die Marke. Die
- * Zeile traegt ihn danach selbst, ausgerichtet werden muss dann nichts mehr.
+ * HIER KEINE ECHO-ERKENNUNG: die steht vor diesem Aufruf (`isEcho` in
+ * services/outbound-echo.js, #1956), und beim Echo fragen die Abrufe diese
+ * Funktion gar nicht. Was hier ankommt, ist kein Echo: auch Yuvomis eigener
+ * ausgerichteter Start ohne gueltigen Schnappschuss ist ein anderer Start und
+ * nimmt die Marke. Die Zeile traegt ihn danach selbst.
  * Dasselbe gilt fuer eine andere Schreibweise desselben Beginns oder
  * derselben Regel: was der Abruf hineinschreibt, ist die Form des Anbieters.
  *

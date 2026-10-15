@@ -21155,20 +21155,14 @@ const SERVER_TEXT_OPEN = new Map([
   ['pages/birthdays.js', 1],
   ['pages/calendar.js', 7],
   ['pages/contacts.js', 4],
-  ['pages/documents.js', 9],
-  ['pages/health.js', 28],
   ['pages/inventory.js', 8],
-  ['pages/meals.js', 6],
+  ['pages/meals.js', 5],
   ['pages/notes.js', 5],
   ['pages/pantry.js', 6],
-  ['pages/recipes.js', 9],
   ['pages/schedule.js', 1],
-  ['pages/subscriptions.js', 8],
   ['pages/tasks.js', 1],
   ['settings/module-install-errors.js', 1],
-  ['settings/pages/modules-health.js', 2],
   ['settings/pages/modules-kitchen.js', 1],
-  ['utils/document-folder-delete.js', 1],
 ]);
 
 test('der Leser fuer den Servertext sieht jede Schreibweise und keinen Kommentar (#1909)', () => {
@@ -21226,8 +21220,53 @@ test('keine Seite zeigt den Text des Servers ohne Zuordnung, die offenen stehen 
   assert.deepEqual(shrunk, [],
     'Eine Datei liest den Servertext seltener als die Liste sagt - SERVER_TEXT_OPEN auf die neue Zahl senken '
     + '(bei 0 den Eintrag streichen), sonst darf die Zahl unbemerkt wieder steigen.');
-  for (const name of ['pages/shopping.js', 'pages/waste.js', 'utils/kitchen-transfer.js', 'components/category-manager.js']) {
+  for (const name of ['pages/shopping.js', 'pages/waste.js', 'pages/health.js', 'settings/pages/modules-health.js', 'utils/kitchen-transfer.js', 'components/category-manager.js',
+    'pages/documents.js', 'utils/document-folder-delete.js', 'pages/recipes.js', 'pages/subscriptions.js']) {
     assert.equal(SERVER_TEXT_OPEN.has(name), false, `${name} steht auf 0 und gehoert nicht in die Liste`);
+  }
+});
+
+/* DIE ZWEITE TUER: `err.message` (#1909).
+ *
+ * api.js setzt `message` des ApiError auf denselben Text wie `data.error`, und
+ * ein Netz- oder Ladefehler traegt dort den Satz des Browsers - beides
+ * unuebersetzt. Der Leser darueber sieht nur `data.error`. Fuer die Module,
+ * deren Scheibe abgeschlossen ist, gilt deshalb auch: kein `.message` eines
+ * gefangenen Fehlers. Ein Modul kommt mit seiner Scheibe auf diese Liste.
+ */
+function countErrorMessageReads(source) {
+  const code = withoutCommentsKeepingLines(source, { blankLiterals: true });
+  return [...code.matchAll(/\b(?:err|error|e|ex|reason)\s*(?:\?\.|\.)\s*message\b/g)].length;
+}
+
+const ERROR_MESSAGE_CLEAN = [
+  'pages/health.js',
+  'pages/health-fasting.js',
+  'settings/pages/modules-health.js',
+  'pages/documents.js',
+  'utils/document-folder-delete.js',
+  'pages/recipes.js',
+  'pages/subscriptions.js',
+];
+
+test('der Leser fuer err.message sieht beide Schreibweisen und keinen Kommentar (#1909)', () => {
+  for (const [source, expected] of [
+    ["el.textContent = error?.message || '';", 1],
+    ['showToast(err.message);', 1],
+    ['showToast(e?.message ?? fallback); log(ex.message);', 2],
+    ['// showToast(err.message)', 0],
+    ["const hint = 'err.message';", 0],
+    ['const { message } = t;', 0],
+    ['showToast(errorSentence(err));', 0],
+  ]) {
+    assert.equal(countErrorMessageReads(source), expected, source);
+  }
+});
+
+test('die umgestellten Module lesen auch err.message nicht (#1909)', () => {
+  for (const name of ERROR_MESSAGE_CLEAN) {
+    const count = countErrorMessageReads(read(`../public/${name}`));
+    assert.equal(count, 0, `${name} liest ${count}x \`.message\` eines Fehlers - errorSentence(err, fallbackKey) nehmen`);
   }
 });
 

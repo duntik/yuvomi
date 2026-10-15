@@ -480,8 +480,13 @@ test('install.sh übernimmt einen bestehenden Schlüssel aus der .env', () => {
 
   const dir = mkdtempSync(join(tmpdir(), 'oikos-env-'));
   try {
-    const run = key => execFileSync('bash', ['-c', `${fn}\nread_existing_env_value ${key} || printf '<none>'`],
-      { cwd: dir, encoding: 'utf8' });
+    // Das Skript geht über stdin an bash, nicht als `-c`-Argument: unter
+    // Windows baut Node daraus eine Kommandozeile, deren Quoting die `\"` der
+    // Funktion zerlegt ("unexpected EOF while looking for matching").
+    const run = key => execFileSync('bash', ['-s'], {
+      cwd: dir, encoding: 'utf8',
+      input: `${fn}\nread_existing_env_value ${key} || printf '<none>'`,
+    });
 
     assert.equal(run('DB_ENCRYPTION_KEY'), '<none>', 'ohne .env darf nichts gefunden werden');
 

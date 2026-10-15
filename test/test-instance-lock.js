@@ -281,12 +281,14 @@ test('#1530 der wartende Server meldet sich wiederholt', async () => {
   const dbPath = join(tempDir('yuvomi-test-instance-lock-'), 'yuvomi.db');
   // Der Halter endet von selbst nach gut einer Sekunde - das Warten ist
   // synchron, ein Timer in diesem Prozess kaeme nicht dran. Bis dahin laufen
-  // bei 300 ms Frist mehrere Warteversuche, jeder mit eigener Zeile.
+  // bei 100 ms Frist mehrere Warteversuche, jeder mit eigener Zeile. Kurz,
+  // weil ein Versuch unter Windows deutlich laenger dauert als die Frist
+  // (gemessen bei 300 ms: rund 800 ms, also nur zwei Zeilen).
   const holder = startCliLikeHolder(dbPath, { lifetimeMs: 1500 });
   await holder.waitFor(/HOLDING/);
   const lines = [];
   const log = { info: (m) => lines.push(`info ${m}`), warn: (m) => lines.push(`warn ${m}`) };
-  const lock = acquireInstanceLock(dbPath, { onBusy: 'wait', log, waitLogIntervalMs: 300 });
+  const lock = acquireInstanceLock(dbPath, { onBusy: 'wait', log, waitLogIntervalMs: 100 });
   try {
     assert.equal(lock?.path, instanceLockPath(dbPath));
     lock.release();

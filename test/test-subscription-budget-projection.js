@@ -254,6 +254,21 @@ test('abgeschlossenes Abo: nichts', async () => {
   assert.equal(expectedOf(await month('2026-11')).length, 0);
 });
 
+// #2009: der Abschluss rueckt das Datum hinter den bezahlten Tag vor. Bei
+// `on_date` liegt es dann nach dem Ende - es ist keine Zahlung, die kommt, und
+// die Vorschau zeigt in keinem Folgemonat etwas.
+test('abgeschlossenes Abo mit Enddatum: das vorgerueckte Datum nach dem Ende erzeugt keine Erwartung', async () => {
+  const sub = await createSub({ end_type: 'on_date', end_date: '2026-11-05' });
+  const r = await call('POST', `/budget/subscriptions/${sub.id}/renew`);
+  assert.equal(r.body.data.status, 'completed');
+  assert.equal(r.body.data.next_payment_date, '2026-11-20', 'das gespeicherte Datum liegt nach dem Ende');
+  for (const ym of ['2026-10', '2026-11', '2026-12', '2027-01']) {
+    assert.deepEqual(expectedOf(await month(ym)), [], `${ym}: keine Erwartung`);
+    assert.equal((await call('GET', `/budget/summary?month=${ym}`)).body.data.pending.count, 0, ym);
+  }
+  assert.deepEqual(bookedOf(await month('2026-11')), [], 'im November steht auch keine Buchung');
+});
+
 test('vergangene Monate bekommen keine Projektion, der laufende schon', async () => {
   await createSub({ next_payment_date: '2026-07-15' });
   assert.deepEqual(bookedOf(await month('2026-07')).map((r) => r.date), ['2026-07-15']);
@@ -664,4 +679,22 @@ test('Fremdwaehrung ohne gespeicherten Kurs: der Betrag der gebuchten Zeile, kei
   db.prepare(`INSERT INTO subscription_exchange_rates (base_currency, quote_currency, rate, fetched_at)
               VALUES ('EUR', 'USD', 0.5, ?)`).run(new Date(NOW).toISOString());
   assert.equal((await month('2026-11'))[0].amount, real.amount);
+});
+
+test('abgeschlossenes Abo (#2004, #594): die gebuchte letzte Zahlung zaehlt weiter, die Vorschau und die Monatssumme der Abos nicht mehr', async () => {
+  const sub = await createSub({ end_type: 'after_count', occurrence_count: 1 });
+  const r = await call('POST', `/budget/subscriptions/${sub.id}/renew`);
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.body.data.status, 'completed');
+
+  const october = await call('GET', '/budget/summary?month=2026-10');
+  assert.equal(october.body.data.expenses, -12.99, 'die bezahlte Zahlung bleibt in der Summe des Budgets');
+  assert.deepEqual(bookedOf(await month('2026-10')).map((row) => [row.date, row.amount]), [['2026-10-20', -12.99]]);
+
+  for (const ym of ['2026-11', '2026-12']) {
+    assert.deepEqual(expectedOf(await month(ym)), [], `${ym}: keine Erwartung fuer ein abgeschlossenes Abo`);
+    assert.equal((await call('GET', `/budget/summary?month=${ym}`)).body.data.pending.count, 0, ym);
+  }
+  const list = await call('GET', '/budget/subscriptions');
+  assert.equal(list.body.data.summary.monthly_total, 0, 'die Monatssumme der Abos zaehlt es nicht');
 });

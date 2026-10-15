@@ -3140,6 +3140,69 @@ test('Abo-Zeile: Metaangaben brechen um statt unter den Betrag zu laufen', async
   assert.deepEqual(loose, [], 'ausserhalb der beiden Einheiten steht kein loser Text');
 });
 
+/**
+ * Ein abgeschlossenes Abo hat keine Faelligkeit (#2009). Der Abschluss rueckt
+ * `next_payment_date` auf die Zahlung NACH der letzten vor, damit eine
+ * Reaktivierung den bezahlten Tag nicht noch einmal bucht. Dieses Datum kommt
+ * nie, solange das Abo abgeschlossen ist - Karte und Leseansicht zeigen es
+ * deshalb nicht als „in 30 Tagen"; die Ende-Zeile sagt „Abgeschlossen am".
+ * Ein laufendes Abo zeigt seine Faelligkeit weiter.
+ */
+test('Abo-Zeile: ein abgeschlossenes Abo zeigt keine naechste Zahlung', async () => {
+  const { __test: abos } = await import('../public/pages/subscriptions.js');
+  const sub = (extra) => ({
+    id: 8, name: 'Kurs', description: '', amount: 10, currency: 'EUR', monthly_base: 10,
+    next_payment_date: '2099-02-15', billing_cycle: 'monthly', cycle_interval: 1, reminder_days: 3,
+    end_type: 'after_count', occurrence_count: 1, occurrences_done: 1, ...extra,
+  });
+  const completed = sub({ status: 'completed', enabled: false, completed_at: '2099-01-15T08:00:00Z', occurrences_remaining: 0 });
+  const active = sub({ status: 'active', enabled: true, completed_at: null, occurrence_count: 3, occurrences_remaining: 2 });
+  const nextRow = (s) => abos.subscriptionReadSections(s).find((row) => row.label === 'subscriptions.detailNextPaymentLabel');
+
+  const doneCard = abos.renderCard(completed);
+  assert.doesNotMatch(doneCard, /subscription-card__due/, 'abgeschlossen: keine Faelligkeit auf der Karte');
+  assert.doesNotMatch(doneCard, /subscriptions\.dueInDays/, 'abgeschlossen: kein „in N Tagen"');
+  assert.match(doneCard, /subscriptions\.completedOn/, 'die Ende-Zeile sagt, wann es endete');
+  assert.equal(nextRow(completed).value, '', 'abgeschlossen: die Leseansicht laesst die naechste Zahlung weg');
+
+  // #2011: auch keine naechste ZAHLUNG und keine Erinnerung - der Server lehnt
+  // "Bezahlt" ab, syncReminder hat die Erinnerung entfernt. Weder Knopf noch
+  // Wischpanel noch Erinnerungs-Chip; die Leseansicht laesst die Zeile weg.
+  const reminderRow = (s) => abos.subscriptionReadSections(s).find((row) => row.label === 'subscriptions.reminderDaysLabel');
+  assert.doesNotMatch(doneCard, /data-action="renew"/, 'abgeschlossen: kein Bezahlt-Knopf');
+  assert.doesNotMatch(doneCard, /swipe-reveal--done/, 'abgeschlossen: kein Bezahlt-Panel der Wischgeste');
+  assert.doesNotMatch(doneCard, /subscriptions\.reminderMeta|subscriptions\.noReminder|data-lucide="bell/, 'abgeschlossen: kein Erinnerungs-Chip');
+  assert.match(doneCard, /swipe-reveal--delete/, 'Loeschen per Geste bleibt');
+  assert.equal(reminderRow(completed).value, '', 'abgeschlossen: die Leseansicht laesst die Erinnerung weg');
+
+  const liveCard = abos.renderCard(active);
+  assert.match(liveCard, /data-action="renew"/, 'laufend: der Bezahlt-Knopf bleibt');
+  assert.match(liveCard, /swipe-reveal--done/, 'laufend: das Bezahlt-Panel bleibt');
+  assert.match(liveCard, /subscriptions\.reminderMeta/, 'laufend: der Erinnerungs-Chip bleibt');
+  assert.notEqual(reminderRow(active).value, '', 'laufend: die Leseansicht nennt die Erinnerung');
+  assert.match(liveCard, /subscription-card__due/, 'laufend: die Faelligkeit bleibt');
+  assert.match(liveCard, /subscriptions\.dueInDays/);
+  assert.notEqual(nextRow(active).value, '', 'laufend: die Leseansicht nennt die naechste Zahlung');
+
+  // Der Bearbeiten-Dialog zeigt das Datum weiter - es ist der Tag, an dem ein
+  // wieder aufgenommenes Abo weiterlaeuft. Damit es dort nicht wie eine
+  // angekuendigte Zahlung wirkt, sagt ein Hinweis am Feld, wann es gilt
+  // (Review-Runde 1 zu #2010). Nur am abgeschlossenen Abo.
+  const dialog = (s) => {
+    const vorher = globalThis.__openModal;
+    let letzte = null;
+    globalThis.__openModal = (o) => { letzte = o; };
+    try { abos.openSubscriptionModal(s); } finally { globalThis.__openModal = vorher; }
+    return letzte?.content ?? '';
+  };
+  const field = (html) => html.slice(html.indexOf('id="subscription-next-date"'), html.indexOf('id="subscription-reminder"'));
+  const doneField = field(dialog(completed));
+  assert.match(doneField, /value="2099-02-15"/, 'abgeschlossen: der Dialog bietet das naechste Datum an');
+  assert.match(doneField, /<p class="form-hint"[^>]*>subscriptions\.nextPaymentCompletedHint<\/p>/, 'abgeschlossen: der Hinweis steht am Feld');
+  assert.doesNotMatch(field(dialog(active)), /nextPaymentCompletedHint/, 'laufend: kein Hinweis');
+  assert.doesNotMatch(dialog(null), /nextPaymentCompletedHint/, 'neu: kein Hinweis');
+});
+
 test('die Statistik steht ab 960px Container auf der Budget-Bahn: Verlauf und Vergleich links, Anteile rechts (A5 P2-5)', () => {
   // Die drei Diagramme standen untereinander auf 720px und endeten 404px vor
   // der Bahn, an der jeder andere Reiter endet (Critique 2026-09-26). Die
@@ -5084,6 +5147,108 @@ test('#1593: Unterkategorien zeigen den Gesamtwert und folgen der bekannten Reih
   } finally {
     Object.assign(state, previous);
   }
+});
+
+/* Der Anteil an der Gesamtsumme steht wie in der Statistik leise HINTER dem
+ * Betrag (`budget-bar-row__share`) und nur bei Ausgaben. Kategorien rechnen
+ * gegen die Summe ihres Blocks, Unterkategorien gegen die ihrer Kategorie. */
+const shareTexts = (html) => [...html.matchAll(/<span class="budget-bar-row__share">([^<]*)<\/span>/g)]
+  .map((m) => m[1]);
+
+test('Anteil hinter dem Betrag: Ausgabenkategorien rechnen gegen die Summe der Ausgaben', () => {
+  const html = budgetUi.renderCategoryBars(kategorien());
+  const expensesTotal = 1620.99 + 482.75 + 371.4 + 234.98;
+  const expensesBlock = html.match(/<section class="budget-chart-block budget-chart-block--expenses[\s\S]*?<\/section>/)[0];
+  const incomeBlock = html.match(/<section class="budget-chart-block budget-chart-block--income[\s\S]*?<\/section>/)[0];
+
+  assert.deepEqual(
+    shareTexts(expensesBlock).map((text) => Number.parseInt(text, 10)),
+    [1620.99, 482.75, 371.4, 234.98].map((v) => Math.round((v / expensesTotal) * 100)),
+    'Anteil an der Summe der Ausgaben, nicht an Einnahmen plus Ausgaben',
+  );
+  for (const text of shareTexts(expensesBlock)) assert.match(text, /^\d+\s?%$/, 'Prozentformat der Sprache');
+  assert.deepEqual(shareTexts(incomeBlock), [], 'bei Einnahmen steht kein Anteil - wie in der Statistik');
+
+  for (const row of expensesBlock.match(/<button\b[\s\S]*?<\/button>/g)) {
+    assert.match(row, /<span class="budget-bar-row__amount">[^<]*<span class="budget-bar-row__share">[^<]*<\/span><\/span>/,
+      'der Anteil steht im Betragsfeld, hinter dem Betrag');
+    const track = row.match(/<span class="budget-bar-row__track"[\s\S]*?<\/span>\s*<\/span>/)[0];
+    assert.doesNotMatch(track, /__share/, 'die Bahn bleibt, wie sie ist');
+    const label = row.match(/<span class="budget-bar-row__label"[\s\S]*?<\/span>/)[0];
+    assert.doesNotMatch(label, /__share/, 'der Anteil steht nicht beim Namen');
+  }
+});
+
+test('Anteil hinter dem Betrag: sharePercent ist eine Stelle fuer Uebersicht und Statistik', async () => {
+  const { sharePercent } = await import('../public/utils/money.js');
+  assert.match(sharePercent(25, 100), /^25\s?%$/);
+  assert.match(sharePercent(-25, -100), /^25\s?%$/, 'das Vorzeichen spielt keine Rolle');
+  assert.match(sharePercent(1, 999), /^<1\s?%$/, 'unter einem halben Prozent steht "<1 %", nicht "0 %"');
+  assert.match(sharePercent(0, 100), /^0\s?%$/);
+  assert.match(sharePercent(5, 0), /^0\s?%$/, 'eine leere Summe teilt nicht durch null');
+  assert.doesNotMatch(sharePercent(5, 0), /NaN|Infinity/);
+
+  // Die Uebersicht maskiert den Text ("<" gehoert escaped).
+  const html = budgetUi.renderCategoryBars([
+    { category: 'rent', income: 0, expenses: -999, total: -999 },
+    { category: 'coffee', income: 0, expenses: -1, total: -1 },
+  ]);
+  const texts = shareTexts(html);
+  assert.match(texts[1], /^&lt;1\s?%$/);
+
+  // Die Statistik rechnet nicht mehr selbst.
+  const code = withoutHtmlComments(stats);
+  assert.match(code, /import \{[^}]*\bsharePercent\b[^}]*\} from '\/utils\/money\.js'/, 'die Statistik nimmt dieselbe Funktion');
+  assert.match(code, /sharePercent\(r\.amount, absTotal\)/);
+  assert.doesNotMatch(code, /Math\.round\(\(Math\.abs\(r\.amount\) \/ absTotal\)/, 'keine zweite Prozentrechnung in der Statistik');
+  assert.doesNotMatch(withoutHtmlComments(budget), /function sharePercent/, 'keine zweite Kopie in der Uebersicht');
+});
+
+test('Anteil hinter dem Betrag: Ausgaben-Unterkategorien rechnen gegen die Summe ihrer Kategorie', () => {
+  const state = budgetUi.state;
+  const previous = { ...state };
+  try {
+    Object.assign(state, {
+      currency: 'EUR',
+      categoryFilter: 'housing',
+      subcategoryFilter: null,
+      responsibleFilterId: null,
+      meta: {
+        expenseCategories: [{ key: 'housing', name: 'Abitazione' }],
+        incomeCategories: [{ key: 'salary', name: 'Stipendio' }],
+        subcategories: {
+          housing: [{ key: 'rent_mortgage' }, { key: 'utilities' }],
+          salary: [{ key: 'main' }, { key: 'bonus' }],
+        },
+      },
+      entries: [
+        { category: 'housing', subcategory: 'rent_mortgage', amount: -900 },
+        { category: 'housing', subcategory: 'utilities', amount: -300 },
+        { category: 'other', subcategory: 'x', amount: -5000 },
+        { category: 'salary', subcategory: 'main', amount: 900 },
+        { category: 'salary', subcategory: 'bonus', amount: 300 },
+      ],
+      summary: { byCategory: [{ category: 'housing', income: 0, expenses: -1200, total: -1200 }] },
+    });
+    const html = budgetUi.renderSubcategoryBreakdowns();
+    assert.deepEqual(shareTexts(html).map((text) => Number.parseInt(text, 10)), [75, 25],
+      'Anteil an der Kategorie, Buchungen anderer Kategorien zaehlen nicht mit');
+    assert.doesNotMatch(html.match(/<span class="budget-bar-row__track"[\s\S]*?<\/span>\s*<\/span>/)[0], /__share/);
+
+    state.categoryFilter = 'salary';
+    assert.deepEqual(shareTexts(budgetUi.renderSubcategoryBreakdowns()), [], 'bei Einnahmen steht kein Anteil');
+  } finally {
+    Object.assign(state, previous);
+  }
+});
+
+test('Anteil hinter dem Betrag: die Bahn behaelt ihre Hoehe, es gibt keine Regel fuer Text darin', () => {
+  const rules = [...eachRule(budgetCss)];
+  const track = rules.find((r) => r.at.length === 0 && r.selector.trim() === '.budget-bar-row__track' && /height:/.test(r.body));
+  assert.match(track.body, /height:\s*var\(--space-2\)/);
+  assert.equal(rules.some((r) => /__pct\b/.test(r.selector)), false, 'kein Anteil mitten in der Bahn');
+  const share = rules.find((r) => r.selector.trim() === '.budget-bar-row__share');
+  assert.ok(share, 'der Anteil traegt die Regel der Statistik');
 });
 
 // ---------------------------------------------------------------------------
