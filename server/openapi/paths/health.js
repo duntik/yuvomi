@@ -51,6 +51,10 @@ export function healthPaths() {
   // Dieselbe Regel fuer jeden Zeitstempel dieses Bereichs, deren Rumpf kein
   // eigenes Schema traegt (#1364).
   const WALL_CLOCK_INPUT = ' Timestamps (`measured_at`, `performed_at`, `consumed_at`, `scheduled_at`, `taken_at`) are household wall-clock time, stored as `YYYY-MM-DDTHH:MM`. A value without offset is taken as such; a value with `Z` or a numeric offset is read as an instant and converted into the household time zone, so the same moment sent in UTC or with a local offset lands on the same minute. Up to v2.68.0 the offset was dropped and its digits kept.';
+  // #1909: jede 404 dieses Bereichs, die "gibt es nicht (mehr) fuer dich"
+  // heisst, nennt ihren Fall - angehaengt an jede Operation auf einer Zeile
+  // (Pfad mit `{id}`), siehe withNotFoundReasons() am Ende.
+  const NOT_FOUND = 'A 404 for a row that does not exist or is not writable for the caller carries a `reason` naming the row: `health_vital_not_found`, `health_medication_not_found`, `health_schedule_not_found`, `health_dose_not_found`, `health_lab_report_not_found`, `health_lab_result_not_found`, `health_activity_not_found`, `health_prevention_type_not_found`, `health_prevention_record_not_found`, `health_nutrition_entry_not_found`, `health_cycle_period_not_found` or `health_cycle_log_not_found` (#1909).';
   const TAKEN_NOW = ' A dose that ends up `taken` without a `taken_at` gets the current minute in household wall-clock time, so no path stores `taken` without a time.';
   // Der kanonische Satz aus docs/DECISIONS.md Abschnitt 5, nicht das Paar
   // private/family der uebrigen Gesundheit. Der benannte Satz ('assignees')
@@ -58,7 +62,7 @@ export function healthPaths() {
   // tragen koennte - er waere von 'private' nicht unterscheidbar.
   const nutritionVisibility = { type: 'string', enum: ['private', 'all'], default: 'private' };
 
-  return {
+  return withNotFoundReasons(NOT_FOUND, {
     '/api/v1/health/vitals': {
       get: op({ summary: 'List vital measurements', tag: 'Health', description: 'Scoped to the viewer; `?user_id=` filters to a family member (only their `family`-visible rows). Optional `type`, `from`, `to` filters.' }),
       post: op({ summary: 'Create a vital measurement', tag: 'Health', stateChanging: true, requestBody: jsonBody(null), description: WALL_CLOCK_INPUT.trim() }),
@@ -231,7 +235,7 @@ export function healthPaths() {
         tag: 'Health',
         stateChanging: true,
         requestBody: jsonBody(null),
-        description: 'Body: { csv: string }. Header-tolerant CSV in the export\'s own column order (`start_date`, `end_date` first - see GET /export/cycle); extra columns are ignored. Accepts both comma and semicolon separators (German Excel exports use `;`) and both `YYYY-MM-DD` and `DD.MM.YYYY` dates (again a German-export accommodation). All-or-nothing: any invalid row rejects the whole import with 400 and up to the first 10 row errors, nothing is inserted. A row whose `start_date` matches an existing period of the caller is skipped (counted, not an error); other overlaps are allowed. Rejects with 400 if the payload exceeds 100 KB or 500 data rows. New periods take the caller\'s `default_visibility` from `/cycle/settings` (falls back to `private`). Response: `{ imported, skipped, errors: [] }`. Re-syncs the caller\'s cycle reminders once after commit.',
+        description: 'Body: { csv: string }. Header-tolerant CSV in the export\'s own column order (`start_date`, `end_date` first - see GET /export/cycle); extra columns are ignored. Accepts both comma and semicolon separators (German Excel exports use `;`) and both `YYYY-MM-DD` and `DD.MM.YYYY` dates (again a German-export accommodation). All-or-nothing: any invalid row rejects the whole import with 400 and up to the first 10 row errors, nothing is inserted. A row whose `start_date` matches an existing period of the caller is skipped (counted, not an error); other overlaps are allowed. Rejects with 400 if the payload exceeds 100 KB or 500 data rows. New periods take the caller\'s `default_visibility` from `/cycle/settings` (falls back to `private`). Response: `{ imported, skipped, errors: [] }`. Re-syncs the caller\'s cycle reminders once after commit. A refusal a user reaches with the file carries a `reason` (#1909): `health_cycle_import_too_large` with `params.limit_kb`, `health_cycle_import_no_rows` (header only), `health_cycle_import_too_many_rows` with `params.limit`.',
       }),
     },
     '/api/v1/health/caregivers/me': {
@@ -263,10 +267,10 @@ export function healthPaths() {
     },
     '/api/v1/health/prevention/records': {
       get: op({ summary: 'List preventive-care records (vaccinations/check-ups given)', tag: 'Health', description: 'Scoped to the viewer; `?user_id=` filters to a family member (their `family`-visible rows, or all of them if the viewer is a caregiver for that person). Optional `type_id`, `from`, `to` filters.' }),
-      post: op({ summary: 'Log a preventive-care record', tag: 'Health', stateChanging: true, requestBody: jsonBody(null), description: 'Body: { type_id? or name, given_on, dose_number?, batch?, provider?, note?, interval_months?, next_due_on?, reminder_offset_days?, visibility?, user_id? }. `user_id` lets a caregiver log for the person they care for (#584); the row\'s visibility then follows that person\'s own default, not the caller\'s.' }),
+      post: op({ summary: 'Log a preventive-care record', tag: 'Health', stateChanging: true, requestBody: jsonBody(null), description: 'Body: { type_id? or name, given_on, dose_number?, batch?, provider?, note?, interval_months?, next_due_on?, reminder_offset_days?, visibility?, user_id? }. `user_id` lets a caregiver log for the person they care for (#584); the row\'s visibility then follows that person\'s own default, not the caller\'s. An unknown `type_id` answers 400 with `reason: health_prevention_selected_type_not_found`.' }),
     },
     '/api/v1/health/prevention/records/{id}': {
-      patch: op({ summary: 'Update a preventive-care record', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null) }),
+      patch: op({ summary: 'Update a preventive-care record', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null), description: 'An unknown `type_id` answers 400 with `reason: health_prevention_selected_type_not_found`.' }),
       delete: op({ summary: 'Delete a preventive-care record', tag: 'Health', params: [idParam()], stateChanging: true }),
     },
     '/api/v1/health/nutrition/targets': {
@@ -290,5 +294,21 @@ export function healthPaths() {
     '/api/v1/health/prevention/due': {
       get: op({ summary: 'List preventive-care items due or overdue', tag: 'Health', description: 'Scoped to the viewer; `?user_id=` computes the list for a family member instead (subject to the same visibility rule as the records list). Derived from each type\'s most recent record plus its interval - the same computation the reminder sync uses, never duplicated.' }),
     },
-  };
+  });
+}
+
+/**
+ * Haengt den Satz ueber die `reason`-Werte an jede Operation auf einer Zeile
+ * (Pfad mit `{id}`) und beschreibt ihre 404. Das Fasten fuehrt eigene Gruende
+ * (FASTING_NOT_FOUND) und bleibt aussen vor.
+ */
+function withNotFoundReasons(note, paths) {
+  for (const [path, operations] of Object.entries(paths)) {
+    if (!path.includes('{id}') || path.includes('/fasting/')) continue;
+    for (const operation of Object.values(operations)) {
+      operation.description = operation.description ? `${operation.description}\n\n${note}` : note;
+      operation.responses[404] = { description: note };
+    }
+  }
+  return paths;
 }

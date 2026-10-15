@@ -1112,14 +1112,25 @@ test('Persoenliches: die Glocke der Shell fragt ueber einer Wand die Haushaltsfa
     saved[name] = Object.getOwnPropertyDescriptor(globalThis, name);
     Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
   }
-  const settle = async () => { for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve)); };
+  // Die Anfragen laufen echt ueber HTTP; erst auf ihre Antworten warten, dann
+  // die Mikrotasks der Glocke ablaufen lassen (sonst ein Wettlauf, z. B. unter Windows).
+  const inflight = [];
+  const settle = async () => {
+    await Promise.allSettled(inflight.splice(0));
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  };
   const bell = await import('../public/reminders.js');
   try {
     await withClock(NOON_BERLIN, 'Europe/Berlin', async () => {
       seedPersonal();
       viewer = BEN;
       globalThis.__apiStub = {
-        get: async (path) => { asked.push(path); return (await fetch(`${base}${path}`)).json(); },
+        get: (path) => {
+          asked.push(path);
+          const answer = fetch(`${base}${path}`).then((res) => res.json());
+          inflight.push(answer);
+          return answer;
+        },
       };
       // An der Wand: Schalter an, Route der Uebersicht.
       store.set('yuvomi-wall-mode', '1');

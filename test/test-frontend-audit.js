@@ -21155,20 +21155,14 @@ const SERVER_TEXT_OPEN = new Map([
   ['pages/birthdays.js', 1],
   ['pages/calendar.js', 7],
   ['pages/contacts.js', 4],
-  ['pages/documents.js', 9],
-  ['pages/health.js', 28],
   ['pages/inventory.js', 8],
-  ['pages/meals.js', 6],
+  ['pages/meals.js', 5],
   ['pages/notes.js', 5],
   ['pages/pantry.js', 6],
-  ['pages/recipes.js', 9],
   ['pages/schedule.js', 1],
-  ['pages/subscriptions.js', 8],
   ['pages/tasks.js', 1],
   ['settings/module-install-errors.js', 1],
-  ['settings/pages/modules-health.js', 2],
   ['settings/pages/modules-kitchen.js', 1],
-  ['utils/document-folder-delete.js', 1],
 ]);
 
 test('der Leser fuer den Servertext sieht jede Schreibweise und keinen Kommentar (#1909)', () => {
@@ -21226,9 +21220,96 @@ test('keine Seite zeigt den Text des Servers ohne Zuordnung, die offenen stehen 
   assert.deepEqual(shrunk, [],
     'Eine Datei liest den Servertext seltener als die Liste sagt - SERVER_TEXT_OPEN auf die neue Zahl senken '
     + '(bei 0 den Eintrag streichen), sonst darf die Zahl unbemerkt wieder steigen.');
-  for (const name of ['pages/shopping.js', 'pages/waste.js', 'utils/kitchen-transfer.js', 'components/category-manager.js']) {
+  for (const name of ['pages/shopping.js', 'pages/waste.js', 'pages/health.js', 'settings/pages/modules-health.js', 'utils/kitchen-transfer.js', 'components/category-manager.js',
+    'pages/documents.js', 'utils/document-folder-delete.js', 'pages/recipes.js', 'pages/subscriptions.js']) {
     assert.equal(SERVER_TEXT_OPEN.has(name), false, `${name} steht auf 0 und gehoert nicht in die Liste`);
   }
+});
+
+/* DIE ZWEITE TUER: `err.message` (#1909).
+ *
+ * api.js setzt `message` des ApiError auf denselben Text wie `data.error`, und
+ * ein Netz- oder Ladefehler traegt dort den Satz des Browsers - beides
+ * unuebersetzt. Der Leser darueber sieht nur `data.error`. Fuer die Module,
+ * deren Scheibe abgeschlossen ist, gilt deshalb auch: kein `.message` eines
+ * gefangenen Fehlers. Ein Modul kommt mit seiner Scheibe auf diese Liste.
+ */
+function countErrorMessageReads(source) {
+  const code = withoutCommentsKeepingLines(source, { blankLiterals: true });
+  return [...code.matchAll(/\b(?:err|error|e|ex|reason)\s*(?:\?\.|\.)\s*message\b/g)].length;
+}
+
+const ERROR_MESSAGE_CLEAN = [
+  'pages/health.js',
+  'pages/health-fasting.js',
+  'settings/pages/modules-health.js',
+  'pages/documents.js',
+  'utils/document-folder-delete.js',
+  'pages/recipes.js',
+  'pages/subscriptions.js',
+];
+
+test('der Leser fuer err.message sieht beide Schreibweisen und keinen Kommentar (#1909)', () => {
+  for (const [source, expected] of [
+    ["el.textContent = error?.message || '';", 1],
+    ['showToast(err.message);', 1],
+    ['showToast(e?.message ?? fallback); log(ex.message);', 2],
+    ['// showToast(err.message)', 0],
+    ["const hint = 'err.message';", 0],
+    ['const { message } = t;', 0],
+    ['showToast(errorSentence(err));', 0],
+  ]) {
+    assert.equal(countErrorMessageReads(source), expected, source);
+  }
+});
+
+test('die umgestellten Module lesen auch err.message nicht (#1909)', () => {
+  for (const name of ERROR_MESSAGE_CLEAN) {
+    const count = countErrorMessageReads(read(`../public/${name}`));
+    assert.equal(count, 0, `${name} liest ${count}x \`.message\` eines Fehlers - errorSentence(err, fallbackKey) nehmen`);
+  }
+});
+
+/* DER GESPEICHERTE FEHLERTEXT EINER ABFUHR-QUELLE (#1909, dritte Abfuhr-Scheibe).
+ *
+ * `source.last_error` ist der englische Text des Servers ("No calendar entries
+ * in the response") - er traegt denselben Satz wie `err.data.error`, nur auf
+ * einem Datensatz statt an einem Fehler, und der Leser darueber sieht ihn
+ * nicht. Die Seite darf ihn als Wahrheitswert lesen (gibt es einen
+ * Fehlschlag?), aber nie ausgeben: den Satz baut sie aus
+ * `last_error_reason`/`last_error_params`.
+ */
+function countLastErrorOutputs(source) {
+  const code = withoutCommentsKeepingLines(source);
+  const blank = withoutCommentsKeepingLines(source, { blankLiterals: true });
+  let count = 0;
+  for (const hit of code.matchAll(/(?:\besc\s*\(|\$\{|textContent\s*=|showToast\s*\()\s*[\w$.?\s]*\b(last_error)\s*(?:[)};,]|\|\||\?\?)/g)) {
+    // `last_error` selbst muss Code sein, kein Text in einem Literal.
+    const at = hit.index + hit[0].lastIndexOf('last_error');
+    if (blank[at] === code[at]) count += 1;
+  }
+  return count;
+}
+
+test('der Zaehler fuer last_error sieht die Ausgabe, nicht die Frage (#1909)', () => {
+  for (const [source, expected] of [
+    ['`<p>${esc(source.last_error)}</p>`', 1],
+    ['el.textContent = source?.last_error;', 1],
+    ['`${source.last_error}`', 1],
+    ['showToast(source.last_error || fallback);', 1],
+    ["`${source.last_error ? `<p>${esc(lastFailureSentence(source))}</p>` : ''}`", 0],
+    ["if (source.last_error) return { code: 'error' };", 0],
+    ['// esc(source.last_error)', 0],
+    ["const hint = 'esc(source.last_error)';", 0],
+    ['const { last_error_reason } = source;', 0],
+  ]) {
+    assert.equal(countLastErrorOutputs(source), expected, source);
+  }
+});
+
+test('die Abfuhr-Seite gibt den gespeicherten Fehlertext einer Quelle nie aus (#1909)', () => {
+  assert.equal(countLastErrorOutputs(read('../public/pages/waste.js')), 0,
+    'pages/waste.js gibt `last_error` aus - den Satz aus last_error_reason/last_error_params bauen (lastFailureSentence)');
 });
 
 /* WER NOCH UEBER friendlyError FRAGT, STEHT ALS ZAHL DA (#1909, Uebergang).

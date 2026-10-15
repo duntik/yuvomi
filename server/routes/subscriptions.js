@@ -27,6 +27,55 @@ const log = createLogger('Subscriptions');
 const router = express.Router();
 const URL_RE = /^https?:\/\/[^\s]+$/i;
 
+// Die Kurse fuer die Buchung des Abos, austauschbar fuer test:subscriptions-errors:
+// dort verschwindet das Abo genau waehrend dieses await.
+let ratesFor = getRates;
+export function _setRatesForTest(fn) { ratesFor = fn || getRates; }
+// Die Logo-Suche geht ins Netz; test:subscriptions-errors setzt das Ergebnis.
+let logoFinder = findLogoOptions;
+export function _setLogoFinderForTest(fn) { logoFinder = fn || findLogoOptions; }
+
+/** Das Abo verschwand, waehrend seine Buchung berechnet wurde (#1909). */
+class SubscriptionGoneError extends Error {}
+
+// #1909: die Faelle, die ein Nutzer erreicht, nennen sich mit `reason`; den
+// Satz dazu besitzt die App. `error` bleibt der englische Text fuer die API.
+function subscriptionGone(res) {
+  return res.status(404).json({ error: 'Subscription not found.', code: 404, reason: 'subscriptions_subscription_not_found' });
+}
+
+/**
+ * Die Antwort auf eine oder mehrere Pruefungen. Ein Eintrag ist ein Satz oder
+ * `{ error, reason }`. Ein Grund steht nur an einer Absage mit GENAU einem
+ * Befund - mehrere zugleich erreicht nur ein Aufrufer der API, und der Satz
+ * eines einzelnen Falls waere dort nur die halbe Antwort.
+ */
+function problemBody(problems) {
+  const items = problems.map((item) => (typeof item === 'string' ? { error: item } : item));
+  return {
+    error: items.map((item) => item.error).join(' '),
+    code: 400,
+    ...(items.length === 1 && items[0].reason ? { reason: items[0].reason } : {}),
+  };
+}
+
+/**
+ * Gibt es die im Dialog GEWAEHLTE Kategorie und Zahlungsart noch? Wer sie
+ * zwischen dem Oeffnen und dem Speichern im Verwalten-Dialog loescht, liess das
+ * Schreiben bis #1909 am Fremdschluessel scheitern - als 500. Jetzt ist es der
+ * Fall, den der Dialog erklaert: er bleibt offen und bietet die aktuellen an.
+ */
+function selectedMetaGone(categoryId, paymentMethodId) {
+  const database = db.get();
+  if (categoryId && !database.prepare('SELECT 1 FROM subscription_categories WHERE id = ?').get(Number(categoryId))) {
+    return { error: 'Category not found.', code: 400, reason: 'subscriptions_selected_category_not_found' };
+  }
+  if (paymentMethodId && !database.prepare('SELECT 1 FROM subscription_payment_methods WHERE id = ?').get(Number(paymentMethodId))) {
+    return { error: 'Payment method not found.', code: 400, reason: 'subscriptions_selected_payment_method_not_found' };
+  }
+  return null;
+}
+
 function actorId(req) {
   return req.authUserId || req.session.userId;
 }
@@ -122,21 +171,33 @@ function decorate(row) {
 }
 
 // Prüft die Ende-Bedingung gegen die zusammengeführten Effektivwerte (#594).
-function endConfigErrors({ end_type, end_date, occurrence_count, next_payment_date, occurrences_done }) {
+//
+// `stillCompleted`: die Zeile ist abgeschlossen und bleibt es (#2009). Dann
+// faellt nur der Vergleich mit dem Stand weg - Ende vor der naechsten Zahlung,
+// Zaehler nicht ueber den geleisteten -, die Form der Felder gilt weiter. Ein
+// abgeschlossenes Abo hat seine Zahlungen hinter sich: bei `on_date` liegt sein
+// naechstes Datum immer nach dem Ende, bei `after_count` ist der Zaehler
+// erreicht. Der Dialog schickt bei jedem Speichern alle Felder, also lehnte
+// der Vergleich JEDE Bearbeitung ab, auch die einer Notiz. Erst das
+// Reaktivieren braucht ein Ende, das noch Zahlungen zulaesst.
+function endConfigErrors({ end_type, end_date, occurrence_count, next_payment_date, occurrences_done }, { stillCompleted = false } = {}) {
   const errors = [];
   if (end_type === 'on_date') {
     if (!end_date) { errors.push('An end date is required.'); return errors; }
     try {
-      if (parseDateKey(end_date).getTime() < parseDateKey(next_payment_date).getTime()) {
-        errors.push('The end date must not be before the next payment date.');
+      parseDateKey(end_date);
+      if (!stillCompleted && parseDateKey(end_date).getTime() < parseDateKey(next_payment_date).getTime()) {
+        errors.push({ error: 'The end date must not be before the next payment date.', reason: 'subscriptions_end_before_next_payment' });
       }
     } catch (err) { errors.push(err.message); }
   } else if (end_type === 'after_count') {
     const count = Number(occurrence_count);
     if (!Number.isInteger(count) || count < 1 || count > 1200) {
       errors.push('Occurrence count must be between 1 and 1200.');
-    } else if (count <= Number(occurrences_done || 0)) {
-      errors.push('Occurrence count must be greater than the number of payments already made.');
+    } else if (!stillCompleted && count <= Number(occurrences_done || 0)) {
+      // Erreichbar im Dialog: ein Abo mit drei geleisteten Zahlungen auf "nach
+      // zwei Zahlungen" stellen.
+      errors.push({ error: 'Occurrence count must be greater than the number of payments already made.', reason: 'subscriptions_occurrence_count_too_low' });
     }
   }
   return errors;
@@ -149,65 +210,213 @@ function budgetCurrency() {
 // Betrag und Titel der Buchung rechnet services/subscription-budget-projection.js:
 // die gebuchte Zeile hier und die erwarteten Zeilen der Folgemonate (#1844)
 // muessen dasselbe sagen, also gibt es die Rechnung einmal.
-async function budgetExpenseAmount(subscription) {
-  const currency = budgetCurrency();
-  if (subscription.currency === currency) return subscriptionBudgetAmount(subscription, currency, {});
-  const result = await getRates(currency, [subscription.currency]);
-  return subscriptionBudgetAmount(subscription, currency, result.rates);
+//
+// DIE BUCHUNG IM RENNEN UM DEN KURS (#2004). Eine fremde Waehrung braucht vor
+// der Buchung einen Kurs, und das ist ein await. Was davor gelesen wurde,
+// gilt danach nicht mehr: ein anderer Request kann das Abo pausieren, privat
+// schalten, den Betrag oder die Waehrung aendern oder es verlaengern. Daher
+// EIN Design fuer alle Schreiber:
+//
+//  1. Der Kurs wird geholt, BEVOR entschieden wird. Danach liest
+//     applyBooking() die Zeile frisch und schreibt die Buchung ganz aus ihr -
+//     Betrag, Titel, Datum, Eigentuemer, Sichtbarkeit, Verknuepfung, Pause -
+//     im selben synchronen Schritt. Zwischen diesem Lesen und dem Schreiben
+//     liegt kein await (der Treiber ist synchron).
+//  2. Passt der geholte Kurs nicht mehr zur Zeile (Waehrung des Abos oder des
+//     Budgets gewechselt), schreibt applyBooking() nichts, und der Schreiber
+//     holt den Kurs der neuen Waehrung und versucht es noch einmal.
+//  3. Verlaengern gibt seine bezahlte Buchung im selben synchronen Schritt ab,
+//     in dem es das Datum vorrueckt (renewBooking), und legt dort schon die
+//     Buchung der naechsten Zahlung an. Die bezahlte ist danach nicht mehr
+//     verknuepft, kein anderer Sync sieht sie; nur das Verlaengern selbst
+//     traegt ihr nach dem await den umgerechneten Betrag nach, aus SEINEM
+//     Schnappschuss - dem Stand des Abos im Moment der Zahlung.
+//
+// WARUM DAS KONVERGIERT. Jeder Schreiber der Abo-Zeile (POST, PUT, Verlaengern)
+// ruft danach syncBudgetExpense(). Jede Buchung, die applyBooking() schreibt,
+// ist eine Funktion der Zeile im Moment des Schreibens und des Kurses ihrer
+// Waehrung - nicht des Requests und nicht seines Schnappschusses. Nach der
+// letzten Aenderung an der Zeile steht die Zeile fest; jedes applyBooking()
+// danach schreibt dasselbe, und mindestens eins kommt danach (das des letzten
+// Schreibers). Wer vorher schrieb, wird ueberschrieben, wer spaeter schreibt,
+// schreibt dasselbe noch einmal. In welcher Reihenfolge die Kurse
+// zurueckkommen, aendert also nichts, solange ein Paar einen Kurs hat (der
+// Kurs-Cache liefert ihn). Der erste Versuch in #2003 las nur die
+// Verknuepfung frisch und den Rest aus dem Schnappschuss - so schrieb ein
+// wartender PUT die frisch angelegte Buchung eines Verlaengerns auf das alte
+// Datum zurueck.
+
+/** Hoechstens so oft holt ein Sync den Kurs neu, wenn die Waehrung wechselt. */
+const RATE_ATTEMPTS = 3;
+
+/** Der Kurs fuer die Waehrung einer Zeile, oder null, wenn keiner noetig ist. */
+async function fetchBookingRates(currency, budgetCur) {
+  if (currency === budgetCur) return null;
+  const result = await ratesFor(budgetCur, [currency]);
+  return { currency, budgetCurrency: budgetCur, rates: result.rates };
 }
 
-function budgetEntryTitle(subscription) {
-  return subscriptionBudgetTitle(subscription, budgetCurrency());
+/** Betrag der Buchung aus einer Zeile, oder undefined, wenn der Kurs nicht zur Zeile passt. */
+function bookingAmount(row, budgetCur, fetched) {
+  if (row.currency === budgetCur) return subscriptionBudgetAmount(row, budgetCur, {});
+  if (!fetched || fetched.currency !== row.currency || fetched.budgetCurrency !== budgetCur) return undefined;
+  return subscriptionBudgetAmount(row, budgetCur, fetched.rates);
 }
 
-async function syncBudgetExpense(subscription, { preserveCurrent = false } = {}) {
+/**
+ * Schreibt die verknuepfte Buchung aus `row`, legt sie an, wenn es sie nicht
+ * (mehr) gibt, und verknuepft sie. Eigentuemer + Sichtbarkeit kommen aus der
+ * Zeile (#476/#505): ein privates Abo hat eine private Buchung.
+ */
+function writeLinkedBooking(row, budgetCur, amount) {
   const database = db.get();
-  if (!subscription.enabled) {
-    if (subscription.budget_entry_id) {
-      database.prepare('DELETE FROM budget_entries WHERE id = ?').run(subscription.budget_entry_id);
-      database.prepare('UPDATE budget_subscriptions SET budget_entry_id = NULL WHERE id = ?').run(subscription.id);
-    }
-    return loadSubscription(subscription.id);
-  }
-
-  const amount = await budgetExpenseAmount(subscription);
-  const subcategory = subscription.budget_subcategory_key || '';
-  let entryId = preserveCurrent ? null : subscription.budget_entry_id;
-  if (entryId) {
-    // Eigentümer + Sichtbarkeit mitziehen (#476/#505): ohne das bliebe der
-    // verknüpfte Ausgaben-Eintrag beim Umschalten des Abos (shared↔private) auf
-    // seinem alten Wert und entkoppelte sich vom Abo (privates Abo → geteilter
-    // Eintrag im Haushalts-Topf). Symmetrisch zur INSERT-Branch unten.
+  const values = [
+    subscriptionBudgetTitle(row, budgetCur), -amount, row.budget_subcategory_key || '', row.next_payment_date,
+    row.owner_id ?? row.created_by, row.visibility || 'shared',
+  ];
+  if (row.budget_entry_id) {
     const updated = database.prepare(`
       UPDATE budget_entries
       SET title = ?, amount = ?, category = 'subscriptions', subcategory = ?, date = ?,
           owner_id = ?, visibility = ?
       WHERE id = ?
-    `).run(
-      budgetEntryTitle(subscription), -amount, subcategory, subscription.next_payment_date,
-      subscription.owner_id ?? subscription.created_by, subscription.visibility || 'shared', entryId,
-    );
-    if (!updated.changes) entryId = null;
+    `).run(...values, row.budget_entry_id);
+    if (updated.changes) return row.budget_entry_id;
   }
-  if (!entryId) {
-    // Verknüpfter Ausgaben-Eintrag erbt Eigentümer + Sichtbarkeit des Abos (#476/#505).
-    entryId = database.prepare(`
-      INSERT INTO budget_entries
-        (title, amount, category, subcategory, date, is_recurring, created_by, owner_id, visibility)
-      VALUES (?, ?, 'subscriptions', ?, ?, 0, ?, ?, ?)
-    `).run(
-      budgetEntryTitle(subscription),
-      -amount,
-      subcategory,
-      subscription.next_payment_date,
-      subscription.created_by,
-      subscription.owner_id ?? subscription.created_by,
-      subscription.visibility || 'shared',
-    ).lastInsertRowid;
-    database.prepare('UPDATE budget_subscriptions SET budget_entry_id = ? WHERE id = ?').run(entryId, subscription.id);
-  }
-  return loadSubscription(subscription.id);
+  const [title, signed, subcategory, date, ownerId, visibility] = values;
+  const entryId = database.prepare(`
+    INSERT INTO budget_entries
+      (title, amount, category, subcategory, date, is_recurring, created_by, owner_id, visibility)
+    VALUES (?, ?, 'subscriptions', ?, ?, 0, ?, ?, ?)
+  `).run(title, signed, subcategory, date, row.created_by, ownerId, visibility).lastInsertRowid;
+  database.prepare('UPDATE budget_subscriptions SET budget_entry_id = ? WHERE id = ?').run(entryId, row.id);
+  return entryId;
 }
+
+/**
+ * Lesen, entscheiden, schreiben - synchron, aus der frischen Zeile. Liefert
+ * `{ row }` nach dem Schreiben oder `{ needs }` mit der Waehrung, deren Kurs
+ * fehlt; dann ist nichts geschrieben.
+ */
+const applyBooking = (id, fetched) => db.get().transaction(() => {
+  const row = loadSubscription(id);
+  // GIBT ES DAS ABO NOCH? (#1909) Sonst entstuende eine Buchung ohne Abo.
+  if (!row) throw new SubscriptionGoneError();
+  if (!row.enabled) {
+    if (row.budget_entry_id) {
+      db.get().prepare('DELETE FROM budget_entries WHERE id = ?').run(row.budget_entry_id);
+      db.get().prepare('UPDATE budget_subscriptions SET budget_entry_id = NULL WHERE id = ?').run(id);
+    }
+    return { row: loadSubscription(id) };
+  }
+  const budgetCur = budgetCurrency();
+  const amount = bookingAmount(row, budgetCur, fetched);
+  if (amount === undefined) {
+    // Bis der Kurs da ist, wird die Buchung nur ENGER, nie weiter: steht das
+    // Abo auf privat, ist sie es SOFORT - nicht erst nach dem Kursabruf und
+    // auch nicht erst, wenn der Neuversuch gelingt (Review zu #2008). Eine
+    // Erweiterung auf geteilt wird erst mit dem vollstaendigen Schreiben
+    // wirksam, zusammen mit Titel und Betrag: sonst saehe der Haushalt fuer
+    // die Dauer des Kursabrufs den alten privaten Inhalt (Codex zu #2008).
+    // Der Eigentuemer bleibt bis dahin stehen; ein neuer bekaeme sonst den
+    // alten Inhalt einer privaten Buchung zu sehen.
+    if (row.budget_entry_id && row.visibility === 'private') {
+      db.get().prepare("UPDATE budget_entries SET visibility = 'private' WHERE id = ? AND visibility <> 'private'")
+        .run(row.budget_entry_id);
+    }
+    return { needs: { currency: row.currency, budgetCurrency: budgetCur } };
+  }
+  writeLinkedBooking(row, budgetCur, amount);
+  return { row: loadSubscription(id) };
+})();
+
+/**
+ * Bringt die verknuepfte Buchung auf den Stand der Zeile. `fetched` ist ein
+ * schon geholter Kurs (Verlaengern), sonst holt der Sync ihn selbst.
+ */
+async function syncBudgetExpense(id, fetched = null) {
+  let rates = fetched;
+  for (let attempt = 0; ; attempt += 1) {
+    const result = applyBooking(id, rates);
+    if (result.row) return result.row;
+    if (attempt >= RATE_ATTEMPTS) {
+      // Die Waehrung wechselte bei jedem Versuch. Wer sie zuletzt gewechselt
+      // hat, ruft selbst einen Sync; dieser hier schreibt nichts Veraltetes.
+      log.warn(`Booking of subscription ${id} skipped: its currency kept changing during the rate lookup.`);
+      const row = loadSubscription(id);
+      if (!row) throw new SubscriptionGoneError();
+      return row;
+    }
+    rates = await fetchBookingRates(result.needs.currency, result.needs.budgetCurrency);
+  }
+}
+
+/**
+ * Verlaengern, synchron: Datum und Zaehler vorruecken (oder bei der letzten
+ * Zahlung abschliessen), die bezahlte Buchung auf den Stand des Abos bringen
+ * und abkoppeln, und - ausser beim Abschluss - die naechste anlegen und
+ * verknuepfen. Kennt die bezahlte ihren Betrag noch nicht (fremde Waehrung),
+ * traegt sie den der letzten Buchung, und `paid` sagt, welche Zeile nach dem
+ * Kurs nachzutragen ist. Die naechste traegt ihn vorlaeufig auch; ihren
+ * eigenen schreibt der Sync danach aus der frischen Zeile.
+ *
+ * Der Abschluss behaelt die letzte bezahlte Buchung wie jedes Verlaengern
+ * (Entscheidung zu #2008; bis dahin loeschte er sie, seit #594). Aus der
+ * Monatssumme der Abos und aus der Vorschau faellt das Abo trotzdem, denn
+ * beide lesen nur laufende Abos.
+ *
+ * Auch der Abschluss rueckt das Datum vor (#2009): der bezahlte Tag ist
+ * bezahlt. Blieb er stehen, buchte eine Reaktivierung (PUT enabled, hoeherer
+ * Zaehler, spaeteres Ende) ihn ein zweites Mal und zaehlte ihn doppelt. Das
+ * vorgerueckte Datum liegt bei `on_date` immer nach dem Ende; ein
+ * abgeschlossenes Abo leitet daraus nichts ab - es bucht nicht, erinnert
+ * nicht, steht in keiner Vorschau, und die Karte zeigt es nicht als faellig.
+ * Reaktivieren ohne spaeteres Ende lehnt endConfigErrors ab.
+ */
+const renewBooking = (current, { completed, nextDate, occurrencesDone }) => db.get().transaction(() => {
+  const database = db.get();
+  if (completed) {
+    database.prepare(`
+      UPDATE budget_subscriptions
+      SET next_payment_date = ?, occurrences_done = ?, enabled = 0,
+          completed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+      WHERE id = ?
+    `).run(nextDate, occurrencesDone, current.id);
+  } else {
+    database.prepare('UPDATE budget_subscriptions SET next_payment_date = ?, occurrences_done = ? WHERE id = ?')
+      .run(nextDate, occurrencesDone, current.id);
+  }
+  // Ein pausiertes Abo bucht nichts und gibt nichts ab: eine Verknuepfung
+  // aus dem Altbestand bleibt stehen, und der Sync danach loescht ihre
+  // Buchung wie auf main - abgekoppelt bliebe sie als Waise liegen.
+  if (!current.enabled) return { paid: null };
+  database.prepare('UPDATE budget_subscriptions SET budget_entry_id = NULL WHERE id = ?').run(current.id);
+  const budgetCur = budgetCurrency();
+  const amount = bookingAmount(current, budgetCur, null);
+  const linked = current.budget_entry_id
+    ? database.prepare('SELECT id, amount FROM budget_entries WHERE id = ?').get(current.budget_entry_id)
+    : null;
+  const known = amount ?? (linked ? Math.abs(Number(linked.amount)) : subscriptionBudgetAmount(current, budgetCur, {}));
+  if (linked) {
+    // Die bezahlte Buchung: Betrag, Titel und Tag nach dem Stand des Abos am
+    // bezahlten Tag, dann abgekoppelt. Eigentuemer und Sichtbarkeit bleiben,
+    // wie sie sind - wie auf main: wer die Buchung selbst privat gestellt
+    // hat, bekommt die bezahlte Zahlung nicht fuer den Haushalt geoeffnet
+    // (Codex zu #2008). Enger als das Abo ist sie damit hoechstens; weiter
+    // nicht, denn jedes Privatstellen des Abos engt sie im selben synchronen
+    // Schritt ein (applyBooking).
+    database.prepare(`
+      UPDATE budget_entries
+      SET title = ?, amount = ?, category = 'subscriptions', subcategory = ?, date = ?
+      WHERE id = ?
+    `).run(
+      subscriptionBudgetTitle(current, budgetCur), -known, current.budget_subcategory_key || '', current.next_payment_date,
+      linked.id,
+    );
+  }
+  if (!completed) writeLinkedBooking({ ...current, next_payment_date: nextDate, budget_entry_id: null }, budgetCur, known);
+  return { paid: linked && amount === undefined ? { id: linked.id, budgetCurrency: budgetCur } : null };
+})();
 
 function validatePayload(body, { partial = false } = {}) {
   const checks = [];
@@ -255,7 +464,8 @@ function validatePayload(body, { partial = false } = {}) {
     // Case-insensitiv, weil ein data-URL-Leser `;BASE64,` genauso dekodiert:
     // ein exakter Substring-Test haette sich mit einer Grossschreibung umgehen
     // lassen, und zwar genau von dem, der etwas zu verbergen hat.
-    errors.push('Logo content does not match its image type.');
+    // Erreichbar mit einer umbenannten Datei (#1909).
+    errors.push({ error: 'Logo content does not match its image type.', reason: 'subscriptions_logo_content_mismatch' });
   }
   for (const key of ['category_id', 'payment_method_id']) {
     if (body[key] !== undefined && body[key] !== null && (!Number.isInteger(Number(body[key])) || Number(body[key]) < 1)) {
@@ -360,7 +570,7 @@ router.post('/categories', (req, res) => {
     })();
     res.status(201).json({ data: category });
   } catch (err) {
-    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists.', code: 409 });
+    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists.', code: 409, reason: 'subscriptions_category_exists' });
     throw err;
   }
 });
@@ -374,7 +584,7 @@ router.post('/payment-methods', (req, res) => {
       .run(name.value, order);
     res.status(201).json({ data: db.get().prepare('SELECT * FROM subscription_payment_methods WHERE id = ?').get(result.lastInsertRowid) });
   } catch (err) {
-    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Payment method already exists.', code: 409 });
+    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Payment method already exists.', code: 409, reason: 'subscriptions_payment_method_exists' });
     throw err;
   }
 });
@@ -409,7 +619,7 @@ router.put('/categories/:id', (req, res) => {
   try {
     const id = Number(req.params.id);
     const existing = db.get().prepare('SELECT * FROM subscription_categories WHERE id = ?').get(id);
-    if (!existing) return res.status(404).json({ error: 'Category not found.', code: 404 });
+    if (!existing) return res.status(404).json({ error: 'Category not found.', code: 404, reason: 'subscriptions_category_not_found' });
     const name = str(req.body.name, 'Name', { max: MAX_SHORT });
     const categoryColor = color(req.body.color ?? existing.color, 'Color');
     const errors = collectErrors([name, categoryColor]);
@@ -441,7 +651,7 @@ router.put('/categories/:id', (req, res) => {
     })();
     res.json({ data: database.prepare('SELECT * FROM subscription_categories WHERE id = ?').get(id) });
   } catch (err) {
-    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists.', code: 409 });
+    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Category already exists.', code: 409, reason: 'subscriptions_category_exists' });
     log.error('PUT /categories/:id error:', err);
     res.status(500).json({ error: 'Subscription category could not be saved.', code: 500 });
   }
@@ -451,7 +661,7 @@ router.delete('/categories/:id', (req, res) => {
   try {
     const id = Number(req.params.id);
     const existing = db.get().prepare('SELECT * FROM subscription_categories WHERE id = ?').get(id);
-    if (!existing) return res.status(404).json({ error: 'Category not found.', code: 404 });
+    if (!existing) return res.status(404).json({ error: 'Category not found.', code: 404, reason: 'subscriptions_category_not_found' });
     const database = db.get();
     const affected = database.transaction(() => {
       const count = database.prepare('SELECT COUNT(*) AS n FROM budget_subscriptions WHERE category_id = ?').get(id).n;
@@ -477,7 +687,7 @@ router.put('/payment-methods/:id', (req, res) => {
   try {
     const id = Number(req.params.id);
     const existing = db.get().prepare('SELECT * FROM subscription_payment_methods WHERE id = ?').get(id);
-    if (!existing) return res.status(404).json({ error: 'Payment method not found.', code: 404 });
+    if (!existing) return res.status(404).json({ error: 'Payment method not found.', code: 404, reason: 'subscriptions_payment_method_not_found' });
     const name = str(req.body.name, 'Name', { max: MAX_SHORT });
     if (name.error) return res.status(400).json({ error: name.error, code: 400 });
     // Wie bei den Kategorien: ein eigener Name schlaegt den uebersetzten - aber
@@ -489,7 +699,7 @@ router.put('/payment-methods/:id', (req, res) => {
                       WHERE id = ?`).run(name.value, id);
     res.json({ data: db.get().prepare('SELECT * FROM subscription_payment_methods WHERE id = ?').get(id) });
   } catch (err) {
-    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Payment method already exists.', code: 409 });
+    if (String(err.message).includes('UNIQUE')) return res.status(409).json({ error: 'Payment method already exists.', code: 409, reason: 'subscriptions_payment_method_exists' });
     log.error('PUT /payment-methods/:id error:', err);
     res.status(500).json({ error: 'Payment method could not be saved.', code: 500 });
   }
@@ -499,7 +709,7 @@ router.delete('/payment-methods/:id', (req, res) => {
   try {
     const id = Number(req.params.id);
     const existing = db.get().prepare('SELECT * FROM subscription_payment_methods WHERE id = ?').get(id);
-    if (!existing) return res.status(404).json({ error: 'Payment method not found.', code: 404 });
+    if (!existing) return res.status(404).json({ error: 'Payment method not found.', code: 404, reason: 'subscriptions_payment_method_not_found' });
     const affected = db.get().prepare('SELECT COUNT(*) AS n FROM budget_subscriptions WHERE payment_method_id = ?').get(id).n;
     // FK ON DELETE SET NULL entkoppelt betroffene Abos von der Zahlungsart.
     db.get().prepare('DELETE FROM subscription_payment_methods WHERE id = ?').run(id);
@@ -529,14 +739,14 @@ router.post('/logo-search', async (req, res) => {
       return res.status(400).json({ error: query.error, code: 400 });
     }
     logoQuery = query.value;
-    const options = await findLogoOptions(logoQuery, { diagnostics });
+    const options = await logoFinder(logoQuery, { diagnostics });
     if (!options.length) {
       log.warn('Subscription logo search returned no supported logos', {
         query: logoQuery,
         elapsed_ms: Date.now() - started,
         diagnostics,
       });
-      return res.status(404).json({ error: 'No supported logo could be found.', code: 404 });
+      return res.status(404).json({ error: 'No supported logo could be found.', code: 404, reason: 'subscriptions_no_logo_found' });
     }
     res.json({ data: { logo_data: options[0].logo_data, options } });
   } catch (err) {
@@ -647,7 +857,7 @@ router.get('/', refuseWhileRestoring, async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const validated = validatePayload(req.body);
-    if (validated.errors.length) return res.status(400).json({ error: validated.errors.join(' '), code: 400 });
+    if (validated.errors.length) return res.status(400).json(problemBody(validated.errors));
     const endType = req.body.end_type || 'never';
     const endDate = endType === 'on_date' ? req.body.end_date : null;
     const occurrenceCount = endType === 'after_count' ? Number(req.body.occurrence_count) : null;
@@ -655,7 +865,9 @@ router.post('/', async (req, res) => {
       end_type: endType, end_date: endDate, occurrence_count: occurrenceCount,
       next_payment_date: req.body.next_payment_date, occurrences_done: 0,
     });
-    if (endErrors.length) return res.status(400).json({ error: endErrors.join(' '), code: 400 });
+    if (endErrors.length) return res.status(400).json(problemBody(endErrors));
+    const metaGone = selectedMetaGone(req.body.category_id, req.body.payment_method_id);
+    if (metaGone) return res.status(400).json(metaGone);
     const me = actorId(req);
     const visibility = normalizeObjectVisibility(
       req.body.visibility,
@@ -678,11 +890,11 @@ router.post('/', async (req, res) => {
       req.body.account_username?.trim() || null, me, me, visibility,
       endType, endDate, occurrenceCount,
     );
-    let row = loadSubscription(result.lastInsertRowid);
-    row = await syncBudgetExpense(row);
+    const row = await syncBudgetExpense(Number(result.lastInsertRowid));
     syncReminder(row);
     res.status(201).json({ data: decorate(row) });
   } catch (err) {
+    if (err instanceof SubscriptionGoneError) return subscriptionGone(res);
     log.error('POST / error:', err);
     res.status(500).json({ error: 'Subscription could not be created.', code: 500 });
   }
@@ -692,10 +904,10 @@ router.put('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     const current = loadSubscription(id);
-    if (!current) return res.status(404).json({ error: 'Subscription not found.', code: 404 });
+    if (!current) return subscriptionGone(res);
     if (!mayEditSub(req, current)) return res.status(403).json({ error: 'You cannot modify this subscription.', code: 403 });
     const validated = validatePayload(req.body, { partial: true });
-    if (validated.errors.length) return res.status(400).json({ error: validated.errors.join(' '), code: 400 });
+    if (validated.errors.length) return res.status(400).json(problemBody(validated.errors));
     const value = (key, fallback) => req.body[key] === undefined ? fallback : req.body[key];
     // Sichtbarkeit umschaltbar; owner_id bleibt fix (#476/#505).
     const nextVisibility = req.body.visibility !== undefined
@@ -711,14 +923,16 @@ router.put('/:id', async (req, res) => {
     const occurrenceCount = endType === 'after_count'
       ? (req.body.occurrence_count !== undefined ? Number(req.body.occurrence_count) : current.occurrence_count)
       : null;
-    const endErrors = endConfigErrors({
-      end_type: endType, end_date: endDate, occurrence_count: occurrenceCount,
-      next_payment_date: nextPaymentDate, occurrences_done: current.occurrences_done,
-    });
-    if (endErrors.length) return res.status(400).json({ error: endErrors.join(' '), code: 400 });
     // Reaktivieren (enabled -> true) hebt einen Abschluss auf.
     const nextEnabled = value('enabled', Boolean(current.enabled)) ? 1 : 0;
     const completedAt = nextEnabled ? null : current.completed_at;
+    const endErrors = endConfigErrors({
+      end_type: endType, end_date: endDate, occurrence_count: occurrenceCount,
+      next_payment_date: nextPaymentDate, occurrences_done: current.occurrences_done,
+    }, { stillCompleted: Boolean(completedAt) });
+    if (endErrors.length) return res.status(400).json(problemBody(endErrors));
+    const metaGone = selectedMetaGone(value('category_id', current.category_id), value('payment_method_id', current.payment_method_id));
+    if (metaGone) return res.status(400).json(metaGone);
     db.get().prepare(`
       UPDATE budget_subscriptions SET
         name = ?, description = ?, amount = ?, currency = ?, billing_cycle = ?, cycle_interval = ?,
@@ -739,11 +953,11 @@ router.put('/:id', async (req, res) => {
       value('account_username', current.account_username)?.trim() || null, nextVisibility,
       endType, endDate, occurrenceCount, completedAt, id,
     );
-    let row = loadSubscription(id);
-    row = await syncBudgetExpense(row);
+    const row = await syncBudgetExpense(id);
     syncReminder(row);
     res.json({ data: decorate(row) });
   } catch (err) {
+    if (err instanceof SubscriptionGoneError) return subscriptionGone(res);
     log.error('PUT /:id error:', err);
     res.status(500).json({ error: 'Subscription could not be updated.', code: 500 });
   }
@@ -753,31 +967,47 @@ router.post('/:id/renew', async (req, res) => {
   try {
     const id = Number(req.params.id);
     const current = loadSubscription(id);
-    if (!current) return res.status(404).json({ error: 'Subscription not found.', code: 404 });
+    if (!current) return subscriptionGone(res);
     // Verlaengern SCHREIBT: es rueckt den Zahlungstag vor, zaehlt eine Zahlung,
     // legt eine Buchung an und schliesst ein endliches Abo ab. Es folgt
     // deshalb derselben Regel wie PUT und DELETE - sie fehlte hier.
     if (!mayEditSub(req, current)) return res.status(403).json({ error: 'You cannot modify this subscription.', code: 403 });
-    const { completed, nextDate, occurrencesDone } = resolveRenewal(current);
-    if (completed) {
-      // Letzte Zahlung durch: abschließen. enabled = 0 lässt syncBudgetExpense den
-      // Ausgaben-Eintrag entfernen und syncReminder die Erinnerung löschen.
-      db.get().prepare(`
-        UPDATE budget_subscriptions
-        SET occurrences_done = ?, enabled = 0, completed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE id = ?
-      `).run(occurrencesDone, id);
-      const done = await syncBudgetExpense(loadSubscription(id));
-      syncReminder(done);
-      return res.json({ data: decorate(done) });
+    // Ein abgeschlossenes Abo hat keine naechste Zahlung (#2011). Ohne diese
+    // Absage zaehlte jedes "Bezahlt" eine Zahlung, die es nie gab, setzte den
+    // Abschluss neu und rueckte das Datum weiter - ein spaeteres Reaktivieren
+    // begann zu spaet. Die Pruefung liest `current` aus demselben synchronen
+    // Schritt, in dem renewBooking schreibt: kein await dazwischen.
+    if (current.completed_at) {
+      return res.status(409).json({ error: 'A completed subscription cannot be renewed.', code: 409, reason: 'subscriptions_subscription_completed' });
     }
-    db.get().prepare('UPDATE budget_subscriptions SET next_payment_date = ?, occurrences_done = ? WHERE id = ?')
-      .run(nextDate, occurrencesDone, id);
-    let row = loadSubscription(id);
-    row = await syncBudgetExpense(row, { preserveCurrent: true });
+    // Bis hierher kein await: Datum, Zaehler, Abschluss und die Uebergabe der
+    // bezahlten Buchung stehen im selben synchronen Schritt wie das Lesen
+    // oben (#2004).
+    const { paid } = renewBooking(current, resolveRenewal(current));
+    let row;
+    try {
+      let fetched = null;
+      if (paid) {
+        // Die bezahlte Buchung gehoert jetzt nur noch diesem Request: ihr Betrag
+        // kommt aus dem Schnappschuss `current`, dem Stand im Moment der Zahlung.
+        fetched = await fetchBookingRates(current.currency, paid.budgetCurrency);
+        db.get().prepare('UPDATE budget_entries SET amount = ? WHERE id = ?')
+          .run(-bookingAmount(current, paid.budgetCurrency, fetched), paid.id);
+      }
+      row = await syncBudgetExpense(id, fetched);
+    } catch (err) {
+      if (err instanceof SubscriptionGoneError) throw err;
+      // Die Zahlung ist schon festgeschrieben. Ein 500 liesse den Client es
+      // noch einmal versuchen - und ein zweites Mal verlaengern. Die Betraege
+      // bleiben vorlaeufig, bis der naechste Sync den Kurs hat.
+      log.warn(`Renewal of subscription ${id} saved; its booking amounts wait for the exchange rate:`, err.message);
+      row = loadSubscription(id);
+      if (!row) throw new SubscriptionGoneError();
+    }
     syncReminder(row);
     res.json({ data: decorate(row) });
   } catch (err) {
+    if (err instanceof SubscriptionGoneError) return subscriptionGone(res);
     log.error('POST /:id/renew error:', err);
     res.status(500).json({ error: 'Subscription renewal could not be saved.', code: 500 });
   }
@@ -786,8 +1016,10 @@ router.post('/:id/renew', async (req, res) => {
 router.delete('/:id', (req, res) => {
   try {
     const id = Number(req.params.id);
+    // Die 404 heisst hier nur "gibt es nicht mehr": loadSubscription liest
+    // ohne Sichtbarkeitsfilter, ein fremdes privates Abo endet unten mit 403.
     const existing = loadSubscription(id);
-    if (!existing) return res.status(404).json({ error: 'Subscription not found.', code: 404 });
+    if (!existing) return subscriptionGone(res);
     if (!mayEditSub(req, existing)) return res.status(403).json({ error: 'You cannot modify this subscription.', code: 403 });
     db.get().transaction(() => {
       const subscription = loadSubscription(id);

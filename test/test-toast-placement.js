@@ -23,7 +23,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   chooseToastPlacement, persistentToastMustYield, placeToastStack, KEEPOUT_SELECTOR,
@@ -389,7 +389,7 @@ function markedBars(section) {
 test('jeder Dialog der App steht im Register, mit dem Weg zu seinen Knoepfen', () => {
   const found = {};
   for (const path of walk(join(ROOT, 'public'))) {
-    const file = relative(ROOT, path);
+    const file = relative(ROOT, path).split(sep).join('/');
     const count = dialogSections(code(file)).sections.length;
     if (count) found[file] = count;
   }
@@ -421,7 +421,7 @@ test('jeder Dialog zeichnet genau die Leisten aus, die das Register nennt - nach
   }
   // Und keine Auszeichnung ausserhalb des Registers.
   for (const path of walk(join(ROOT, 'public'))) {
-    const file = relative(ROOT, path);
+    const file = relative(ROOT, path).split(sep).join('/');
     if (DIALOG_REGISTRY[file]) continue;
     assert.equal(countMarks(code(file)), 0, `${file}: traegt data-dialog-actions, baut aber keinen registrierten Dialog`);
   }

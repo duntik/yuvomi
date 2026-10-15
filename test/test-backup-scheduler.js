@@ -141,6 +141,10 @@ describe('Backup Scheduler', () => {
       t.skip('running as root bypasses directory permissions');
       return;
     }
+    if (process.platform === 'win32') {
+      t.skip('chmod on Windows only sets the read-only flag, the directory stays writable');
+      return;
+    }
     assert.equal(path.isAbsolute(TEST_BACKUP_DIR), false,
       'BACKUP_DIR must stay relative - with an absolute path the absolute-path assertion below checks nothing');
 

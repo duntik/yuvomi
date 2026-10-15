@@ -1377,8 +1377,8 @@ button.budget-bar-row:focus-visible {
 .budget-bar-row__fill--income   { background-color: var(--color-success); }
 .budget-bar-row__fill--expenses { background-color: var(--bar-fill, var(--module-accent)); }
 
-/* Der Anteil einer Ausgabe steht in der Statistik hinter ihrem Betrag
- * (R14 P8) - leiser, er erklaert den Betrag. */
+/* Der Anteil einer Ausgabe steht hinter ihrem Betrag, in der Statistik und in
+ * der Uebersicht gleich (R14 P8) - leiser, er erklaert den Betrag. */
 .budget-bar-row__share {
   margin-inline-start: var(--space-1);
   color: var(--color-text-secondary);
