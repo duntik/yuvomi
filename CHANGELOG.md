@@ -181,6 +181,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end that came back from another calendar as a UTC time showed the following day in the edit form
   west of UTC, and an end with a time but no time zone reached Google as UTC instead of the
   series' local time.
+- **Installing a custom module from Settings copes with more of what can go wrong.** When GitHub
+  slows down a server that asks too often in a short time, the page now says GitHub's limit is
+  reached, with the time to try again where GitHub names one, instead of "GitHub answered with
+  status 403". A replace cut short by a crash or restart no longer makes the module disappear:
+  the next start puts the previous version back, switched off until an admin approves it again,
+  and clears the folders the install itself left behind, nothing else. Where a module's files
+  are unpacked is now checked against the modules folder itself as well, not only through the
+  rule for module ids.
 
 ## [2.77.1] - 2026-10-14
 
@@ -261,14 +269,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry as "not found", as standard CalDAV and CardDAV servers do. Such an entry now counts as gone.
   Any other refusal still stops the sync with its HTTP status, and an entry the server sends
   without its content is an error, not an empty contact or event.
-- **Installing a custom module from Settings copes with more of what can go wrong.** When GitHub
-  slows down a server that asks too often in a short time, the page now says GitHub's limit is
-  reached, with the time to try again where GitHub names one, instead of "GitHub answered with
-  status 403". A replace cut short by a crash or restart no longer makes the module disappear:
-  the next start puts the previous version back, switched off until an admin approves it again,
-  and clears the folders the install itself left behind, nothing else. Where a module's files
-  are unpacked is now checked against the modules folder itself as well, not only through the
-  rule for module ids.
 
 ### Security
 
