@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A server whose `TZ` names an unknown time zone now runs in UTC.** Without a household time zone
+  in Settings, the server falls back to `TZ` and then to the zone the system reports. With `TZ` set
+  to a name the system does not know, some systems (Windows, for example) report `Etc/Unknown`,
+  which is not a time zone: Settings showed it as the effective zone, and the date helpers could not
+  use it and each fell back in its own way. In that case the server now uses UTC. A valid `TZ` and a
+  household time zone set in Settings work as before.
+
 ## [2.77.2] - 2026-10-15
 
 ### Added
@@ -185,12 +194,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end that came back from another calendar as a UTC time showed the following day in the edit form
   west of UTC, and an end with a time but no time zone reached Google as UTC instead of the
   series' local time.
-- **A server whose `TZ` names an unknown time zone now runs in UTC.** Without a household time zone
-  in Settings, the server falls back to `TZ` and then to the zone the system reports. With `TZ` set
-  to a name the system does not know, some systems (Windows, for example) report `Etc/Unknown`,
-  which is not a time zone: Settings showed it as the effective zone, and the date helpers could not
-  use it and each fell back in its own way. In that case the server now uses UTC. A valid `TZ` and a
-  household time zone set in Settings work as before.
 
 ## [2.77.1] - 2026-10-14
 
