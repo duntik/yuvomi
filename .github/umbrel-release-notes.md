@@ -1,10 +1,10 @@
-<!-- version: 2.77.1 -->
-This update fixes calendar sync details, makes error messages on the health pages speak your language, and tightens how reminder and task sync talk to a CalDAV server.
+<!-- version: 2.77.2 -->
+This update makes the app start again on 64-bit ARM devices and brings a few budget and subscription fixes.
 
-A "last day of the month" series now keeps the date you entered: it goes out with the same start on every upload, and the next sync no longer writes the start that came back into Yuvomi or moves its reminders. A timed series that ends on a date ends on the same occurrence in Google as in Yuvomi. Renaming an event no longer shifts it when the app and the server run in different time zones and no household time zone is set.
+On ARM-based systems the 2.77.1 image stopped right at startup because two libraries were missing from it. They are back, and every image is now checked for its libraries on each platform before it is published.
 
-The health pages and the waste source dialog now explain a failed save or refresh in the language of the app instead of showing the server's text. A contact or shopping item already deleted on a CalDAV or CardDAV server no longer blocks its sync, and reminder and task sync check every request against the account's address, as event sync already did.
+Subscriptions with an end behave as expected: the last payment stays in the budget, a completed subscription can no longer be marked as paid again, and switching one back on continues with the payment after the last one instead of booking it twice. A private subscription no longer shows its expense in the household budget when two changes meet. The budget overview shows each category's share of the total, and error messages on the recipes, documents and subscriptions pages now speak the language of the app.
 
-The update runs three database migrations on first start. They add columns the calendar sync and the waste sources need; no action is needed. As always, a backup before updating is a good idea.
+No database migration and no action is needed. As always, a backup before updating is a good idea.
 
-Full release notes are available at https://github.com/ulsklyc/yuvomi/releases/tag/v2.77.1
+Full release notes are available at https://github.com/ulsklyc/yuvomi/releases/tag/v2.77.2

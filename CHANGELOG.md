@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.77.2] - 2026-10-15
+
 ### Added
 
 - **Budget overview: expense categories and subcategories show their share of the total.** The
@@ -61,7 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reactivation started too late. A completed subscription no longer shows the action, the swipe
   for it or its payment reminder, which no longer exists once it is completed. If somebody else in
   the household completed it in the meantime, the app says so in your language and the list shows
-  the current state.
+  the current state. For API clients:
+  `POST /api/v1/budget/subscriptions/:id/renew` on a completed subscription is refused with 409 and
+  `reason: "subscriptions_subscription_completed"`.
 - **Recipes: an error message is in your language and names the cause** (#1909). The recipes
   page showed the server's own text when something could not be saved, planned, matched or put on
   a shopping list, whatever the app language, in English or in German - for example "Recipe not
