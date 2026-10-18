@@ -5,10 +5,10 @@
  */
 
 import { api } from '/api.js';
-import { openModal as openSharedModal, closeModal as closeSharedModal, selectModal, confirmModal, askOverModal, advancedSection, wireBlurValidation, reportFieldError, refocusAfterRender, swapFieldsKeepingDirtyBase } from '/components/modal.js';
-import { stagger, scheduleUndoableDelete, wireScrollFade } from '/utils/ux.js';
+import { openModal as openSharedModal, closeModal as closeSharedModal, selectModal, confirmModal, askOverModal, advancedSection, wireBlurValidation, reportFieldError, reportFieldErrors, refocusAfterRender, swapFieldsKeepingDirtyBase } from '/components/modal.js';
+import { stagger, scheduleUndoableDelete, wireScrollFade, isImeComposing } from '/utils/ux.js';
 import { t, formatDate, formatDayMonth, formatDateInput, parseDateInput, isDateInputValid } from '/i18n.js';
-import { esc, REQUIRED_MARK } from '/utils/html.js';
+import { esc, REQUIRED_MARK, externalHref } from '/utils/html.js';
 import { periodStepperHtml, syncPeriodReset, swapPeriod } from '/utils/period-stepper.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { DEFAULT_CATEGORY_NAME, categoryLabel } from '/utils/shopping-categories.js';
@@ -312,7 +312,7 @@ function wireMealTitleCombobox(panel, { onRecipe } = {}) {
     if (box.hidden || !items.length) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(active + 1, items.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(active - 1, 0)); }
-    else if (e.key === 'Enter' && active >= 0) {
+    else if (e.key === 'Enter' && active >= 0 && !isImeComposing(e)) {
       // Enter UEBERNIMMT den Vorschlag und endet hier: bis zum Dialog
       // durchgereicht, loeste es dessen Enter-zum-Speichern aus, und die
       // Mahlzeit war angelegt, bevor man sie gesehen hatte.
@@ -1259,9 +1259,9 @@ function renderSlot(date, type, mealsForDay, dayCol, typeRow) {
             href="/recipes?open=${encodeURIComponent(meal.recipe_id)}"
             aria-label="${esc(t('meals.viewRecipeNamed', { title: meal.title }))}"
           ><i data-lucide="chef-hat" class="icon-md" aria-hidden="true"></i></a>`
-          : meal.recipe_url ? `<a class="meal-card__action-btn meal-card__action-btn--recipe"
+          : externalHref(meal.recipe_url) ? `<a class="meal-card__action-btn meal-card__action-btn--recipe"
             data-action="open-recipe"
-            href="${esc(meal.recipe_url)}"
+            href="${esc(externalHref(meal.recipe_url))}"
             target="_blank"
             rel="noopener noreferrer"
             aria-label="${esc(t('meals.openRecipeNamed', { title: meal.title }))}"
@@ -1286,13 +1286,11 @@ ${/* KEIN PAPIERKORB AUF DER KARTE (Entscheidung 2026-10-07, benannte
     <div class="meal-slot meal-slot--has-meal" data-date="${date}" data-type="${type.key}" style="${gridPos}">
       <div class="meal-slot__type-label"><span class="meal-slot__type-text">${type.label}</span></div>
       ${cardsHTML}
-      ${ro ? '' : `<button
-        class="meal-slot__add-more-btn"
-        data-action="add-meal"
-        data-date="${date}"
-        data-type="${type.key}"
-        aria-label="${esc(t('meals.addMealTypeOnDay', { type: type.label, day: dayLongName(date) }))}"
-      ><i data-lucide="plus" class="icon-sm" aria-hidden="true"></i></button>`}
+      ${/* DAS PLUS STEHT NUR IN LEEREN ZELLEN (Critique 2026-10-16, D5). Unter
+            jeder belegten Zelle lag eine gestrichelte „+"-Leiste: am Desktop
+            28 Plus in einer Woche, eins je Zelle, belegt oder nicht. Eine
+            zweite Mahlzeit in denselben Platz legt der FAB - sein Dialog
+            fragt Tag und Mahlzeit. */ ''}
     </div>
   `;
 }
@@ -1610,10 +1608,12 @@ async function runRandomize(panel) {
 // --------------------------------------------------------
 
 let _suppressNextClick = false;
+// Ab so viel Weg wird aus einem Druecken ein Zug; darunter ist es ein Klick.
+const DRAG_THRESHOLD_PX = 5;
 
 function wireDragDrop(grid) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let dragging = null; // { mealId, sourceDate, sourceType, ghost, startX, startY }
+  let dragging = null; // { mealId, sourceDate, sourceType, ghost, card, slot }
 
   grid.addEventListener('pointerdown', (e) => {
     // Am ANFANG der Geste (siehe wireGrid): verdrahtet wurde mit Schreibrecht,
@@ -1647,25 +1647,43 @@ function wireDragDrop(grid) {
     const sourceType = slot.dataset.type;
 
     e.preventDefault();
-    card.setPointerCapture(e.pointerId);
+    // Der Zeiger wird am GEDRUECKTEN Element gefangen, nicht an der Karte
+    // (Critique 2026-10-16, P1): ein `click` geht an das gemeinsame Ziel von
+    // Druecken und Loslassen, und mit der Karte als Faenger war das das
+    // `.meal-card`-div - der Oeffnen-Knopf bekam den Klick nie, ein Mausklick
+    // oeffnete keinen Dialog. Die Ereignisse steigen vom Faenger weiter zur
+    // Karte auf, die Listener unten bleiben deshalb dort.
+    e.target.setPointerCapture(e.pointerId);
 
+    // Ein Zug beginnt erst mit Weg. Vorher legte jeder Klick einen Geist und
+    // die Zieh-Markierung an; ein Druecken ohne Weg ist ein Klick.
+    const startX = e.clientX;
+    const startY = e.clientY;
     let ghost = null;
-    if (!reducedMotion) {
-      ghost = card.cloneNode(true);
-      ghost.classList.add('meal-card--ghost');
-      ghost.style.width  = card.offsetWidth + 'px';
-      ghost.style.height = card.offsetHeight + 'px';
-      ghost.style.left   = (e.clientX - card.offsetWidth / 2) + 'px';
-      ghost.style.top    = (e.clientY - card.offsetHeight / 2) + 'px';
-      document.body.appendChild(ghost);
-    }
+    let pending = { mealId, sourceDate, sourceType, card, slot };
 
-    slot.classList.add('meal-slot--dragging');
-    dragging = { mealId, sourceDate, sourceType, ghost, card, slot };
+    function beginDrag(ev) {
+      if (!reducedMotion) {
+        ghost = card.cloneNode(true);
+        ghost.classList.add('meal-card--ghost');
+        ghost.style.width  = card.offsetWidth + 'px';
+        ghost.style.height = card.offsetHeight + 'px';
+        ghost.style.left   = (ev.clientX - card.offsetWidth / 2) + 'px';
+        ghost.style.top    = (ev.clientY - card.offsetHeight / 2) + 'px';
+        document.body.appendChild(ghost);
+      }
+      slot.classList.add('meal-slot--dragging');
+      dragging = { ...pending, ghost };
+      pending = null;
+    }
 
     let lastTarget = null;
 
     function onMove(ev) {
+      if (pending) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_THRESHOLD_PX) return;
+        beginDrag(ev);
+      }
       if (!dragging) return;
       if (ghost) {
         ghost.style.left = (ev.clientX - ghost.offsetWidth / 2) + 'px';
@@ -1686,9 +1704,15 @@ function wireDragDrop(grid) {
     }
 
     async function onUp(ev) {
-      if (!dragging) return;
+      if (!dragging) { cleanup(); return; } // ohne Weg: ein Klick, er geht durch
       const { mealId, sourceDate, sourceType, slot: sourceSlot } = dragging;
       cleanup(); // setzt dragging = null - Werte daher vorher destrukturieren
+
+      // Nach einem echten Zug ist der folgende Klick keine Bitte zum
+      // Bearbeiten - auch dann nicht, wenn die Karte im eigenen Slot landet.
+      // Seit der Faenger der Oeffnen-Knopf ist, erreichte ihn dieser Klick sonst.
+      _suppressNextClick = true;
+      setTimeout(() => { _suppressNextClick = false; }, 300);
 
       if (ghost) ghost.style.display = 'none';
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -1698,8 +1722,6 @@ function wireDragDrop(grid) {
       if (targetSlot && targetSlot !== sourceSlot) {
         const targetDate = targetSlot.dataset.date;
         const targetType = targetSlot.dataset.type;
-        _suppressNextClick = true;
-        setTimeout(() => { _suppressNextClick = false; }, 300);
         await moveMeal(mealId, targetDate, targetType);
       }
     }
@@ -1711,6 +1733,7 @@ function wireDragDrop(grid) {
       dragging?.slot?.classList.remove('meal-slot--dragging');
       lastTarget?.classList.remove('meal-slot--drop-target');
       dragging = null;
+      pending = null;
       card.removeEventListener('pointermove',   onMove);
       card.removeEventListener('pointerup',     onUp);
       card.removeEventListener('pointercancel', onCancel);
@@ -2010,6 +2033,7 @@ function openMealModal(opts) {
     content,
     size: 'md',
     onSave(panel) {
+      wireMealTypeChips(panel);
       // Zutaten
       const ingList   = panel.querySelector('#ingredient-list');
       const addIngBtn = panel.querySelector('#add-ingredient-btn');
@@ -2356,12 +2380,58 @@ function wireIngredientCount(panel) {
   }).observe(list, { childList: true });
 }
 
-function buildModalContent({ mode, date, mealType, meal, fromSlot = false, recipeId = null }) {
+/* Die Mahlzeitart als Radiogruppe aus Chips (buildModalContent): Klick und
+ * Pfeiltasten waehlen, das versteckte `#modal-type` haelt den Wert. Roving
+ * tabindex wie beim Segment: EIN Tab-Halt, die Pfeile wandern. */
+function wireMealTypeChips(panel) {
+  const group = panel.querySelector?.('#modal-type-chips');
+  const field = panel.querySelector?.('#modal-type');
+  if (!group || !field) return;
+  const chips = () => [...group.querySelectorAll('[data-meal-type]')];
+  const select = (chip, { focus = false } = {}) => {
+    for (const other of chips()) {
+      const on = other === chip;
+      other.setAttribute('aria-checked', String(on));
+      other.tabIndex = on ? 0 : -1;
+      other.classList.toggle('filter-chip--active', on);
+    }
+    if (field.value !== chip.dataset.mealType) {
+      field.value = chip.dataset.mealType;
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (focus) chip.focus();
+  };
+  group.addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-meal-type]');
+    if (chip) select(chip);
+  });
+  group.addEventListener('keydown', (e) => {
+    const list = chips();
+    const i = list.indexOf(document.activeElement);
+    if (i < 0) return;
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const dir = getComputedStyle(group).direction === 'rtl' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft') ? -step : step;
+    select(list[(i + dir + list.length) % list.length], { focus: true });
+  });
+}
+
+function buildModalContent({ mode, date, mealType, meal, recipeId = null }) {
   const isEdit   = mode === 'edit';
   const isRecurring = isEdit && meal.recurrence_template_id;
-  const typeOpts = MEAL_TYPES().map((mt) =>
-    `<option value="${mt.key}" ${mt.key === mealType ? 'selected' : ''}>${mt.label}</option>`
-  ).join('');
+  // MAHLZEITART ALS CHIPS WIE IM REZEPT-DIALOG (Critique 2026-10-16, D4).
+  // Rezept und Mahlzeit fragten dieselbe Sache einmal als Chips, einmal als
+  // Auswahlliste. Hier ist es eine Einfachauswahl: dieselben Chips, als
+  // Radiogruppe (genau einer gewaehlt). Das versteckte Feld `#modal-type`
+  // traegt den Wert - Speichern, Dirty-Check und Tests lesen es wie vorher.
+  const types = MEAL_TYPES();
+  const chosenType = types.some((mt) => mt.key === mealType) ? mealType : types[0]?.key;
+  const typeChips = types.map((mt) => {
+    const on = mt.key === chosenType;
+    return `<button type="button" class="filter-chip meal-type-chip${on ? ' filter-chip--active' : ''}" role="radio"
+              data-meal-type="${mt.key}" aria-checked="${on}" tabindex="${on ? '0' : '-1'}">${esc(mt.label)}</button>`;
+  }).join('');
 
   const listOpts = state.lists.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join('');
 
@@ -2474,15 +2544,14 @@ function buildModalContent({ mode, date, mealType, meal, fromSlot = false, recip
     </div>`}`;
 
   const whenHtml = `
-    <div class="modal-grid modal-grid--2${fromSlot && !isEdit ? ' meal-modal__when' : ''}">
-      <div class="form-group">
-        <label class="form-label" for="modal-date">${t('meals.dateLabel')}</label>
-        <yuvomi-datepicker type="date" id="modal-date" value="${formatDateInput(date)}"></yuvomi-datepicker>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="modal-type">${t('meals.mealTypeLabel')}</label>
-        <select class="form-input" id="modal-type">${typeOpts}</select>
-      </div>
+    <div class="form-group">
+      <span class="form-label" id="modal-type-label">${t('meals.mealTypeLabel')}</span>
+      <div class="meal-type-chips" id="modal-type-chips" role="radiogroup" aria-labelledby="modal-type-label">${typeChips}</div>
+      <input type="hidden" id="modal-type" value="${esc(chosenType ?? '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="modal-date">${t('meals.dateLabel')}</label>
+      <yuvomi-datepicker type="date" id="modal-date" value="${formatDateInput(date)}"></yuvomi-datepicker>
     </div>
 `;
   const nameHtml = `
@@ -2497,12 +2566,12 @@ function buildModalContent({ mode, date, mealType, meal, fromSlot = false, recip
            aria-label="${esc(t('meals.suggestionsLabel'))}" hidden></div>
     </div>
 `;
-  // AUS DEM SLOT: NAME ZUERST (Re-Critique 2026-09-28, A4 P2-9). Der Slot
-  // weiss Tag und Mahlzeit schon; oben standen trotzdem genau diese zwei
-  // Felder, und der Name lag bei 427px Hoehe unter dem Falz. Aus dem Slot
-  // fuehrt jetzt der Name (mit den Rezeptvorschlaegen des Autocompletes), Tag
-  // und Mahlzeit stehen als ruhige, weiter editierbare Zeile darunter. Ohne
-  // Slot (FAB, Kurzbefehl) bleibt "erst wann, dann was".
+  // NAME ZUERST, IMMER (Re-Critique 2026-09-28 A4 P2-9 fuer den Slot;
+  // Critique 2026-10-16 D4 fuer jeden Weg). Der Name ist das Pflichtfeld und
+  // traegt die Rezeptvorschlaege des Autocompletes; er steht oben und bekommt
+  // den Fokus. Vorher fuehrte ohne Slot (FAB, Kurzbefehl) das Datum - der
+  // Dialog fokussierte "Datum", das Pflichtfeld stand an dritter Stelle.
+  // Darunter Mahlzeitart (Chips) und Tag.
   // ZUTATEN BEIM BEARBEITEN EINGEKLAPPT, MIT ZAEHLER (R17 Schritt 5). Eine
   // Zutatenzeile misst mobil 104px; mit sechs Zutaten lag alles Weitere zwei
   // Bildschirme tiefer. Wer eine bestehende Mahlzeit oeffnet, aendert meist
@@ -2527,7 +2596,7 @@ function buildModalContent({ mode, date, mealType, meal, fromSlot = false, recip
 
   return `
     ${scopeHtml}
-    ${fromSlot && !isEdit ? nameHtml + whenHtml : whenHtml + nameHtml}
+    ${nameHtml + whenHtml}
     ${cookPickerHtml(isEdit ? meal : null)}
 
     ${ingredientsHtml}
@@ -2596,25 +2665,16 @@ async function saveModal(overlay) {
   // unterscheidet das ausdrücklich vom fehlenden Feld (Ende bleibt unverändert).
   const repeat_until = repeatUntilRaw ? parseDateInput(repeatUntilRaw) : '';
 
-  if (!date || !isDateInputValid(dateRaw)) {
-    reportFieldError(overlay.querySelector('#modal-date'), t('calendar.invalidDate'));
-    return;
-  }
-
-  if (repeatUntilRaw && (!repeat_until || !isDateInputValid(repeatUntilRaw))) {
-    reportFieldError(repeatUntilEl, t('calendar.invalidDate'));
-    return;
-  }
-
-  if (repeat_until && repeat_until < date) {
-    reportFieldError(repeatUntilEl, t('meals.recurrenceUntilBeforeStart'));
-    return;
-  }
-
-  if (!title) {
-    reportFieldError(overlay.querySelector('#modal-title'), t('common.nameRequired'));
-    return;
-  }
+  // Alle Feldfehler auf einmal, Fokus aufs erste im Bild (Critique R19):
+  // der Titel steht oben, wurde aber zuletzt geprueft.
+  const dateValid = Boolean(date) && isDateInputValid(dateRaw);
+  const untilInvalid = Boolean(repeatUntilRaw) && (!repeat_until || !isDateInputValid(repeatUntilRaw));
+  if (reportFieldErrors([
+    !title && [overlay.querySelector('#modal-title'), t('common.nameRequired')],
+    !dateValid && [overlay.querySelector('#modal-date'), t('calendar.invalidDate')],
+    untilInvalid && [repeatUntilEl, t('calendar.invalidDate')],
+    dateValid && !untilInvalid && repeat_until && repeat_until < date && [repeatUntilEl, t('meals.recurrenceUntilBeforeStart')],
+  ])) return;
 
   const ingredients = collectModalIngredients(overlay);
 

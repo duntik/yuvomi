@@ -212,17 +212,163 @@ export function markSegments(text, query) {
  * @param {number} [input.cap=6] hoechstens so viele je Abschnitt
  * @returns {{ places: object[], actions: object[] }}
  */
+/**
+ * Wie gut `label` zur Eingabe passt - kleiner ist besser (R20, Re-Critique
+ * 2026-10-17 A1 P2-4). Die Palette sortierte nach der Reihenfolge der
+ * Navigation, und „ge" stellte „Belohnungen" (enthaelt „ge") vor
+ * „Geburtstage" (beginnt damit). Wer tippt, tippt einen Anfang:
+ *   0  der Name beginnt mit dem ersten Wort der Eingabe,
+ *   1  ein Wort darin beginnt damit,
+ *   2  es steht irgendwo darin.
+ * Gleichstand behaelt die Reihenfolge der Navigation (Array.sort ist stabil).
+ */
+export function paletteRank(query, label) {
+  const [first] = paletteTokens(query);
+  if (!first) return 2;
+  const folded = [...String(label ?? '')].map(foldChar).join('');
+  if (folded.startsWith(first)) return 0;
+  return folded.split(/[^\p{L}\p{N}_]+/u).some((word) => word.startsWith(first)) ? 1 : 2;
+}
+
+const byRank = (query) => (a, b) => paletteRank(query, a.label) - paletteRank(query, b.label);
+
+/**
+ * Trifft die Eingabe das Verb der Anlege-Befehle („Neu anlegen")? Nur, wenn
+ * jedes Wort ein Wortanfang des Verbs ist und mindestens drei Zeichen hat.
+ * Vorher reichte ein Teilstueck: „an" oder „ne" holte alle vierzehn Befehle
+ * in die Palette, und die Datentreffer rutschten bei 1280x800 unter die Falz.
+ */
+function matchesVerb(query, verb) {
+  const tokens = paletteTokens(query);
+  if (!verb || !tokens.length || tokens.some((tok) => tok.length < 3)) return false;
+  const words = [...String(verb)].map(foldChar).join('').split(/[^\p{L}\p{N}_]+/u);
+  return tokens.every((tok) => words.some((word) => word.startsWith(tok)));
+}
+
 export function paletteCommands(query, { places = [], settings = [], actions = [], commands = [], cap = 6 } = {}) {
   if (!paletteTokens(query).length) return { places: [], actions: [] };
-  const hitPlaces = [...places, ...commands].filter((p) => paletteMatches(query, p.label));
+  const hitPlaces = [...places, ...commands].filter((p) => paletteMatches(query, p.label)).sort(byRank(query));
   // Nur Einstellungen, deren NAME passt: die Einstellungssuche trifft auch
   // Beschreibungen, und ein Treffer ohne sichtbaren Grund ("sch" -> "Budget")
   // ist genau das, was die Markierung abschaffen soll.
-  const hitSettings = settings.filter((s) => paletteMatches(query, s.label))
+  const hitSettings = settings.filter((s) => paletteMatches(query, s.label)).sort(byRank(query))
     .slice(0, Math.max(0, cap - hitPlaces.length));
-  const hitActions = actions.filter((a) => paletteMatches(query, a.label, a.context, a.verb));
+  const hitActions = actions
+    .filter((a) => paletteMatches(query, a.label, a.context) || matchesVerb(query, a.verb))
+    .sort(byRank(query));
   return {
-    places: [...hitPlaces, ...hitSettings].slice(0, cap),
+    places: [...hitPlaces, ...hitSettings].sort(byRank(query)).slice(0, cap),
     actions: hitActions.slice(0, cap),
   };
+}
+
+/* ── Zuletzt geoeffnet (R19, Critique 2026-10-16, Alex) ──
+ * ⌘K mit leerem Feld zeigte nur die Modul-Kacheln. Eine Palette ist fuer den
+ * Wiederholer da: was man gerade geoeffnet hat, will man als Naechstes wieder
+ * oeffnen (Raycast, Linear, Spotlight).
+ *
+ * GEMERKT WIRD NUR EIN ZIEL, NIE SEIN NAME (Sicherheits-Review R19). Die erste
+ * Fassung legte Titel und Kontext von Datentreffern im localStorage ab -
+ * Gesundheit, Dokumente, private Notizen - und die ueberlebten das Abmelden;
+ * am geteilten Familien-Tablett oder Wand-Display las sie der Naechste. Jetzt
+ * stehen dort nur `route` und `module`, und gemerkt werden nur ORTE (Ziele
+ * der Navigation, Einstellungsblaetter), keine Datentreffer: deren Namen
+ * liessen sich beim Anzeigen nicht frisch und mit Rechtepruefung holen, ohne
+ * je Art eine eigene Abfrage. Den Namen ermittelt die Anzeige aus der
+ * aktuellen Navigation bzw. den Einstellungsblaettern (`resolve` in
+ * visibleRecent); was dort nicht mehr steht (abgeschaltet, kein Recht),
+ * faellt weg. Und beim Abmelden gehen alle Listen (forgetAllRecent).
+ *
+ * Je Konto und Geraet, hoechstens RECENT_MAX Eintraege, der neueste zuerst,
+ * je Ziel einmal. Der Speicher ist eine Zugabe: wirft er (Safari privat,
+ * voll), bleibt die Liste leer, nichts bricht. */
+export const RECENT_MAX = 5;
+export const RECENT_KEY_PREFIX = 'yuvomi-palette-recent:';
+
+/** Speicher-Schluessel je Konto - ein geteiltes Tablett mischt sonst Familien. */
+export function recentStorageKey(userId) {
+  return `${RECENT_KEY_PREFIX}${userId ?? 'anon'}`;
+}
+
+/** Ein Eintrag ist brauchbar, wenn er ein Ziel IN der App und ein Modul hat. */
+function isRecentEntry(entry) {
+  return Boolean(entry)
+    && typeof entry.module === 'string' && entry.module !== ''
+    && typeof entry.route === 'string' && entry.route.startsWith('/') && !entry.route.startsWith('//');
+}
+
+/**
+ * Die Liste nach dem Oeffnen von `entry`: vorn eingereiht, das alte Vorkommen
+ * desselben Ziels entfernt, auf RECENT_MAX gekuerzt. Behalten werden NUR
+ * `route` und `module` - was der Aufrufer sonst mitgibt (Titel, Kontext),
+ * landet nie im Speicher. Reine Funktion.
+ * @returns {Array<{route: string, module: string}>}
+ */
+export function pushRecent(list, entry, max = RECENT_MAX) {
+  const prior = Array.isArray(list) ? list.filter(isRecentEntry).map(({ route, module }) => ({ route, module })) : [];
+  if (!isRecentEntry(entry)) return prior.slice(0, max);
+  const clean = { route: entry.route, module: entry.module };
+  return [clean, ...prior.filter((e) => e.route !== clean.route)].slice(0, max);
+}
+
+/** Liest die Liste; alles Unlesbare ist eine leere Liste. */
+export function readRecent(storage, userId) {
+  try {
+    const parsed = JSON.parse(storage?.getItem(recentStorageKey(userId)) ?? '[]');
+    return pushRecent(Array.isArray(parsed) ? parsed : [], null);
+  } catch {
+    return [];
+  }
+}
+
+/** Merkt ein geoeffnetes Ziel; ein werfender Speicher ist kein Fehler. */
+export function rememberRecent(storage, userId, entry) {
+  const next = pushRecent(readRecent(storage, userId), entry);
+  try { storage?.setItem(recentStorageKey(userId), JSON.stringify(next)); } catch { /* nur Zugabe */ }
+  return next;
+}
+
+/**
+ * Vergisst ALLE Listen auf diesem Geraet (jedes Konto) - beim Abmelden und
+ * wenn die Sitzung ablaeuft (forgetSessionState im Router).
+ */
+export function forgetAllRecent(storage) {
+  try {
+    const keys = [];
+    for (let i = 0; i < (storage?.length ?? 0); i++) {
+      const key = storage.key(i);
+      if (typeof key === 'string' && key.startsWith(RECENT_KEY_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) storage.removeItem(key);
+  } catch { /* nur Zugabe */ }
+}
+
+/**
+ * Die Liste zum Anzeigen: jeder Eintrag bekommt seinen Namen JETZT aus
+ * `resolve(entry)` (aktuelle Navigation, Einstellungsblaetter) - liefert der
+ * nichts (Modul abgeschaltet, ausgeblendet, kein Recht, Blatt weg), faellt
+ * der Eintrag heraus, statt auf eine Tuer zu zeigen, die nicht mehr aufgeht.
+ * @param {Array<{route: string, module: string}>} list
+ * @param {(entry: {route: string, module: string}) => ({label: string, context?: string}|null)} resolve
+ */
+export function visibleRecent(list, resolve) {
+  return (Array.isArray(list) ? list : []).filter(isRecentEntry).flatMap((entry) => {
+    const found = typeof resolve === 'function' ? resolve(entry) : null;
+    return found?.label ? [{ ...entry, label: found.label, context: found.context || '' }] : [];
+  });
+}
+
+/**
+ * Die Ansage der Palette zu ihren Zeilen. `count` zaehlt jede waehlbare Zeile.
+ * Steht ohne jeden Treffer allein „als Aufgabe anlegen" da (`createLabel`),
+ * waere „1 Ergebnis" falsch und „Keine Ergebnisse" verschwiege die waehlbare
+ * Zeile (Codex-Review PR #2053): dann sagt sie beides, wie es dasteht.
+ * @param {number} count
+ * @param {{ createLabel?: string|null }} opts
+ * @param {(key: string, params?: object) => string} tr
+ */
+export function paletteStatusText(count, { createLabel = null } = {}, tr) {
+  if (createLabel) return `${tr('search.noResults')} ${createLabel}`;
+  if (count === 0) return tr('search.noResults');
+  return count === 1 ? tr('search.resultCountOne', { count }) : tr('search.resultCountMany', { count });
 }

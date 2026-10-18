@@ -305,27 +305,26 @@ const DIALOG_REGISTRY = {
   'public/components/document-attach.js': [{ bars: ['doc-attach-picker__header', 'doc-attach-picker__footer'] }],
   'public/components/datepicker.js': [{ none: true, why: 'Monatsraster ohne Leiste; jeder Tag ist ein Knopf und damit selbst Leiste' }],
   'public/pages/budget.js': [{ bars: ['budget-inline-modal__header', 'budget-inline-modal__footer'] }],
-  'public/pages/calendar.js': [
-    { panel: ['modal-panel__header'] },
-    // R14 (Re-Critique 2026-09-28, A2 P2-7): die Filter am Desktop als natives
-    // Popover am Knopf. Den Inhalt samt Fuss (Aufheben) baut das Filterblatt
-    // vor der Rolle; die Platzierung nimmt jeden sichtbaren Knopf ohnehin dazu.
-    { none: true, why: 'Filter-Popover: Haken und Fuss kommen fertig aus dem Filterblatt, ausgezeichnet wird nichts eigenes' },
-  ],
+  // Das eigene Filter-Popover des Kalenders ist seit D2 (Critique 2026-10-16)
+  // weg: der Kalender oeffnet das geteilte Filterblatt (utils/filter-sheet.js).
+  'public/pages/calendar.js': [{ panel: ['modal-panel__header'] }],
   'public/pages/dashboard.js': [{ bars: ['onboarding-actions'] }],
   'public/pages/documents.js': [{ bars: ['dms-preview__header', 'dms-preview__actions'] }],
   'public/pages/inventory.js': [{ bars: ['inventory-booking-picker__header', 'inventory-booking-picker__nav', 'inventory-booking-picker__role-footer'] }],
   'public/pages/subscriptions.js': [{ bars: ['subscriptions-logo-picker-head', 'subscriptions-logo-search'] }],
   // R17 (E13): das Filter-Popover am Desktop baut das Filterblatt selbst, fuer
-  // jedes Modul, das es am Knopf oeffnet (Aufgaben; der Kalender traegt seins
-  // noch im eigenen Modul). Inhalt und Fuss sind die des Blatts.
+  // jedes Modul, das es am Knopf oeffnet (Aufgaben, Kalender). Inhalt und Fuss
+  // sind die des Blatts.
   'public/utils/filter-sheet.js': [
     { none: true, why: 'Filter-Popover: Haken und Fuss kommen fertig aus dem Filterblatt, ausgezeichnet wird nichts eigenes' },
   ],
   'public/router.js': [
     { none: true, why: 'Mehr-Blatt: Navigation ohne Kopf- und Fusszeile, seine Links sind selbst die Leisten' },
     { none: true, why: 'Suche: Feld und Treffer sind selbst die Leisten' },
-    { panel: ['modal-panel__header'] },
+    // Der Tastenkuerzel-Dialog (showHelpModal) baut seit R20 (Schritt D) kein
+    // eigenes Panel mehr: er laeuft ueber openModal() und ist damit ein Dialog
+    // von modal.js, dessen modal-panel__header dort steht. Dass er dabei
+    // bleibt, haelt der Test unter dem Register.
   ],
 };
 
@@ -334,7 +333,9 @@ const MODAL_PANEL_ZONE = /modal-panel__header|modal-panel__footer|modal-actions/
 // Ein Attribut-Selektor (`[role="dialog"]`) FRAGT nach Dialogen, er baut
 // keinen: das Popover der Leseansicht laesst so Klicks in einer anderen Ebene
 // durch (Re-Kritik 2026-09-28, E2) und zaehlte sonst als zweiter Dialog.
-const DIALOG_ROLE = /(?<!\[)role="dialog"|setAttribute\(\s*'role'\s*,\s*'dialog'\s*\)/g;
+// Seit D7 baut das geteilte Modal ein natives `<dialog ...>` - die Rolle ist
+// dort implizit und steht als kein Attribut im Markup, der Dialog zaehlt aber.
+const DIALOG_ROLE = /(?<!\[)role="dialog"|setAttribute\(\s*'role'\s*,\s*'dialog'\s*\)|<dialog\s/g;
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -425,6 +426,17 @@ test('jeder Dialog zeichnet genau die Leisten aus, die das Register nennt - nach
     if (DIALOG_REGISTRY[file]) continue;
     assert.equal(countMarks(code(file)), 0, `${file}: traegt data-dialog-actions, baut aber keinen registrierten Dialog`);
   }
+});
+
+test('der Tastenkuerzel-Dialog laeuft ueber den geteilten Dialog, nicht ueber ein eigenes Panel', () => {
+  const source = code('public/router.js');
+  const start = source.indexOf('function showHelpModal(');
+  assert.ok(start >= 0, 'showHelpModal fehlt in router.js');
+  const next = source.slice(start + 1).search(/\nfunction |\nasync function |\nexport /);
+  const body = source.slice(start, next < 0 ? undefined : start + 1 + next);
+  assert.ok(body.includes('openModal('), 'showHelpModal ruft openModal nicht auf');
+  assert.equal((body.match(DIALOG_ROLE) || []).length, 0,
+    'showHelpModal baut wieder eine eigene Dialog-Rolle - im Register als eigener router.js-Dialog eintragen');
 });
 
 // --------------------------------------------------------

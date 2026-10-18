@@ -44,7 +44,7 @@ export const NAVIGATE_DEPS = Object.freeze([
   'hasLeaveGuard', 'mayLeave', 'whenHistorySettled', 'consumeOverlayMarker',
   // Sitzung
   'auth', 'syncPreferencesOnce', 'startThirdPartyModulePolling', 'loadReminderStyles', 'initReminders', 'initPush',
-  'armScreensaver',
+  'armScreensaver', 'showSessionUnreachable',
   // Seite
   'rememberScrollPosition', 'scrollPositionFor', 'renderPage', 'adoptPageFab', 'updateNav', 'topLevelSection',
   'syncWallMode', 'applyModuleAccentForRoute', 'updateThemeColorForRoute', 'updateBranding',
@@ -67,6 +67,30 @@ export function prefetchPathOf(dataset) {
   const target = dataset?.navHref ?? dataset?.route;
   if (typeof target !== 'string') return null;
   return target.split(/[?#]/)[0] || null;
+}
+
+/** Grund eines ueberholten Seitenaufbaus - einmal erzeugt, ohne Stapel der Navigation. */
+const NAVIGATION_SUPERSEDED = typeof DOMException === 'function'
+  ? new DOMException('A newer navigation took over.', 'AbortError')
+  : undefined;
+
+/**
+ * Zeigt `target` auf die Adresse, die gerade steht - Pfad UND Query (R20)?
+ *
+ * Der Tipp auf den aktiven Tab (oder dieselbe Zeile im Mehr-Blatt, in der
+ * Seitenleiste) baute die Seite neu, sprang hart nach oben und legte einen
+ * zweiten History-Eintrag mit derselben Adresse an: Zurueck tat danach
+ * sichtbar nichts (Re-Critique 2026-10-17, a1 P2-1). Wie der Tab einer
+ * iOS-Leiste fuehrt er jetzt nur nach oben. Ein Hash zaehlt nicht mit, eine
+ * andere Query schon: `/tasks?open=3` -> `/tasks` ist ein echter Rueckweg.
+ *
+ * @param {string|null|undefined} target
+ * @param {{pathname?: string, search?: string}|null|undefined} loc
+ */
+export function isCurrentAddress(target, loc) {
+  if (typeof target !== 'string' || typeof loc?.pathname !== 'string') return false;
+  const address = target.split('#')[0];
+  return address === loc.pathname + (loc.search || '');
 }
 
 /**
@@ -122,6 +146,42 @@ export function focusMainAfterNavigation(path, { document, requestAnimationFrame
 }
 
 /**
+ * Wartet auf `promise`, bis es fertig ist ODER `signal` abbricht (Review
+ * #2049). renderPage() wartete blank auf `module.render()`, auch wenn die
+ * Navigation laengst ueberholt war - und Seiten wie der Kalender rufen ihr
+ * erstes api.get() ohne Signal: ein haengender Abruf hielt den neueren Tipp
+ * unbegrenzt auf, denn der wartende startet erst im finally von navigate().
+ *
+ * Ein Fehler VOR dem Abbruch bleibt ein Fehler (renderPage zeigt ihn). Einer
+ * DANACH - die Seite bricht ihr Laden ab - wird geschluckt: niemand wartet
+ * mehr darauf, und als unbehandelte Ablehnung waere er nur Rauschen.
+ *
+ * @param {Promise<unknown>|unknown} promise
+ * @param {AbortSignal|null} signal
+ * @returns {Promise<boolean>} true, wenn fertig; false, wenn abgebrochen
+ */
+export function unlessAborted(promise, signal) {
+  const work = Promise.resolve(promise);
+  if (!signal) return work.then(() => true);
+  if (signal.aborted) {
+    work.catch(() => {});
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => resolve(false);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      () => { signal.removeEventListener('abort', onAbort); resolve(true); },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        if (signal.aborted) resolve(false);
+        else reject(err);
+      },
+    );
+  });
+}
+
+/**
  * @param {object} state - der geteilte Zustand, Felder wie in NAVIGATE_STATE
  * @param {object} deps - Abhaengigkeiten, Namen wie in NAVIGATE_DEPS
  * @returns {(path: string, userOrPushState?: object|boolean, pushState?: boolean) => Promise<void>}
@@ -137,7 +197,7 @@ export function createNavigate(state, deps) {
     location, history, window, document,
     hasLeaveGuard, mayLeave, whenHistorySettled, consumeOverlayMarker,
     auth, syncPreferencesOnce, startThirdPartyModulePolling, loadReminderStyles, initReminders, initPush,
-    armScreensaver,
+    armScreensaver, showSessionUnreachable,
     rememberScrollPosition, scrollPositionFor, renderPage, adoptPageFab, updateNav, topLevelSection,
     syncWallMode, applyModuleAccentForRoute, updateThemeColorForRoute, updateBranding,
     focusMainContentAfterNavigation, showToast, t,
@@ -182,8 +242,41 @@ export function createNavigate(state, deps) {
    *   oder boolean (pushState) für interne Navigation
    * @param {boolean} pushState - false beim initialen Load und popstate
    */
+  /*
+   * DER LETZTE TIPP GEWINNT (Critique R19, Nachlese 1b). Bis hierher verwarf
+   * navigate() jeden Aufruf, solange eine Navigation lief - wer waehrend des
+   * Ladens einer Seite ein zweites Ziel antippte, blieb auf dem ersten (im
+   * Browser gemessen: 1 von 24 schnellen Doppeltipps).
+   *
+   * Jetzt wartet der neue Wunsch als EINER (`queued`; ein noch neuerer
+   * ersetzt ihn), und die laufende Navigation wird abgebrochen (`running`):
+   * renderPage() rendert ein ueberholtes Seitenmodul nach seinem Laden nicht
+   * mehr, und eine schon gezeichnete Seite bekommt ihr Signal entzogen. Danach
+   * startet der wartende Wunsch - durch dieselben Weichen, denselben
+   * Verlassen-Schutz und dieselbe Sperre wie jeder andere. Hat die ueberholte
+   * Navigation schon einen History-Eintrag geschrieben, ERSETZT der naechste
+   * ihn: Zurueck fuehrt nicht auf eine Seite, die nie zu sehen war. Ein
+   * Sitzungsende (`_pendingLoginRedirect`) geht dem Wartenden vor.
+   */
+  let running = null;
+  let queued = null;
+  let replaceNextEntry = false;
+
+  function startQueued() {
+    const next = queued;
+    queued = null;
+    if (next) navigate(...next.args).then(next.resolve, next.resolve);
+  }
+
   async function navigate(path, userOrPushState = true, pushState = true) {
-    if (state.isNavigating) return;
+    if (state.isNavigating) {
+      queued?.resolve();
+      // Ein fester Grund statt einer neuen Ausnahme je Abbruch (deren Stapel
+      // hielte die laufende Navigation fest, siehe PAGE_LEFT in router.js).
+      running?.abort(NAVIGATION_SUPERSEDED);
+      return new Promise((resolve) => { queued = { args: [path, userOrPushState, pushState], resolve }; });
+    }
+    const run = new AbortController();
     // UNBEKANNTE ADRESSE (#1607): statt still die Uebersicht unter der toten
     // Adresse zu zeichnen, laeuft DIESE Navigation mit dem naechsten bekannten
     // Vorfahren weiter. Bewusst kein zweites navigate(): das gab im finally die
@@ -235,6 +328,7 @@ export function createNavigate(state, deps) {
       return;
     }
     state.isNavigating = true;
+    running = run;
     commitDetourAddress(userOrPushState);
 
     // Offenes „Mehr“-Sheet beim Navigieren immer schließen - robust und
@@ -361,13 +455,26 @@ export function createNavigate(state, deps) {
             initReminders();
             initPush();
           }
-        } catch {
+        } catch (err) {
           state.currentPath = null; // Reset damit navigate('/login') nicht geblockt wird
           state.isNavigating = false;
           // _pendingLoginRedirect leeren: der catch ruft navigate('/login') direkt auf,
           // der finally soll keinen zweiten Aufruf starten (würde isNavigating=true setzen,
           // während die Login-Seite rendert, und so post-login navigate blockieren).
           state._pendingLoginRedirect = false;
+          // NUR EIN 401 HEISST "NICHT ANGEMELDET" (Critique R19, 2026-10-16).
+          // Bis hierher fuehrte jeder Fehler zur Anmeldung: eine Bremse (429),
+          // ein Serverfehler, ein Netzabbruch beim Kaltstart - mit gueltigen
+          // Cookies. Alles ausser dem 401 zeigt jetzt den Fehlerzustand der
+          // Shell, der selbst erneut versucht (utils/session-unreachable.js).
+          // Derselbe Pfad und dieselbe Art wie dieser Aufruf, damit ein Erfolg
+          // dort landet, wo die Navigation hinwollte.
+          if (err?.status !== 401) {
+            const retryPath = path;
+            const retryPush = pushState;
+            showSessionUnreachable(err, () => navigate(retryPath, retryPush));
+            return;
+          }
           navigate(state._setupRequired ? '/setup' : '/login');
           return;
         }
@@ -430,6 +537,9 @@ export function createNavigate(state, deps) {
         return;
       }
 
+      // Nur die direkt folgende Navigation tritt an die Stelle einer ueberholten.
+      const replaceEntry = replaceNextEntry;
+      replaceNextEntry = false;
       if (pushState) {
         /* EIN DIALOG UEBERLEBT KEINE NAVIGATION (#871). Er stuende sonst ueber
          * der falschen Seite - genau der gemeldete Zustand, nur andersherum
@@ -440,8 +550,13 @@ export function createNavigate(state, deps) {
          * WAR ER ES, TRITT DIE NEUE SEITE AN SEINE STELLE. Laege sie darueber,
          * zeigte der Rueckweg zuerst auf einen Eintrag mit derselben Adresse -
          * eine Geste, die sichtbar nichts tut. */
-        if (consumeOverlayMarker()) history.replaceState({ path }, '', detourAddress ?? path);
-        else history.pushState({ path }, '', detourAddress ?? path);
+        /* DIESELBE ADRESSE IST KEIN NEUER SCHRITT (R20). Ein zweiter Eintrag
+         * mit der Adresse, die schon steht, macht Zurueck zu einer Geste ohne
+         * sichtbare Wirkung - derselbe Fehler wie beim Dialog-Platzhalter.
+         * Zuerst consumeOverlayMarker(): es schliesst auch dann offene Dialoge. */
+        const address = detourAddress ?? path;
+        if (consumeOverlayMarker() || replaceEntry || isCurrentAddress(address, location)) history.replaceState({ path }, '', address);
+        else history.pushState({ path }, '', address);
       }
 
       // Soft-Navigation innerhalb desselben Moduls (z. B. Settings-Blatt → Blatt
@@ -457,15 +572,26 @@ export function createNavigate(state, deps) {
       ) {
         let handled = false;
         try {
-          handled = await state._renderedModule.update({
+          // UEBERHOLBAR WIE renderPage() (Review #2049, Runde 2). update()
+          // wartet auf Daten - Schedules Reiterwechsel auf activateView() und
+          // dessen Abruf ohne Signal. Blank abgewartet hielt das den naechsten
+          // Tipp auf, denn der wartende startet erst im finally. Das Signal
+          // reist mit; endet das Warten mit dem Abbruch, kehrt diese
+          // Navigation zurueck, ohne Scroll, FAB oder Nav anzufassen - und
+          // ohne ein spaetes false noch auf ein volles Rendern umzulenken.
+          const updating = state._renderedModule.update({
             user: state.currentUser,
             path: basePath,
             query: new URLSearchParams(path.split('?')[1] ?? ''),
+            signal: run.signal,
           });
+          if (!(await unlessAborted(updating, run.signal))) return;
+          handled = await updating;
         } catch (error) {
           console.error('[Router] Soft-Update fehlgeschlagen, vollständiges Rendern folgt:', error);
           handled = false;
         }
+        if (run.signal.aborted) return;
         if (handled) {
           // Auch die Soft-Navigation wechselt den Inhalt (Settings-Blatt, Health-Tab)
           // und muss den Scrollport nachziehen - hier zwangsläufig NACH dem Render,
@@ -507,7 +633,18 @@ export function createNavigate(state, deps) {
         updateThemeColorForRoute(route);
       }
 
-      await renderPage(route, previousPath, scrollTarget);
+      const shown = await renderPage(route, previousPath, scrollTarget, { signal: run.signal });
+      if (run.signal.aborted) {
+        // Ueberholt. Hat renderPage() nichts gezeichnet (`false`), gilt die
+        // Seite, die zu sehen ist, und der Eintrag dieser Navigation gehoert dem
+        // naechsten Ziel. Steht die Seite schon, bleibt beides - Nav, Titel und
+        // Fokus zieht ohnehin die naechste Navigation nach.
+        if (shown === false) {
+          if (state.currentPath === basePath) state.currentPath = previousPath;
+          if (pushState) replaceNextEntry = true;
+        }
+        return;
+      }
       // Autoritative Aktualisierung nach dem Render: deckt den Erstlade-Fall ab und
       // markiert ggf. seiten-interne [data-route]-Links (idempotent).
       // Settings-Blätter teilen sich den /settings Nav-Eintrag (aria-current).
@@ -516,19 +653,28 @@ export function createNavigate(state, deps) {
       updateBranding(basePath);
       focusMainContentAfterNavigation(basePath);
     } finally {
+      // Hat eine Weiche oben schon die naechste Navigation gestartet, gehoert
+      // ihr der Wartende - nicht diesem finally.
+      const handOver = running === run;
       state.isNavigating = false;
+      if (handOver) running = null;
       // Im finally, weil auch die Soft-Navigation (Settings-Blatt) frueh
       // zurueckkehrt - und nach dem Rendern, weil es die Toast-Flaeche beim
       // Kaltstart erst mit der Shell gibt. Deshalb leitet die Gast-Weiche oben
       // nicht mehr ueber ein zweites navigate() weiter (#1640): dieses finally
       // lief dann VOR dessen Rendern, und der Hinweis fand keine Flaeche.
-      if (unknownNotice) showToast(t('common.unknownAddress'), 'default', 5000);
+      // Eine ueberholte Navigation meldet ihre Adresse nicht mehr.
+      if (unknownNotice && !run.signal.aborted) showToast(t('common.unknownAddress'), 'default', 5000);
       // auth:expired kann waehrend einer Navigation gefeuert haben (z.B. wenn ein
       // paralleler API-Call 401 zurueckgab). Jetzt wo die Navigation abgeschlossen
       // ist, holen wir die Login-Weiterleitung nach.
       if (state._pendingLoginRedirect) {
         state._pendingLoginRedirect = false;
+        queued?.resolve();
+        queued = null;
         navigate('/login');
+      } else if (handOver) {
+        startQueued();
       }
     }
   }

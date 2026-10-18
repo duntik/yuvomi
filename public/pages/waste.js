@@ -15,7 +15,7 @@ import { api } from '/api.js';
 import { t, formatDate, getLocale } from '/i18n.js';
 import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { todayKey, addLocalDays, parseLocalDateKey, toLocalDateKey } from '/utils/date.js';
-import { openModal, closeModal, confirmModal, confirmOverModal, btnLoading, refocusAfterRender } from '/components/modal.js';
+import { openModal, closeModal, confirmModal, confirmOverModal, btnLoading, refocusAfterRender, reportFieldError } from '/components/modal.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { emptyStateHTML, mountLoadError } from '/utils/empty-state.js';
 import {
@@ -491,6 +491,55 @@ function typeWithoutScheduleLine(typeId, occurrences = state.occurrences) {
   return next ? `${t('waste.nextPickupLabel')}: ${pickupWhenLabel(next.date_key)}` : t('waste.noSchedulesYet');
 }
 
+/**
+ * "Noch kein Termin" MIT DEM WEG DORTHIN (R20, Re-Critique 2026-10-17 a2
+ * P2-5). Die Zeile sagte, was fehlt, und der Weg lag im "..." der Karte. Jetzt
+ * steht "Termin hinzufuegen" daneben - derselbe `add-schedule` wie im Menue.
+ * Nicht bei einer archivierten Abfallart (sie nimmt keine Termine an) und nicht
+ * bei `read`; und nicht, wenn eine Einzelabholung schon die naechste nennt.
+ */
+function typeWithoutScheduleHtml(type, ro = readOnly()) {
+  const line = typeWithoutScheduleLine(type.id);
+  const offer = !ro && !type.archived && !state.occurrences.some((occ) => occ.type_id === type.id);
+  if (!offer) return `<p class="waste-schedule-list__empty">${esc(line)}</p>`;
+  return `<div class="waste-schedule-list__empty waste-schedule-list__empty--action"><span>${esc(line)}</span>`
+    + `<button type="button" class="btn btn--secondary btn--sm" data-action="add-schedule" data-type-id="${type.id}"><i data-lucide="plus" aria-hidden="true"></i>${esc(t('waste.addSchedule'))}</button></div>`;
+}
+
+/**
+ * Die Vorlagen, die der Haushalt noch nicht hat (R20). Im Onboarding standen
+ * sechs Chips, nach der ersten Abfallart keiner mehr - wer Bio und Papier
+ * auch braucht, musste in den Dialog. Jetzt bleiben die uebrigen als leise
+ * Zeile unter den Karten.
+ *
+ * VORHANDEN HEISST: gleicher Name in der eigenen Sprache (ohne Gross/klein)
+ * ODER Symbol und Farbe der Vorlage. Der Name allein reicht nicht, weil die
+ * Vorlage ihn in der Sprache dessen anlegt, der getippt hat: legt ein
+ * Mitglied auf Deutsch "Bioabfall" an, bot die Zeile einem englischen
+ * Mitglied "Organic" erneut an, und ein Tipp legte die Dublette an
+ * (Codex-Review PR #2053). Symbol und Farbe schreibt die Vorlage in jeder
+ * Sprache gleich, und jede Vorlage traegt ein eigenes Symbol. Eine eigene
+ * Art trifft das Paar nur, wenn sie Symbol UND Farbe der Vorlage waehlt - dann
+ * ist sie diese Vorlage; ein Import landet auf `DEFAULT_TYPE_COLOR` (#22C55E),
+ * keiner Vorlagenfarbe. Ohne Schemaaenderung, ohne alle Sprachdateien zu laden.
+ */
+function remainingTypePresets(types = state.types) {
+  const names = new Set(types.map((type) => String(type.name ?? '').trim().toLowerCase()));
+  const looks = new Set(types.map((type) => `${type.icon ?? ''}|${String(type.color ?? '').toUpperCase()}`));
+  return TYPE_PRESETS.filter((preset) => !names.has(presetLabel(preset).trim().toLowerCase())
+    && !looks.has(`${preset.icon}|${preset.color.toUpperCase()}`));
+}
+
+function remainingPresetsHtml() {
+  if (readOnly()) return '';
+  const presets = remainingTypePresets();
+  if (!presets.length) return '';
+  return `<div class="waste-type-presets-more" role="group" aria-label="${esc(t('waste.typePresetLabel'))}">`
+    + presets.map((preset) => `<button type="button" class="filter-chip waste-onboarding__preset" data-action="create-preset-type" data-preset="${preset.key}">`
+      + `<i data-lucide="${esc(preset.icon)}" style="color:${esc(preset.color)}" aria-hidden="true"></i><span>${esc(presetLabel(preset))}</span></button>`).join('')
+    + '</div>';
+}
+
 function typeCardHtml(type, index, total) {
   const schedules = schedulesForType(type.id);
   const ro = readOnly();
@@ -531,7 +580,7 @@ function typeCardHtml(type, index, total) {
           </div>`}
       </div>
       <div class="waste-schedule-list">
-        ${schedules.length ? schedules.map(scheduleRowHtml).join('') : `<p class="waste-schedule-list__empty">${esc(typeWithoutScheduleLine(type.id))}</p>`}
+        ${schedules.length ? schedules.map(scheduleRowHtml).join('') : typeWithoutScheduleHtml(type, ro)}
       </div>
     </div>`;
 }
@@ -655,6 +704,12 @@ async function createPresetType(key, button) {
  */
 function pageModeClasses(s) {
   return {
+    // WAEHREND DES LADENS STEHT DIE SEITENSPALTE NICHT DA (R20, Re-Critique
+    // 2026-10-17 a2 P2-3: CLS mobil 0,24-0,42). Ihr Skelett stand unter dem
+    // der Abholungen und sprang nach dem Laden nach oben (Onboarding: die
+    // Abholungen fallen weg) oder schrumpfte (mit Daten). Sie erscheint jetzt
+    // mit ihrem Inhalt - Erscheinen verschiebt nichts (waste.css).
+    'waste-page--loading': Boolean(s.loading),
     'waste-page--onboarding': isOnboarding(s),
     'waste-page--no-active-type': fabIntent(s).creates === 'type',
   };
@@ -700,7 +755,8 @@ function drawTypes(host) {
     return;
   }
   host.replaceChildren();
-  host.insertAdjacentHTML('beforeend', state.types.map((type, index) => typeCardHtml(type, index, state.types.length)).join(''));
+  host.insertAdjacentHTML('beforeend', state.types.map((type, index) => typeCardHtml(type, index, state.types.length)).join('')
+    + remainingPresetsHtml());
   if (window.lucide) window.lucide.createIcons({ el: host });
 }
 
@@ -1001,7 +1057,7 @@ async function pickTypeIcon(button) {
   const hidden = form?.querySelector('input[name="icon"]');
   if (!hidden) return;
   const { openIconPicker } = await import('/components/icon-picker.js');
-  const chosen = await openIconPicker(hidden.value || null, { suggestions: TYPE_ICON_SUGGESTIONS });
+  const chosen = await openIconPicker(hidden.value || null, { suggestions: TYPE_ICON_SUGGESTIONS, owner: button });
   if (chosen === undefined) return;
   hidden.value = chosen ?? '';
   setTypeIconButtonIcon(button, chosen);
@@ -1076,7 +1132,7 @@ function openTypeModal(type = null) {
     </div>`}
     <div class="form-group">
       <label class="form-label" for="wtm-name">${t('waste.typeNameLabel')}${REQUIRED_MARK}</label>
-      <input type="text" class="form-input" id="wtm-name" maxlength="100" value="${esc(isEdit ? type.name : '')}">
+      <input type="text" class="form-input" id="wtm-name" maxlength="100" value="${esc(isEdit ? type.name : '')}" required>
     </div>
     <div class="form-group">
       <label class="form-label">${t('waste.typeIconLabel')}</label>
@@ -1237,6 +1293,46 @@ function openTypeModal(type = null) {
  * in einer benannten Gruppe; der gewaehlte Stand steht zusaetzlich in einem
  * versteckten Feld, damit der Verwerfen-Schutz des Dialogs die Aenderung sieht.
  * `weekdayPickerValue()` liest die Chips, `wireWeekdayPicker()` schaltet sie. */
+/**
+ * "ALLE N WOCHEN" ALS STEPPER (R20, Re-Critique 2026-10-17 a2 P3). Ein nacktes
+ * Zahlenfeld verlangte fuer "alle 2 Wochen" die Tastatur; die Werte sind fast
+ * immer 1, 2 oder 4. Das Feld bleibt das native `<input type="number">` (sein
+ * `<label for>`, Tastatur und Pfeiltasten wie gehabt), links und rechts ein
+ * Knopf, der um eins schreibt und `input` meldet - der Dialog liest weiter
+ * `#wsm-interval`. An den Grenzen (1, 52) ist der Knopf `disabled`: hier ist
+ * das die Auskunft "weiter geht es nicht", kein toter Weg.
+ */
+function intervalStepperHtml(value) {
+  const v = Math.min(52, Math.max(1, Number(value) || 1));
+  return `<div class="waste-interval-stepper">`
+    + `<button type="button" class="btn btn--secondary btn--icon" data-interval-step="-1" aria-controls="wsm-interval" aria-label="${esc(t('waste.intervalDecrease'))}"${v <= 1 ? ' disabled' : ''}><i data-lucide="minus" class="icon-md" aria-hidden="true"></i></button>`
+    + `<input type="number" class="form-input waste-interval-stepper__input" id="wsm-interval" min="1" max="52" step="1" inputmode="numeric" value="${esc(String(v))}">`
+    + `<button type="button" class="btn btn--secondary btn--icon" data-interval-step="1" aria-controls="wsm-interval" aria-label="${esc(t('waste.intervalIncrease'))}"${v >= 52 ? ' disabled' : ''}><i data-lucide="plus" class="icon-md" aria-hidden="true"></i></button>`
+    + `</div>`;
+}
+
+/** Verdrahtet den Stepper: Knopf schreibt den Wert, das Feld haelt die Knoepfe nach. */
+function wireIntervalStepper(root) {
+  const input = root.querySelector('#wsm-interval');
+  if (!input) return;
+  const buttons = [...root.querySelectorAll('[data-interval-step]')];
+  const sync = () => {
+    const v = Number(input.value) || 1;
+    for (const btn of buttons) btn.disabled = Number(btn.dataset.intervalStep) < 0 ? v <= 1 : v >= 52;
+  };
+  for (const btn of buttons) {
+    btn.addEventListener('click', () => {
+      const next = Math.min(52, Math.max(1, (Number(input.value) || 1) + Number(btn.dataset.intervalStep)));
+      input.value = String(next);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      sync();
+      // An der Grenze wird der Knopf disabled und verloere den Fokus - dann zum Feld.
+      if (btn.disabled) input.focus();
+    });
+  }
+  input.addEventListener('input', sync);
+}
+
 function weekdayPickerHtml(selected) {
   const set = new Set(String(selected ?? '').split(',').filter(Boolean));
   const chosen = WEEKDAY_CODES.filter((code) => set.has(code));
@@ -1249,6 +1345,22 @@ function weekdayPickerHtml(selected) {
 function weekdayPickerValue(root) {
   return [...root.querySelectorAll('.waste-weekday-picker [data-weekday][aria-pressed="true"]')]
     .map((el) => el.dataset.weekday);
+}
+
+/**
+ * "Mindestens ein Wochentag" an der Tagesgruppe statt im Toast (Re-Critique
+ * 2026-10-17). Die Meldung steht unter den Chips, die Gruppe beschreibt sie
+ * (aria-describedby), der Fokus geht auf den ersten Tag - der Baustein selbst
+ * faende nur das versteckte Feld. Die naechste Wahl raeumt die Meldung weg:
+ * das versteckte Feld meldet `input`, und das blubbert zur Gruppe.
+ */
+function reportWeekdaysMissing(root) {
+  const picker = root.querySelector('.waste-weekday-picker');
+  if (!picker) return false;
+  reportFieldError(picker, t('waste.errorScheduleWeekdaysRequired'), { focus: false });
+  picker.querySelector('[data-weekday]')?.focus({ preventScroll: true });
+  picker.scrollIntoView?.({ block: 'center' });
+  return false;
 }
 
 function wireWeekdayPicker(root) {
@@ -1291,7 +1403,7 @@ function openScheduleModal(type, schedule = null) {
         <option value="monthly_ordinal_weekday"${isOrdinal ? ' selected' : ''}>${t('waste.recurrenceMonthlyOrdinal')}</option>
       </select>
     </div>
-    <div class="form-group" id="wsm-weekly-fields" ${kind === 'weekly' ? '' : 'hidden'}>
+    <div class="form-group form-field" id="wsm-weekly-fields" ${kind === 'weekly' ? '' : 'hidden'}>
       <span class="form-label" id="wsm-weekdays-label">${t('waste.weekdaysLabel')}</span>
       ${weekdayPickerHtml(schedule?.weekdays)}
     </div>
@@ -1315,7 +1427,7 @@ function openScheduleModal(type, schedule = null) {
     </div>
     <div class="form-group">
       <label class="form-label" for="wsm-interval">${t('waste.intervalLabelWeekly')}</label>
-      <input type="number" class="form-input" id="wsm-interval" min="1" max="52" value="${esc(String(schedule?.interval ?? 1))}">
+      ${intervalStepperHtml(schedule?.interval ?? 1)}
     </div>
     <div class="form-group">
       <label class="form-label" for="wsm-anchor">${t('waste.anchorDateLabel')}</label>
@@ -1348,6 +1460,7 @@ function openScheduleModal(type, schedule = null) {
       panel.querySelector('#wsm-cancel').addEventListener('click', () => closeModal());
 
       wireWeekdayPicker(panel);
+      wireIntervalStepper(panel);
       const kindSelect = panel.querySelector('#wsm-kind');
       const weeklyFields = panel.querySelector('#wsm-weekly-fields');
       const monthlyFields = panel.querySelector('#wsm-monthly-fields');
@@ -1402,6 +1515,7 @@ function openScheduleModal(type, schedule = null) {
         const body = { type_id: typeId, recurrence_kind: kindValue, anchor_date: anchor, interval, valid_until: validUntil, active };
         if (kindValue === 'weekly') {
           body.weekdays = weekdayPickerValue(panel);
+          if (!body.weekdays.length) return reportWeekdaysMissing(panel);
         } else if (kindValue === 'monthly_ordinal_weekday') {
           body.month_day = Number(ordinalPositionSelect.value);
           body.weekdays = ordinalWeekdaySelect.value;
@@ -1419,6 +1533,11 @@ function openScheduleModal(type, schedule = null) {
           window.yuvomi?.showToast(t('waste.scheduleSavedToast'), 'success');
         } catch (err) {
           if (await keepDialogForMissingType(err, typeSelect)) return;
+          // Dieselbe Absage vom Server (z. B. eine aeltere Seite): ans Feld.
+          if (err?.data?.reason === 'waste_schedule_weekdays_required' && kindValue === 'weekly') {
+            reportWeekdaysMissing(panel);
+            return;
+          }
           reportError(err);
         }
       });
@@ -2643,6 +2762,7 @@ export async function render(container, { signal: routeSignal = null } = {}) {
   _container = container;
   state = { types: [], schedules: [], occurrences: [], sources: [], loading: true, error: null, upcomingExpanded: false };
   renderPage();
+  _container.querySelector('.waste-page')?.classList.add('waste-page--loading');
   bindEvents();
 
   await loadData();
@@ -2655,6 +2775,7 @@ export async function render(container, { signal: routeSignal = null } = {}) {
   state.loading = false;
 
   if (state.error) {
+    _container.querySelector('.waste-page')?.classList.remove('waste-page--loading');
     const host = _container.querySelector('#waste-upcoming-list');
     if (host) mountLoadError(host, { title: t('waste.loadErrorTitle'), error: state.error, onRetry: () => reloadAndRender() });
     return;
@@ -2677,7 +2798,7 @@ export const __test = {
   // steht, und welche Abfallart der Termin-Dialog des Primaerknopfs vorschlaegt.
   pickupWhenLabel, typeWithoutScheduleLine, defaultScheduleType, occurrenceRowHtml,
   // R17/E6: die Wochentage des Termin-Dialogs als Chips.
-  weekdayPickerHtml, weekdayPickerValue,
+  weekdayPickerHtml, weekdayPickerValue, intervalStepperHtml, wireIntervalStepper,
   findScheduleOrigin, parseDeepLinkParams, deepLinkSelectors, recurrenceSummary, originBadges,
   defaultLabelDecision, unresolvedBlockingDiagnostics, buildMappingDecisions, sourceHealthBadgeInfo,
   splitUpcomingByType, deepLinkNeedsExpand, nearestOrdinalAnchorDateKey,
@@ -2685,7 +2806,7 @@ export const __test = {
   // Zeilengrammatik (Audit UX 2026-09-12) tragen sie Bedingungen, die man
   // nicht mehr am Markup ablesen kann - welcher Eintrag bei welcher Position
   // im Menue steht, und dass die Preset-Farben allesamt im Raster liegen.
-  typeCardHtml, scheduleRowHtml, sourceRowHtml, TYPE_PRESETS, WASTE_TYPE_COLORS,
+  typeCardHtml, scheduleRowHtml, sourceRowHtml, TYPE_PRESETS, typeWithoutScheduleHtml, remainingTypePresets, remainingPresetsHtml, WASTE_TYPE_COLORS,
   activeSwatchColor, resolveSwatchColors,
   isOnboarding, onboardingHtml, sectionVisibility, fabIntent, pageModeClasses,
   importErrorText,

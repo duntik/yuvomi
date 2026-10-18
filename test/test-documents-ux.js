@@ -30,8 +30,10 @@ test('der Leerzustand unterscheidet Suche, Filter, Archiv und Erstnutzung', () =
   // Vorher gab es EINEN Zustand: eine Suche ohne Treffer behauptete "Noch keine
   // Dokumente" und bot Hochladen an, während der Ordner-Browser daneben 6 zählte.
   assert.match(page, /function emptyStateFor\(\)/);
+  // Die leere SUCHE baut seit R19 der geteilte Baustein (mountSearchEmpty).
+  assert.match(page, /if \(state\.query\) \{\s*return \{\s*search: true,/);
+  assert.match(page, /mountSearchEmpty\(list, \{/);
   for (const key of [
-    'documents.emptySearchTitle',
     'documents.emptyFilterTitle',
     'documents.emptyArchivedTitle',
     'documents.emptyTitle',
@@ -1239,15 +1241,20 @@ test('die Karte: Blatt-Rahmen 3:4, Titel zweizeilig, Meta einzeilig, kein Mindes
   assert.match(card, /doc\.description \? `<p class="document-card__description">\$\{esc\(doc\.description\)\}<\/p>` : ''/);
 });
 
-test('der Kopf hat EINE Hoehe: Ansichtsumschalter so hoch wie Suche und Knoepfe', () => {
-  // Gemessen vorher bei 1280px: Suche 44, Umschalter 48, Menueknopf 44; mobil
-  // 48 / 52 / 48. Der Umschalter ist ein Well mit 2px Rand - seine Knoepfe
-  // muessen um genau diesen Rand kleiner sein als --target-base.
-  const toggle = topRules(css).find((rule) => rule.selector === '.documents-view-toggle');
-  assert.match(toggle.body, /padding:\s*var\(--space-0h\)/);
-  const btn = topRules(css).find((rule) => rule.selector === '.documents-view-toggle__btn');
-  assert.match(btn.body, /width:\s*calc\(var\(--target-base\) - 2 \* var\(--space-0h\)\)/);
-  assert.match(btn.body, /height:\s*calc\(var\(--target-base\) - 2 \* var\(--space-0h\)\)/);
+test('der Ansichtsumschalter ist das Kanon-Segment (D1) und so hoch wie Suche und Knoepfe', () => {
+  // Gemessen vorher bei 1280px: Suche 44, Umschalter 48, Menueknopf 44. Seit
+  // D1 (Critique 2026-10-16) ist der Umschalter `.segmented` in der Icon-
+  // Variante; die Kopfhoehe rechnet panel.css fuer jedes Kopf-Segment (Naht +
+  // Rand von --target-base bzw. --target-md abgezogen), nicht dieses Modul.
+  const page = readFileSync(new URL('../public/pages/documents.js', import.meta.url), 'utf8');
+  assert.match(page, /<div class="segmented segmented--icons documents-view-toggle" role="group"/, 'das Segment der Shell');
+  assert.match(page, /class="segmented__item documents-view-toggle__btn\$\{state\.view === 'grid' \? ' is-active' : ''\}"/, 'Eintraege der Shell, aktiv per is-active');
+  const own = [...eachRule(css)].filter((rule) => /\.documents-view-toggle(?:__btn(?:--active)?)?$/.test(rule.selector.trim())
+    && /(?:^|[;{\s])(?:background|box-shadow|border-radius|padding|width|height)\s*:/.test(rule.body));
+  assert.deepEqual(own.map((r) => r.selector.trim()), [], 'keine eigene Pille, Flaeche oder Hoehe mehr');
+  const panel = readFileSync(new URL('../public/styles/panel.css', import.meta.url), 'utf8');
+  const item = [...eachRule(panel)].find((r) => r.selector.trim() === '.page-toolbar .segmented__item' && !r.at.length);
+  assert.match(item?.body ?? '', /min-height:\s*calc\(var\(--target-base\) - 4 \* var\(--space-px\)\)/, 'Kopf-Segment aussen so hoch wie ein Kopfknopf');
 });
 
 test('der Ordner-Kebab ist immer sichtbar, ruhig in Tertiaerfarbe', () => {
@@ -1366,8 +1373,9 @@ test('Einzel-Archivieren meldet einen Fehler statt ihn zu verschlucken', () => {
 test('die Leermeldung nennt den Suchbegriff so, wie er getippt wurde', () => {
   // Gesucht "Kassenbon", gemeldet "kassenbon": die Seite zitierte ihre
   // normalisierte Vergleichsform statt der Eingabe.
-  const empty = fnBody('emptyStateFor', 'renderEmptyState');
-  assert.match(empty, /t\('documents\.emptySearchDescription', \{ query: state\.queryText \}\)/);
+  // Der Begriff steht seit R19 als Chip im geteilten Leerzustand - roh, wie
+  // getippt (queryText), nicht in der Vergleichsform.
+  assert.match(page, /mountSearchEmpty\(list, \{\s*query: state\.queryText,/);
   assert.match(page, /state\.queryText = String\(value \?\? ''\)\.trim\(\);/);
   assert.match(fnBody('clearSearch', 'resetFilters'), /state\.queryText = '';/);
   // Leeren zeichnet auch die Zaehler neu: sie zaehlen unter der Suche, und
@@ -1590,7 +1598,7 @@ test('der Ordner-Kebab nennt seinen Ordner', () => {
   // Re-Critique P2: sieben Mal "Ordneraktionen" ohne Namen hintereinander.
   const tree = page.slice(page.indexOf('function renderFolderBrowser()'), page.indexOf('// Der Auslöser trägt den Ordner, in dem man steht'));
   // rowActionHtml escaped label und Attribute selbst.
-  assert.match(tree, /rowActionHtml\(\{ icon: 'more-vertical', className: 'documents-folder-item__menu', label: t\('documents\.folderActionsFor', \{ name: item\.name \}\), attrs: \{ 'data-folder-menu': item\.id, title: t\('documents\.folderActionsFor', \{ name: item\.name \}\)/);
+  assert.match(tree, /rowActionHtml\(\{ icon: 'ellipsis', className: 'documents-folder-item__menu', label: t\('documents\.folderActionsFor', \{ name: item\.name \}\), attrs: \{ 'data-folder-menu': item\.id, title: t\('documents\.folderActionsFor', \{ name: item\.name \}\)/);
   assert.doesNotMatch(page, /t\('documents\.folderActions'\)/);
   for (const file of LOCALES) {
     const docs = localeData(file).documents;
@@ -1715,7 +1723,9 @@ test('eine Ansicht ohne ein einziges Dokument zeigt keine Facetten-Moebel', () =
   assert.match(tree, /const showCounts = state\.allDocuments\.length > 0;/);
   assert.match(tree, /\$\{showCounts \? `<span class="documents-folder-item__count">/);
   // Und die Spur verschwindet samt Haarlinie, wenn keine Gruppe einen Chip traegt.
-  const spur = [...eachRule(css)].find((r) => r.at.length === 0 && r.selector === '.documents-filters__chips:not(:has(.filter-chip))');
+  // Der Ordner-Chip (Critique 2026-10-16) zaehlt dabei nicht als Facette: am
+  // Desktop ist er ausgeblendet, unter 1024px traegt er die Spur allein.
+  const spur = [...eachRule(css)].find((r) => r.at.length === 0 && r.selector === '.documents-filters__chips:not(:has(.filter-chip:not(.documents-folder-chip)))');
   assert.ok(spur && /display:\s*none/.test(spur.body), 'leere Chip-Spur ausblenden');
 });
 
@@ -1959,7 +1969,8 @@ test('der Betrachter ist schmal vollflaechig, und der Meta-Block klappt hinter d
 // R18 (2026-10-07): Betrachter ohne fremde Werkzeugleiste, Luft unter der Filterleiste
 
 test('R18: der PDF-Betrachter am Desktop blendet die Leiste des Browsers aus, der neue Tab behaelt sie', () => {
-  assert.match(page, /const PDF_EMBED_FRAGMENT = '#toolbar=0&navpanes=0&view=FitH';/);
+  // R19: die ganze Seite statt der Breite (FitH zeigte am Desktop ~44 % der Seite).
+  assert.match(page, /const PDF_EMBED_FRAGMENT = '#toolbar=0&navpanes=0&view=Fit&zoom=page-fit';/);
   const viewer = page.slice(page.indexOf('function renderViewerContent('), page.indexOf('function renderViewerContent(') + 2200);
   assert.match(viewer, /<iframe class="document-viewer__pdf" src="\$\{previewUrl\}\$\{PDF_EMBED_FRAGMENT\}"/,
     'das Fragment haengt an der Adresse des eingebetteten Betrachters');
@@ -1971,4 +1982,39 @@ test('R18: der PDF-Betrachter am Desktop blendet die Leiste des Browsers aus, de
 test('R18: zwischen Filterleiste und Inhalt steht Luft', () => {
   const layout = topRules(css).find((rule) => rule.selector === '.documents-browser-layout');
   assert.match(layout.body, /padding-top:\s*var\(--space-4\)/, 'Ordnerspalte und erste Kartenreihe beginnen nicht auf der Trennlinie');
+});
+
+// Critique 2026-10-16 (P2 mobil): der Ordner-Umschalter stand unter 1024px als
+// eigene 48px-Zeile zwischen Filterzeile und Liste (erstes Dokument y=216). Er
+// ist jetzt der erste Chip der Chip-Spur; zugeklappt belegt die Ordnerauswahl
+// keine Zeile (erstes Dokument y=152 bei 390x844).
+test('Dokumente mobil: der Ordner-Umschalter ist der erste Chip der Filterzeile (Critique 2026-10-16)', () => {
+  const spur = page.slice(page.indexOf('<div class="documents-filters__chips">'), page.indexOf('<div class="documents-browser-layout">'));
+  const chip = spur.indexOf('id="documents-folder-toggle"');
+  assert.ok(chip > -1, 'der Auslöser steht in der Chip-Spur');
+  assert.ok(chip < spur.indexOf('id="documents-expiring-filter"') && chip < spur.indexOf('id="documents-category"'), 'und zwar als erster Chip');
+  assert.match(spur, /class="filter-chip filter-chip--sm documents-folder-chip" id="documents-folder-toggle" type="button"\s+aria-expanded="false" aria-controls="documents-folder-browser">/,
+    'Chip-Haut, Zustand und Ziel des Aufklappens');
+  assert.equal((page.match(/id="documents-folder-toggle"/g) ?? []).length, 1, 'genau EIN Auslöser');
+  assert.match(page, /toggleAttribute\('data-folder-active', Boolean\(state\.folderId\)\)/, 'ein gewaehlter Ordner zeigt sich am Chip');
+  const rules = [...eachRule(css)];
+  const tablet = (r) => r.at.some((a) => /max-width:\s*1023px/.test(a));
+  assert.ok(rules.some((r) => r.at.length === 0 && r.selector.trim() === '.documents-folder-chip' && /display:\s*none/.test(r.body)),
+    'am Desktop kein Ordner-Chip - dort steht die Spalte');
+  assert.ok(rules.some((r) => tablet(r) && r.selector.trim() === '.documents-folder-chip' && /display:\s*inline-flex/.test(r.body)));
+  assert.ok(rules.some((r) => tablet(r) && r.selector.trim() === '.documents-folder-browser:not(.documents-folder-browser--open)' && /display:\s*none/.test(r.body)),
+    'zugeklappt belegt die Ordnerauswahl keine Zeile');
+});
+
+// Re-Critique 2026-10-17 (A4 P2-3, P3): im Raster klemmte die leere Suche in
+// einer Zelle (203px von 860 bei 1440), und ein zweizeiliger Titel liess die
+// Karten einer Reihe in Stufen enden (394/414px).
+test('R20: der Leerzustand nimmt im Raster die ganze Breite, und der Titel haelt zwei Zeilen', () => {
+  const rules = [...eachRule(css)];
+  const empty = rules.find((r) => r.selector.trim() === '.documents-list--grid > .documents-empty-state');
+  assert.ok(empty, 'keine Regel fuer den Leerzustand im Raster');
+  assert.match(empty.body, /grid-column:\s*1\s*\/\s*-1/);
+  const title = rules.find((r) => r.selector.trim() === '.documents-list--grid .document-card__title');
+  assert.ok(title, 'keine Rasterregel fuer den Kartentitel');
+  assert.match(title.body, /min-block-size:\s*2lh/, 'ein einzeiliger Titel haelt die zweite Zeile frei');
 });

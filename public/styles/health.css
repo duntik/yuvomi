@@ -120,6 +120,59 @@
   height: 0;
 }
 
+/* EINGEKLAPPT EINE ZEILE (R20, Re-Critique 2026-10-17: der Bereichskopf blieb
+ * beim Lesen 113px hoch, 77 % Inhalt). Wie Apples Navigationsleiste: der
+ * Rueckweg wird zum Zeichen (sein Name bleibt fuer Screenreader), der
+ * Bereichsname rueckt als Inline-Titel zwischen Rueckweg und Personenwahl,
+ * das Siegel geht. 113 -> 65px bei 390px. Das Umklappen gleitet per FLIP
+ * (wireCollapsingHeader, utils/ux.js). */
+@media (max-width: 1023px) {
+  .health-toolbar.page-toolbar--capped.is-collapsed:has(> .health-toolbar__back:not([hidden])) {
+    flex-wrap: nowrap;
+  }
+
+  .health-toolbar.page-toolbar--capped.is-collapsed:has(> .health-toolbar__back:not([hidden])) > :is(.health-toolbar__break, .module-seal--head) {
+    display: none;
+  }
+
+  .health-toolbar.page-toolbar--capped.is-collapsed > .health-toolbar__back:not([hidden]) {
+    flex: 0 0 auto;
+    justify-content: center;
+    min-inline-size: var(--target-base);
+  }
+
+  .health-toolbar.page-toolbar--capped.is-collapsed > .health-toolbar__back > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* Wird es eng, kappt zuerst der Name in der Personenwahl, dann der Titel:
+   * der Bereich sagt, wo man ist; die Person steht auch als Farbpunkt da. */
+  .health-toolbar.page-toolbar--capped.is-collapsed:has(> .health-toolbar__back:not([hidden])) > .page-toolbar__title {
+    order: 1;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .health-toolbar.page-toolbar--capped.is-collapsed:has(> .health-toolbar__back:not([hidden])) > .health-toolbar__person {
+    order: 2;
+    flex: 0 100 auto;
+    min-width: var(--target-base);
+  }
+
+  .health-toolbar.page-toolbar--capped.is-collapsed > .health-toolbar__person :is(.health-person-switcher, .health-person-switcher__trigger) {
+    min-width: 0;
+  }
+
+  .health-toolbar.page-toolbar--capped.is-collapsed:has(> .health-toolbar__back:not([hidden])) > .page-toolbar__actions {
+    order: 3;
+  }
+}
+
 /* Im Kopf ist die Pille eine Kapsel ohne Kante: gefuellt aus der Well-Flaeche
  * wie die Listen-Kapseln im Einkauf, der Name kappt statt umzubrechen. */
 .health-toolbar__person .health-person-switcher__trigger,
@@ -1124,7 +1177,7 @@ button.health-med-card:hover {
   align-items: center;
   padding: var(--space-0h) var(--space-2);
   border-radius: var(--radius-full);
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   background: var(--color-fill-well);
   color: var(--color-text-secondary);
 }
@@ -1163,29 +1216,8 @@ button.health-med-card:hover {
   font-weight: var(--font-weight-medium, 500);
 }
 
-/* Modal: Checkbox-Zeile + Einnahmeplan-Editor */
-.health-check {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--color-text-primary);
-  cursor: pointer;
-}
-
-/* Checkbox im Modul-Akzent statt Browser-Default-Blau; größeres Tap-Ziel als die
- * nativen 13px. Das umschließende Label vergrößert die Trefferfläche zusätzlich. */
-.health-check input[type="checkbox"] {
-  width: 1.15rem;
-  height: 1.15rem;
-  flex: 0 0 auto;
-  /* Modals werden außerhalb von .health-page gerendert, wo --module-accent nicht
-   * gescoped ist. Der Router setzt --active-module-accent global; --module-health
-   * ist der Fallback (beide global verfügbar). */
-  accent-color: var(--active-module-accent, var(--module-health));
-  cursor: pointer;
-}
-
+/* Modal: Einnahmeplan-Editor. Die Checkbox-Zeile (`.health-check`) ist seit
+ * der Re-Kritik 2026-10-17 die geteilte Schalterzeile (toggleRowHtml). */
 .health-sched {
   display: flex;
   flex-direction: column;
@@ -1194,8 +1226,8 @@ button.health-med-card:hover {
   border-top: 1px solid var(--color-border);
 }
 
-.health-sched-hint,
 .health-sched-empty {
+  margin-block-end: var(--space-2);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
@@ -1244,9 +1276,12 @@ button.health-med-card:hover {
   gap: var(--space-2);
 }
 
+/* SIEBEN TAGE, EINE ZEILE (R20, Re-Critique 2026-10-17): umbrechend stand
+ * "So" bei 390px allein in Zeile 2. Sieben gleiche Spalten tragen das 332px-
+ * Blatt (je ~43px breit, 48px hoch). */
 .health-weekday-toggle {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: var(--space-1);
 }
 
@@ -1254,9 +1289,9 @@ button.health-med-card:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: var(--target-base);
+  min-width: 0;
   min-height: var(--target-base);
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-surface);
@@ -1350,13 +1385,27 @@ button.health-med-card:hover {
   color: var(--color-text-secondary);
 }
 
+/* EINE FLAG-SPRACHE IM LABOR (R19, Critique 2026-10-16). Die Befundkarte
+ * sagte "1 auffaellig" amber in 10px, die Zeile darunter "Niedrig" blau und
+ * "Hoch" rot - drei Farben fuer dieselbe Aussage "ausserhalb des Bereichs".
+ * Jetzt traegt jede Abweichung die Warnfarbe (Tinte, kontrastgeprueft), die
+ * RICHTUNG sagen Pfeil und Wort; normal bleibt gruen. Keine Schrift im
+ * Gesundheitsmodul liegt unter Caption 2 (`--type-micro`, 11px). */
 .health-lab-badge {
   display: inline-flex;
   align-items: center;
   gap: var(--space-0h);
   padding: var(--space-0h) var(--space-2);
   border-radius: var(--radius-full);
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
+  flex: 0 0 auto;
+}
+
+/* Das Warnzeichen in Schriftgroesse: als 24px-Lucide war es doppelt so hoch
+ * wie das Wort daneben. */
+.health-lab-badge > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   flex: 0 0 auto;
 }
 
@@ -1413,6 +1462,84 @@ button.health-med-card:hover {
   overflow-x: auto;
 }
 
+/* LABORWERTE MOBIL ALS ZEILEN (Critique 2026-10-16; health.js
+ * `resultListMarkup`). Unter 640px ersetzt die Zeilenliste die seitlich
+ * scrollende Tabelle: Analyt links, Wert rechts, darunter Referenz und
+ * Bewertung. Ein auffaelliger Wert steht vorn und sagt es dreifach - Pfeil,
+ * Wort („Niedrig"), Ton -, die Farbe allein traegt nichts. Die Zeilen liegen
+ * IN der Befundkarte, also ohne eigene Flaeche, nur mit Trennlinien. */
+.health-lab-rows {
+  display: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 639px) {
+  .health-lab-table-wrap {
+    display: none;
+  }
+
+  .health-lab-rows {
+    display: block;
+  }
+}
+
+.health-lab-rows__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  row-gap: var(--space-0h);
+  align-items: baseline;
+  padding-block: var(--space-3);
+}
+
+.health-lab-rows__row + .health-lab-rows__row {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.health-lab-rows__analyte {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  hyphenate-limit-chars: 6 4 4;
+  -webkit-hyphenate-limit-before: 4;
+  -webkit-hyphenate-limit-after: 4;
+}
+
+.health-lab-rows__value {
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  text-align: end;
+  white-space: nowrap;
+}
+
+.health-lab-rows__meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.health-lab-rows__ref {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.health-lab-rows__meta .health-lab-flag {
+  margin-inline-start: auto;
+  font-size: var(--text-sm);
+}
+
+.health-lab-rows__row--low .health-lab-rows__value,
+.health-lab-rows__row--high .health-lab-rows__value {
+  color: var(--color-warning-ink);
+}
+
 .health-lab-table {
   width: 100%;
   border-collapse: collapse;
@@ -1462,9 +1589,9 @@ button.health-med-card:hover {
   white-space: nowrap;
 }
 
-.health-lab-flag--low    { color: var(--color-info); }
+.health-lab-flag--low,
+.health-lab-flag--high   { color: var(--color-warning-ink); }
 .health-lab-flag--normal { color: var(--color-success); }
-.health-lab-flag--high   { color: var(--color-danger); }
 .health-lab-flag--none   { color: var(--color-text-tertiary, var(--color-text-secondary)); }
 
 /* Analyt-Trend */
@@ -2640,7 +2767,7 @@ button.health-med-card:hover {
 
 .cycle-stat__head svg { width: 14px; height: 14px; }
 .cycle-stat__value { font-weight: 700; font-size: var(--text-sm); color: var(--color-text-primary); }
-.cycle-stat__sub { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.cycle-stat__sub { font-size: var(--type-micro); color: var(--color-text-secondary); }
 
 /* Typisch/untypisch-Badge (Phase 4d) - Statusfarben, nicht die kategorialen
  * Zyklusphasen-Farben: das ist ein Zustand (gut/Warnung), keine Identität. */
@@ -2650,7 +2777,7 @@ button.health-med-card:hover {
   margin-inline-start: var(--space-1);
   padding: 1px var(--space-2);
   border-radius: var(--radius-full);
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   font-weight: 600;
   vertical-align: middle;
 }
@@ -2829,7 +2956,7 @@ button.health-med-card:hover {
 
 .cycle-cal__wd {
   text-align: center;
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   color: var(--color-text-secondary);
   padding: var(--space-1) 0;
 }
@@ -3041,7 +3168,7 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   color: var(--color-text-secondary);
 }
 
@@ -3146,7 +3273,7 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
   margin-top: var(--space-1);
   padding-top: var(--space-2);
   border-top: 1px solid var(--color-border-subtle);
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   color: var(--color-text-secondary);
 }
 .cycle-legend__flow-label { font-weight: 600; }
@@ -3343,7 +3470,7 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
   font-variant-numeric: tabular-nums;
 }
 .cycle-pain-tile__label {
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   color: var(--color-text-secondary);
 }
 
@@ -3404,7 +3531,7 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
 .cycle-history__meta { display: flex; gap: var(--space-1); flex-wrap: wrap; }
 
 .cycle-history__chip {
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   color: var(--color-text-secondary);
   background: var(--color-surface-2);
   padding: 1px var(--space-2);
@@ -3659,14 +3786,46 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
   padding: var(--space-2) var(--space-3);
 }
 
+/* DER AUFKLAPPER SAGT, DASS ER EINER IST (R20, Re-Critique 2026-10-17 A5).
+ * `display: flex` nahm dem `summary` sein Dreieck, und uebrig blieb eine
+ * graue Zeile von 40px, die sich las wie eine Ueberschrift. Jetzt traegt er
+ * den Chevron des geteilten Aufklappers (`.form-advanced`, layout.css), der
+ * sich offen dreht, und die volle Zielhoehe (am Finger 48px). */
 .health-medlog summary {
   cursor: pointer;
+  list-style: none;
   font-size: var(--text-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-secondary);
-  min-height: var(--target-md);
+  min-height: var(--target-base);
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.health-medlog summary::-webkit-details-marker { display: none; }
+.health-medlog summary::marker { content: ''; }
+
+@media (hover: hover) {
+  .health-medlog summary:hover {
+    color: var(--color-text-primary);
+  }
+}
+
+.health-medlog__chevron {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex-shrink: 0;
+  transition: transform var(--transition-base);
+}
+
+.health-medlog[open] .health-medlog__chevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .health-medlog__chevron { transition: none; }
 }
 
 .health-medlog__list {
@@ -3744,6 +3903,12 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
 .fasting-hero__remaining { font-weight: var(--font-weight-semibold); }
 .fasting-hero__meta { margin-block: var(--space-2) var(--space-4); color: var(--color-text-secondary); font-size: var(--text-sm); }
 .fasting-hero__actions { display: flex; justify-content: center; gap: var(--space-2); flex-wrap: wrap; }
+/* Vor dem ersten Fasten (health-fasting.js `idle`): kein leerer Ring, keine
+ * Umschaltung der Uhr - Satz und Knoepfe, darunter gleich der Leerzustand
+ * des Verlaufs (Critique 2026-10-16). */
+.fasting-hero--idle .fasting-dial,
+.fasting-hero--idle .fasting-clock-switch { display: none; }
+.fasting-hero--idle .u-section-title { margin-block-end: var(--space-3); }
 .fasting-history-more { display: grid; justify-items: center; gap: var(--space-2); padding-block-start: var(--space-3); }
 .fasting-history-more [hidden] { display: none; }
 .fasting-card__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-block-end: var(--space-3); flex-wrap: wrap; }
@@ -3769,8 +3934,13 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
 .fasting-week__day > span { align-self: end; overflow-wrap: anywhere; }
 .fasting-week__day time { color: var(--color-text-secondary); }
 .fasting-week__track { display: flex; direction: ltr; align-items: end; gap: var(--space-1); background: var(--color-fill-well); }
-.fasting-week__bar, .fasting-week__goal { display: block; width: 50%; height: calc(var(--bar-scale) * 100%); border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--chart-series-1); }
-.fasting-week__goal { background: var(--chart-series-2); }
+/* EINE DIAGRAMMSPRACHE IN DER GESUNDHEIT (R19, Critique 2026-10-16): Kurven,
+ * Flaechen und Aktivitaetsbalken tragen den Modulton, nur die Fastenwoche lief
+ * auf Serie 1/2 (Indigo, Petrol) - zwei fremde Farben fuer dieselbe Art
+ * Messung. Jetzt wie die Aktivitaet: der gemessene Wert im Vollton, das Ziel
+ * in der getoenten Stufe (Tinte + 5 %, 3:1 Grafikkontrast in beiden Themes). */
+.fasting-week__bar, .fasting-week__goal { display: block; width: 50%; height: calc(var(--bar-scale) * 100%); border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--module-health); }
+.fasting-week__goal { background: color-mix(in srgb, var(--module-health) calc(var(--tint-ink) + 5%), var(--color-surface)); }
 .fasting-history-filters { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); margin-block-end: var(--space-4); }
 .fasting-history-filters label { display: grid; gap: var(--space-2); min-width: 0; }
 [data-fasting-shell] { margin-block-end: var(--space-4); }
@@ -3796,6 +3966,23 @@ button.cycle-cal__day:not(:disabled):hover { background: var(--color-surface-2);
   justify-content: space-between;
   gap: var(--space-3);
   flex-wrap: wrap;
+}
+
+/* Kein Tagesziel: zwei Saetze in der Flucht des Abschnittstitels (health.js
+ * `nutritionTodaySectionMarkup`, Critique 2026-10-16). */
+.health-nutrition-today__none {
+  display: grid;
+  gap: var(--space-1);
+  margin-block-start: var(--space-2);
+}
+
+.health-nutrition-today__none > p {
+  margin: 0;
+}
+
+.health-nutrition-today__none-title {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
 }
 
 .health-nutrition-progress {

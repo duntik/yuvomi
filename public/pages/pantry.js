@@ -27,7 +27,7 @@ import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { pageToolsMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
 // Alias, weil dieses Modul selbst eine `emptyStateEl()`-Funktion hat, die den
 // Renderer mit den Vorrats-Texten füllt.
-import { emptyStateEl as emptyStateComponentEl, mountLoadError } from '/utils/empty-state.js';
+import { emptyStateEl as emptyStateComponentEl, mountLoadError, searchEmptyEl } from '/utils/empty-state.js';
 import { scheduleUndoableDelete, vibrate, wireScrollFade, collapseOut, expandIn } from '/utils/ux.js';
 import { redrawList } from '/utils/list-motion.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
@@ -316,7 +316,11 @@ export async function render(container) {
       placeholder: t('pantry.searchPlaceholder'),
       value: state.query,
       clearLabel: t('common.searchClear'),
-      className: 'pantry-search page-toolbar__center',
+      // FELD STATT LUPE AUCH MOBIL (R20, Re-Critique 2026-10-17 a2 P2-4):
+      // die Zeile unter der Kuechen-Leiste trug nur Lupe und Ortsnadel, 65px
+      // fuer zwei Icons. Wie bei den Rezepten (R19) fuellt das Feld die Zeile,
+      // die Lagerorte bleiben daneben.
+      className: 'pantry-search page-toolbar__center page-search--field',
     })}
     ${readOnly() ? '' : `<div class="page-toolbar__actions">
       ${pageToolsMenuHtml({
@@ -513,7 +517,7 @@ function renderFilters() {
   }
 
   bar.insertAdjacentHTML('beforeend', chips.map((chip) => `
-    <button type="button" class="filter-chip${chip.id === state.filter ? ' filter-chip--active' : ''}"
+    <button type="button" class="filter-chip filter-chip--sm${chip.id === state.filter ? ' filter-chip--active' : ''}"
             data-filter="${esc(chip.id)}" aria-pressed="${chip.id === state.filter}">
       <i data-lucide="${esc(chip.icon)}" class="icon-sm" aria-hidden="true"></i>
       <span>${esc(chip.label)}</span>
@@ -799,29 +803,23 @@ function onWatchClick(e) {
  * und der Nutzer suchte den Fehler beim Suchbegriff.
  */
 function noResultsEl() {
-  const active = [];
-  if (state.query) active.push(`„${state.query}"`);
-  if (state.filter !== 'all') {
-    active.push(t({ expired: 'pantry.filterExpired', soon: 'pantry.filterSoon', low: 'pantry.filterLow' }[state.filter]));
-  }
-
-  return emptyStateComponentEl({
-    variant: 'no-results',
-    title: t('pantry.noResultsTitle'),
-    description: t('pantry.noResultsDescription'),
-    hint: active.length ? active.join(' · ') : undefined,
-    action: {
-      label: t('pantry.resetFilters'),
-      onClick: () => {
-        state.query = '';
-        state.filter = 'all';
-        // clear() versteckt zugleich den Leeren-Knopf des geteilten Suchfelds;
-        // ein blankes `value = ''` ließe ihn über dem leeren Feld stehen.
-        _search?.clear();
-        renderFilters();
-        renderList();
-        _search?.input.focus();
-      },
+  // Der geteilte Leerzustand einer leeren Suche (R19): Begriff und Filter als
+  // Chips, EIN Knopf hebt beide auf.
+  const filters = state.filter !== 'all'
+    ? [t({ expired: 'pantry.filterExpired', soon: 'pantry.filterSoon', low: 'pantry.filterLow' }[state.filter])]
+    : [];
+  return searchEmptyEl({
+    query: state.query,
+    filters,
+    onReset: () => {
+      state.query = '';
+      state.filter = 'all';
+      // clear() versteckt zugleich den Leeren-Knopf des geteilten Suchfelds;
+      // ein blankes `value = ''` ließe ihn über dem leeren Feld stehen.
+      _search?.clear();
+      renderFilters();
+      renderList();
+      _search?.input.focus();
     },
   });
 }
@@ -1046,6 +1044,9 @@ function rowEl(item) {
     return wrap;
   }
 
+  // Die Zeichen in --icon-md (R20, Re-Critique 2026-10-17 a2 P3): als
+  // --icon-sm (12px, Inline-Marker) standen sie in der 48px-Flaeche wie Staub;
+  // 16px ist das Mass jeder Knopf-Glyphe. Die Haut bleibt ruhig (pantry.css).
   const stepper = document.createElement('div');
   stepper.className = 'pantry-stepper';
   const step = pantryUnitStep(item.unit);
@@ -1056,7 +1057,7 @@ function rowEl(item) {
   minus.dataset.action = 'decrease';
   minus.disabled = Number(item.quantity) <= 0;
   minus.setAttribute('aria-label', `${t('pantry.decrease')}: ${item.name}`);
-  minus.insertAdjacentHTML('beforeend', '<i data-lucide="minus" class="icon-sm" aria-hidden="true"></i>');
+  minus.insertAdjacentHTML('beforeend', '<i data-lucide="minus" class="icon-md" aria-hidden="true"></i>');
 
   // Der Wert steht in der Meta-Zeile (siehe dort). BEWUSST keine eigene
   // Live-Region je Zeile: bei 60 Artikeln wären das 60 Live-Regionen, und
@@ -1070,7 +1071,7 @@ function rowEl(item) {
   plus.className = 'pantry-stepper__btn';
   plus.dataset.action = 'increase';
   plus.setAttribute('aria-label', `${t('pantry.increase')}: ${item.name}`);
-  plus.insertAdjacentHTML('beforeend', '<i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>');
+  plus.insertAdjacentHTML('beforeend', '<i data-lucide="plus" class="icon-md" aria-hidden="true"></i>');
 
   stepper.dataset.step = String(step);
   stepper.append(minus, plus);

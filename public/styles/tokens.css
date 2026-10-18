@@ -706,9 +706,16 @@
    * (4.92-6.49:1). Trägt weiter den Namen budget.colorTeal. */
   --_chart-series-2: #297989;   /* Petrol   */
   --_chart-series-3: #C2410C;   /* Orange   */
-  --_chart-series-4: #0663C7;   /* Blau     */
-  --_chart-series-5: #A16207;   /* Ocker    */
-  --_chart-series-6: #BE185D;   /* Magenta  */
+  /* FARBFEHLSICHT (R19, Critique 2026-10-16). Simuliert (Machado 2009,
+   * Schwere 1,0) lagen Orange/Ocker bei Deuteranopie dE2000 0,9 auseinander,
+   * Indigo/Blau bei 1,9 - im Donut nebeneinander nicht zu trennen. Blau wird
+   * heller (Sky, 3,66:1 auf der Karte, Grafikkontrast >= 3), Ocker dunkler
+   * (Umbra), Magenta heller; das schlechteste Paar liegt jetzt bei dE 8,4
+   * (Protanopie, Orange/Gruen), normalsichtig bei >= 15. Dunkel unveraendert
+   * (dort war das schlechteste Paar schon 8,1). */
+  --_chart-series-4: #0284C7;   /* Blau     */
+  --_chart-series-5: #713F12;   /* Ocker    */
+  --_chart-series-6: #DB2777;   /* Magenta  */
   --_chart-series-7: #1E7B35;   /* Grün     */
   --chart-series-1: var(--_chart-series-1);
   --chart-series-2: var(--_chart-series-2);
@@ -717,6 +724,15 @@
   --chart-series-5: var(--_chart-series-5);
   --chart-series-6: var(--_chart-series-6);
   --chart-series-7: var(--_chart-series-7);
+  /* TEXTUR ALS ZWEITE KODIERUNG (R20, Tritanopie: Petrol/Gruen dE 5,6,
+   * Orange/Magenta 6,2): Serie 6 und 7 tragen in jedem Kategoriediagramm eine
+   * 45-Grad-Schraffur
+   * (utils/budget-category-colors.js, categoryTexture). Die Linien sind die
+   * Kartenflaeche in halber Deckung - im Dunkelmodus damit dunkel auf hellem
+   * Gruen, im Hellmodus hell auf dunklem, in beiden sichtbar, ohne eine neue
+   * Farbe einzufuehren. Kachel 8px = Hoehe der Balken: eine Linie je Kachel. */
+  --chart-texture-ink: color-mix(in srgb, var(--color-surface) 55%, transparent);
+  --chart-texture-tile: 8px;
 
   /* --------------------------------------------------------
    * 4. Farben - Modul-Akzente (Familientoene, Block 2 2026-08-10)
@@ -854,13 +870,19 @@
   --meal-lunch:            var(--_meal-lunch);
   --_meal-lunch-light:     #DFF6E4;
   --meal-lunch-light:      var(--_meal-lunch-light);
-  --_meal-dinner:          #6C3AED;
-  --meal-dinner:           var(--_meal-dinner);          /* Violett — Abend (= --color-accent) */
-  --_meal-dinner-light:    #F3EFFE;
+  /* ABENDESSEN IST INDIGO, SNACK IST BEERE (R19, Critique 2026-10-16).
+   * Abendessen trug das Markenviolett (= --color-accent) und las sich wie eine
+   * Aktion; Fruehstueck #A85D00 und Snack #C2410C lagen normalsichtig nur
+   * dE2000 13 auseinander, bei Deuteranopie 0,4 (Machado 2009). Jetzt Abend-
+   * Indigo und Beere: das schlechteste Paar der vier ist Fruehstueck/Mittag
+   * (Protanopie 6,6, unveraendert), dunkel 12,3. */
+  --_meal-dinner:          #3949AB;
+  --meal-dinner:           var(--_meal-dinner);          /* Indigo — Abend */
+  --_meal-dinner-light:    #ECEEFB;
   --meal-dinner-light:     var(--_meal-dinner-light);
-  --_meal-snack:           #C2410C;
-  --meal-snack:            var(--_meal-snack);           /* = --module-meals — Snack ist Sub-Domain */
-  --_meal-snack-light:     #FFECE3;
+  --_meal-snack:           #BE185D;
+  --meal-snack:            var(--_meal-snack);           /* Beere — zwischendurch */
+  --_meal-snack-light:     #FCE7F0;
   --meal-snack-light:      var(--_meal-snack-light);
 
   /* Dieselbe lesbare Stufe wie bei der Semantik oben - die Mahlzeitenfarben
@@ -876,14 +898,14 @@
   --meal-breakfast-ink:    var(--_meal-breakfast-ink);
   --_meal-lunch-ink:       #1A6831;
   --meal-lunch-ink:        var(--_meal-lunch-ink);
-  --_meal-dinner-ink:      #5B2FD4;
+  --_meal-dinner-ink:      #2F3C93;
   --meal-dinner-ink:       var(--_meal-dinner-ink);
-  --_meal-snack-ink:       #A5370A;
+  --_meal-snack-ink:       #9D174D;
   --meal-snack-ink:        var(--_meal-snack-ink);
 
   /* GEPRÜFT UND BEWUSST SO GELASSEN (2026-07-30, gilt fort): drei der vier
    * Mahlzeit-Farben teilen den Wert eines semantischen/strukturellen Tokens
-   * (breakfast=warning, dinner=accent, snack=kitchen). Die Farbe erscheint
+   * (breakfast=warning; dinner=accent und snack=kitchen bis R19). Die Farbe erscheint
    * ausschließlich als 8px-Punkt NEBEN dem ausgeschriebenen Wort — Scanhilfe,
    * nie alleiniger Bedeutungsträger. Die Zeitmetapher (Morgen-Amber,
    * Mittag-Grün, Abend-Indigo) bleibt erhalten. */
@@ -1533,6 +1555,11 @@
    * Abhaengige (Zone, Nachlauf, Mehr-Blatt, Toasts, Banner) rechnet ueber
    * --nav-bottom-height mit. */
   --nav-height-mobile: 64px;
+  /* Minimiert beim Lesen (R19, iOS-26-Muster, utils/ux.js watchNavMinimize):
+   * ohne Labels, ein Ziel hoch plus 4px Luft je Seite. Touch 56px (Ziel 48,
+   * der FAB sitzt mit 4px konzentrisch), Zeiger 52px. Die Zone darunter
+   * (--nav-bottom-height) rechnet weiter mit der ausgefahrenen Hoehe. */
+  --nav-height-minimized: calc(var(--target-base) + var(--space-2));
   /* Schwebende Kapsel (Liquid Glass): Zone = Kapsel + 8px Luft oben und unten.
    * Die Kapsel ist MINDESTENS --nav-height-mobile hoch und waechst mit
    * umbrechenden Labels (lange Sprachen, enge Geraete). Ihre echte Hoehe misst
@@ -1596,6 +1623,14 @@
    * 75rem, und 1280 fiel auf den Einspalter mit Modal zurueck (A3 P2-2). */
   --layout-list-min: 26.25rem;
   --layout-list-max: 32.5rem;
+  /* Listenbahn, sobald der Baustein auf der Content-Spalte steht (Modulflaeche
+   * ab 84rem = 1280 + 2 x 32px Gutter, layout.css): dann waechst er nicht
+   * mehr, und die 40 % der Formel oben blieben bei 520px stehen - die Kontakte
+   * kuerzten bei 1920 neun E-Mails und brachen die Filterchips auf zwei
+   * Zeilen, waehrend rechts im Detail 768px fuer kurze Felder standen
+   * (Re-Critique 2026-10-17, A1 P2-8). 640px Liste tragen die fuenf
+   * Kategorie-Chips der Kontakte in einer Zeile; das Detail behaelt 680px. */
+  --layout-list-wide: 40rem;
   --layout-split-threshold: 65rem;
   /* Navigationsliste im Split (Einstellungen, Gesundheit): ihre Zeilen sind
    * Ziele, keine zweizeiligen Datensaetze - sie nimmt die Breite einer
@@ -2054,6 +2089,11 @@
    * den kurzen Hub (`--sheet-lift`): ueber einen Vollhub wirft sie das Blatt
    * sichtbar ueber seine Ruhelage (gemessen 28,5px bei 40 %, test:motion). */
   --sheet-in:   var(--duration-xl) var(--ease-glass);
+  /* Die BLENDE der Einfahrt federt nicht (Critique 2026-10-16, A5): eine
+   * Deckkraft ueber 1 gibt es nicht, die Feder kappte bei 1 und das Blatt
+   * stand nach rund einem Drittel der Zeit voll da, waehrend es noch hob.
+   * Dieselbe Dauer wie `--sheet-in`, die ruhige Kurve. */
+  --sheet-fade-in: var(--duration-xl) var(--ease-out);
   --sheet-out:  var(--duration-md) var(--ease-out);
   --sheet-lift: 24px;
 
@@ -2433,15 +2473,15 @@
     --_meal-breakfast-light: #33230A;
     --_meal-lunch:           #4ADE80;
     --_meal-lunch-light:     #0E2E17;
-    --_meal-dinner:          #A78BFA;
-    --_meal-dinner-light:    #241A45;
-    --_meal-snack:           #FB923C;
-    --_meal-snack-light:     #3D2010;
+    --_meal-dinner:          #8C9EFF;
+    --_meal-dinner-light:    #1A1F45;
+    --_meal-snack:           #F472B6;
+    --_meal-snack-light:     #3D1426;
     /* Die lesbare Stufe geht im Dark nach oben, wie bei der Semantik. */
     --_meal-breakfast-ink:   #FFB84A;
     --_meal-lunch-ink:       #89EAAC;
-    --_meal-dinner-ink:      #BCA6FC;
-    --_meal-snack-ink:       #FCAA67;
+    --_meal-dinner-ink:      #AEBBFF;
+    --_meal-snack-ink:       #F9A8D4;
 
     --_source-mealie:        #2DD4BF;
     --_source-mealie-light:  #0F2E2A;
@@ -2680,15 +2720,15 @@
     --_meal-breakfast-light: #33230A;
     --_meal-lunch:           #4ADE80;
     --_meal-lunch-light:     #0E2E17;
-    --_meal-dinner:          #A78BFA;
-    --_meal-dinner-light:    #241A45;
-    --_meal-snack:           #FB923C;
-    --_meal-snack-light:     #3D2010;
+    --_meal-dinner:          #8C9EFF;
+    --_meal-dinner-light:    #1A1F45;
+    --_meal-snack:           #F472B6;
+    --_meal-snack-light:     #3D1426;
     /* Die lesbare Stufe geht im Dark nach oben, wie bei der Semantik. */
     --_meal-breakfast-ink:   #FFB84A;
     --_meal-lunch-ink:       #89EAAC;
-    --_meal-dinner-ink:      #BCA6FC;
-    --_meal-snack-ink:       #FCAA67;
+    --_meal-dinner-ink:      #AEBBFF;
+    --_meal-snack-ink:       #F9A8D4;
 
     --_source-mealie:        #2DD4BF;
     --_source-mealie-light:  #0F2E2A;

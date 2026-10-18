@@ -333,15 +333,21 @@ test('das Blatt: Filter zuerst, Kategorie und Tag eingeklappt, „Ansicht" abges
     'tasks.filterGroupPerson', 'tasks.categoryLabel', 'tasks.filterGroupTag', 'tasks.viewToggleLabel',
   ]);
   const show = htmlOf('tasks.filterGroupShow');
-  assert.match(show, /type="checkbox"[^>]*data-filter-mine/, '„Mir zugewiesen" ist ein Schalter im Blatt');
+  assert.match(show, /role="switch"[^>]*data-filter-due-today/, '„Bis heute faellig" ist ein Schalter (D2), kein Haken');
   assert.doesNotMatch(show, /data-filter-future/, '„Geplante anzeigen" ist eine Ansichtsoption, kein Filter der ersten Gruppe');
+  // D2 (Critique 2026-10-16): „Mir zugewiesen" steht wie im Kalender als
+  // erster Schalter der Personengruppe, darueber nichts, darunter die Chips.
+  const person = htmlOf('tasks.filterGroupPerson');
+  assert.match(person, /role="switch"[^>]*data-filter-mine/, '„Mir zugewiesen" ist ein Schalter in der Personengruppe');
+  assert.ok(person.indexOf('data-filter-mine') < person.indexOf('data-filter="assigned_to"'), 'der Schalter steht vor den Personen-Chips');
+  assert.doesNotMatch(show, /data-filter-mine/, 'nicht mehr unter „Anzeigen"');
 
   // „Ansicht": Gruppierung und „Geplante anzeigen", abgesetzt.
   const view = groupOf('tasks.viewToggleLabel');
   assert.equal(view.variant, 'view');
   assert.match(view.html, /role="radiogroup"/, 'die Gruppierung ist EINE Wahl aus zwei, kein Paar von Schaltern');
   assert.match(view.html, /data-tab-id="category"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-tab-id="category"/);
-  assert.match(view.html, /type="checkbox"[^>]*data-filter-future/);
+  assert.match(view.html, /role="switch"[^>]*data-filter-future/);
   assert.match(htmlOf('tasks.filterGroupStatus'), /data-filter="status" data-value="open" aria-pressed="true"/,
     'der gewaehlte Status traegt seinen Zustand als aria-pressed');
 
@@ -505,7 +511,11 @@ test('„Filter zuruecksetzen" stellt den Standard her, keinen dritten Zustand (
 test('das Werkzeugmenue: Verwalten nur mit Schreibrecht, Auswahl nur in der Liste', () => {
   baseState();
   const byAction = () => Object.fromEntries(tasks.toolsMenuItems().filter((i) => i.action).map((i) => [i.action, i]));
-  assert.deepEqual(Object.keys(byAction()), ['bulk-select', 'bulk-archive', 'bulk-tag-add', 'bulk-tag-remove', 'toggle-history', 'manage-categories', 'manage-tags'],
+  // R19: der Verlauf ist keine Schalter-Zeile mehr, sondern die dritte Wahl
+  // der Ansichtsgruppe (view-history, neben Liste und Kanban).
+  const views = () => Object.fromEntries(tasks.toolsMenuItems().find((i) => i.group)?.items.map((i) => [i.action, i]) ?? []);
+  assert.deepEqual(Object.keys(views()), ['view-list', 'view-kanban', 'view-history']);
+  assert.deepEqual(Object.keys(byAction()), ['bulk-select', 'bulk-archive', 'bulk-tag-add', 'bulk-tag-remove', 'manage-categories', 'manage-tags'],
     'alles, was vorher als loses Icon im Kopf stand, steht beschriftet im Menue');
   assert.equal(byAction()['bulk-select'].disabled, false);
   // Ablegen und die Tag-Sammelaktionen passen nicht in die einzeilige Pille
@@ -513,17 +523,19 @@ test('das Werkzeugmenue: Verwalten nur mit Schreibrecht, Auswahl nur in der List
   assert.equal(byAction()['bulk-archive'].disabled, true);
   assert.equal(byAction()['bulk-tag-add'].disabled, true);
   assert.equal(byAction()['bulk-tag-remove'].disabled, true);
-  assert.equal(byAction()['toggle-history'].checked, false);
+  assert.equal(views()['view-history'].checked, false);
 
   tasks.state.viewMode = 'kanban';
   assert.equal(byAction()['bulk-select'].disabled, true, 'im Brett gibt es keine Mehrfachauswahl');
   tasks.state.viewMode = 'history';
-  assert.equal(byAction()['toggle-history'].checked, true, 'der Verlauf ist ein Schalter mit Haken');
+  assert.equal(views()['view-history'].checked, true, 'der Verlauf ist die gewaehlte Ansicht');
+  assert.equal(views()['view-list'].checked, false);
 
   setPermissions({ admin: false, modules: { tasks: 'read' }, widgets: {}, capabilities: {} });
   try {
-    assert.deepEqual(Object.keys(byAction()), ['toggle-history'],
+    assert.deepEqual(Object.keys(byAction()), [],
       'bei Nur-lesen bleibt nur, was zeigt (#467) - Auswahl fuehrt nur zu schreibenden Sammelaktionen');
+    assert.deepEqual(Object.keys(views()), ['view-list', 'view-kanban', 'view-history'], 'die Ansichten bleiben');
   } finally {
     clearPermissions();
   }
@@ -940,6 +952,84 @@ test('E13: die Aufgaben reichen ihren Filterknopf als Anker herein', async () =>
 // einer langen Liste unter dem Falz, in einer zugeklappten Gruppe gar nicht,
 // und rechts blieb die vorher gewaehlte Aufgabe stehen.
 
+// R20 (Re-Critique 2026-10-17 a6 P2): nach dem Abhaken zeichnete die Liste alle
+// Zeilen neu (200 Aufgaben: ein Frame von 497 ms bei 4x CPU). Ist sonst alles
+// gleich, faellt nur die Zeile bzw. ihre letzte Gruppe heraus.
+function patchEnv(layout) {
+  const removed = [];
+  const groups = layout.map(([groupId, ids]) => {
+    const group = { dataset: { groupId }, count: { textContent: String(ids.length) } };
+    group.rows = ids.map((id) => ({
+      dataset: { swipeId: String(id) },
+      closest: (sel) => (sel === '.task-group' ? group : null),
+      contains: (x) => x === group.rows?.find((r) => r.dataset.swipeId === String(id)),
+      remove: () => removed.push(`row:${id}`),
+    }));
+    group.querySelectorAll = (sel) => (sel === '.swipe-row' ? group.rows : []);
+    group.querySelector = (sel) => (sel === ':scope > .list-group__title > .list-group__count' ? group.count : null);
+    group.remove = () => removed.push(`group:${groupId}`);
+    return group;
+  });
+  const listEl = {
+    querySelectorAll: (sel) => (sel === ':scope > .task-group' ? groups : []),
+    querySelector: () => null,
+  };
+  const container = {
+    isConnected: false,
+    querySelector: (sel) => (sel === '#task-list' ? listEl : null),
+    querySelectorAll: (sel) => (sel === '#task-list .swipe-row' ? groups.flatMap((g) => g.rows) : []),
+  };
+  return { container, groups, removed };
+}
+
+test('R20: abgehakt faellt nur die Zeile heraus, die Zaehler ziehen nach - sonst zeichnet die Liste neu', () => {
+  const prev = { tasks: tasks.state.tasks, search: tasks.state.searchQuery, collapsed: tasks.state.collapsedGroups };
+  baseState();
+  tasks.state.searchQuery = '';
+  tasks.state.collapsedGroups = new Set();
+  try {
+    // Nach dem Neuladen ist 2 erledigt - der Server liefert unter dem
+    // Statusfilter „offen" nur noch 1 und 3.
+    tasks.state.tasks = [
+      { id: 1, title: 'A', category: 'haushalt', status: 'open', priority: 'none', tags: [] },
+      { id: 3, title: 'C', category: 'haushalt', status: 'open', priority: 'none', tags: [] },
+    ];
+    const ok = patchEnv([['haushalt', [1, 2, 3]]]);
+    assert.equal(tasks.patchRowRemoval(ok.container, 2), true, 'die Liste zeichnet alles neu, obwohl nur eine Zeile ging');
+    assert.deepEqual(ok.removed, ['row:2']);
+    assert.equal(ok.groups[0].count.textContent, '2', 'der Zaehler der Gruppe zieht nicht nach');
+
+    // Die Folge der uebrigen hat sich geaendert (hier: 3 vor 1 im DOM) -> neu zeichnen.
+    const moved = patchEnv([['haushalt', [3, 2, 1]]]);
+    assert.equal(tasks.patchRowRemoval(moved.container, 2), false, 'eine geaenderte Folge wird gepatcht statt neu gezeichnet');
+    assert.deepEqual(moved.removed, []);
+
+    // Die letzte Zeile einer Gruppe nimmt die Gruppe mit.
+    tasks.state.tasks = [
+      { id: 1, title: 'A', category: 'haushalt', status: 'open', priority: 'none', tags: [] },
+    ];
+    const alone = patchEnv([['haushalt', [1]], ['garten', [2]]]);
+    assert.equal(tasks.patchRowRemoval(alone.container, 2), true);
+    assert.deepEqual(alone.removed, ['group:garten']);
+  } finally {
+    tasks.state.tasks = prev.tasks;
+    tasks.state.searchQuery = prev.search;
+    tasks.state.collapsedGroups = prev.collapsed;
+  }
+});
+
+test('R20: lange Listen - Gruppen unter der Falz rechnen erst in Sicht, Zeichen kommen in Sicht-Reihenfolge', () => {
+  const css = readFileSync(new URL('../public/styles/tasks.css', import.meta.url), 'utf8');
+  const rule = css.match(/@supports \(content-visibility: auto\) \{\s*\.task-group \+ \.task-group \{([^}]*)\}/);
+  assert.ok(rule, 'ab der zweiten Gruppe fehlt content-visibility (unter @supports)');
+  assert.match(rule[1], /content-visibility:\s*auto/);
+  assert.match(rule[1], /contain-intrinsic-size:\s*auto none auto \d+px/, 'ohne gemerkte Hoehe springt der Bildlaufbalken');
+  const src = readFileSync(new URL('../public/pages/tasks.js', import.meta.url), 'utf8');
+  const list = src.match(/function renderTaskList\(container[\s\S]*?\n\}/)[0];
+  assert.match(list, /drawTaskIcons\(listEl\);/, 'renderTaskList ersetzt alle Zeichen im Frame des Wechsels');
+  assert.doesNotMatch(list, /lucide\.createIcons\(\{ el: listEl \}\)/);
+});
+
 function revealEnv({ rowFor = () => true } = {}) {
   const env = { expanded: [], scrolled: [], selected: [] };
   const row = { dataset: { swipeId: '9' }, scrollIntoView: (opts) => env.scrolled.push(opts) };
@@ -1053,7 +1143,7 @@ test('am Display: kein Schalter „Mir zugewiesen", und ein gespeicherter Wert w
   // Liste bei fuenfzehn offenen Aufgaben.
   const KEY = 'yuvomi:taskAssignedToMe';
   const vorher = tasks.state.user;
-  const showHtml = () => tasks.filterSheetGroups().find((g) => g.heading === 'tasks.filterGroupShow')?.html ?? '';
+  const showHtml = () => tasks.filterSheetGroups().find((g) => g.heading === 'tasks.filterGroupPerson')?.html ?? '';
   try {
     // DER MENSCH ZUERST - sonst waeren beide Abwesenheiten unten auch dann
     // gruen, wenn der Schalter oder das Wiederherstellen ganz verschwunden ist.

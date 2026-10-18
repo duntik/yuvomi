@@ -142,11 +142,6 @@
   z-index: var(--z-sticky);
 }
 
-/* Kategorie-Icon im Gruppenkopf trägt den Kategorie-Ton (dezent). */
-.contact-group__header .contact-cat-icon {
-  color: var(--cat, var(--color-text-secondary));
-}
-
 .contact-cat-icon {
   flex-shrink: 0;
 }
@@ -177,6 +172,21 @@
   background-color: var(--color-surface-2);
 }
 
+/* LANGE LISTEN RECHNEN NUR, WAS IN SICHT IST (Modern-Web-Guidance-Audit,
+ * Befund 18; Guide defer-rendering-heavy-content). 500 Kontakte sind 22.000
+ * Knoten; der Wechsel nach /contacts hielt die Seite bei 4x CPU 781 ms am
+ * Stueck, mit dieser Regel 568 ms. Zeilen ausserhalb der Sicht ueberspringt
+ * der Browser, bis sie in die Naehe kommen; die Hoehe (65px, gemessen) steht
+ * als Platzhalter da, `auto` merkt sich danach die echte - der Bildlaufbalken
+ * springt nicht. Fokusringe liegen in der Zeile innen und bleiben ganz
+ * (im Browser geprueft). Ohne Unterstuetzung bleibt alles, wie es war. */
+@supports (content-visibility: auto) and (contain-intrinsic-size: auto none auto 1px) {
+  .contact-group__list > .contact-item {
+    content-visibility: auto;
+    contain-intrinsic-size: auto none auto 65px;
+  }
+}
+
 /* --------------------------------------------------------
  * Auswahl-Modus (opt-in Bulk)
  *
@@ -205,19 +215,9 @@
   background-color: color-mix(in srgb, var(--c-accent) var(--tint-state), transparent);
 }
 
-/* Auswahlmodus verdeckt die Anlege-Affordance. Gefragt wird über :has() am
- * Dokument, weil der FAB seit #634 nicht mehr unter `.contacts-page` hängt,
- * sondern in der Shell-Layer neben dem Scrollport. */
-html:has(.contacts-page.is-selecting) .page-fab {
-  display: none;
-}
-
-/* Und mit der Affordance geht ihr Nachlauf (Etappe 6, 2026-08-13). Dieselbe
-   Paarung wie in layout.css: die Nachlauf-Regel fragt `:not([hidden])` und
-   sieht ein `display: none` nicht. */
-html:has(.contacts-page.is-selecting) {
-  --fab-safe-zone: 0px;
-}
+/* Im Auswahlmodus treten FAB und mobile Kapsel ab - die Regel steht seit R20
+ * in der Shell (layout.css, "Der Auswahlmodus nimmt der Shell ihre Bedienung
+ * ab"), einmal fuer jede Seite mit `.app-page.is-selecting`. */
 
 /* Öffnen/Bearbeiten: echte, fokussierbare Schaltfläche (Tastatur/Screenreader).
  *
@@ -279,6 +279,21 @@ html:has(.contacts-page.is-selecting) {
  * Hier stand bis 2026-08-18 `--cat: var(--c-accent)`, also der Modul-Ton -
  * dieselbe Scheibe für jedes Mitglied, während dieselben Menschen zwei Klicks
  * weiter ihre eigene trugen. */
+/* Kontakte ohne Konto: Initialen auf neutraler Flaeche (R19) - statt des
+ * Kategoriezeichens. Die Personenfarbe gehoert den Haushaltsmitgliedern
+ * (oben); ein ausgedachter Ton je Kontakt waere eine zweite Farbsprache. */
+.contact-item__icon--initials {
+  --seal-accent: var(--color-fill-well);
+  background-color: var(--color-fill-well);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.contact-card .contact-item__icon--initials {
+  font-size: var(--text-xl);
+}
+
 .contact-item__icon--member {
   overflow: hidden;
   font-size: var(--text-sm);
@@ -298,12 +313,7 @@ html:has(.contacts-page.is-selecting) {
   flex-direction: column;
 }
 
-.contact-item__name {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Hoechstens zwei Zeilen, dann Ellipse: die Titelregel (typography.css, R19). */
 
 /* Meta: Telefon zuerst, darf nicht schrumpfen; E-Mail füllt den Rest und wird
  * bei Bedarf gekürzt — die Telefonnummer bleibt so immer vollständig sichtbar. */

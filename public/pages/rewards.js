@@ -166,7 +166,12 @@ function avatar(member, size = 40) {
   // in dashboard.js, calendar.js, notes.js und user-multi-select.js.
   const color = member?.avatar_color || member?.user_color || AVATAR_FALLBACK_COLOR;
   const name = member?.display_name || member?.user_name || '';
-  return `<span class="rw-avatar rw-avatar--initials" style="${dim};--rw-avatar-bg:${esc(color)};color:${getReadableTextColor(color)}">${esc(initials(name, '?'))}</span>`;
+  // Die Initialen als Zeichnung (`data-initials` + `::before`, rewards.css),
+  // nicht als Text (R20): der Avatar steht in Knoepfen, deren Name „Emma
+  // Johnson, 25,00 €" lautet - ein Textknoten „EJ" waere Teil ihres sichtbaren
+  // Etiketts, das der Name nicht enthaelt (WCAG 2.5.3). Wie das Bild daneben
+  // (alt="") ist er fuer Hilfstechnik Dekor.
+  return `<span class="rw-avatar rw-avatar--initials" aria-hidden="true" data-initials="${esc(initials(name, '?'))}" style="${dim};--rw-avatar-bg:${esc(color)};color:${getReadableTextColor(color)}"></span>`;
 }
 
 /**
@@ -265,13 +270,15 @@ function balanceOf(userId) {
 // Shell + Tabs
 // --------------------------------------------------------
 
-function tabButton(tab, icon, label) {
+// TEXT-REITER OHNE ICON (Critique 2026-10-16, D3): bis zu sieben Bereiche
+// sind Text-Reiter wie im Budget. Die Belohnungen trugen als einziges Modul
+// Pokal, Geschenk und Uhr davor - dieselbe Leiste in zweiter Form.
+function tabButton(tab, label) {
   const on = state.tab === tab;
   return `
     <button class="rw-tab sub-tab${on ? ' sub-tab--active' : ''}" type="button" role="tab"
             data-tab-id="${esc(tab)}" aria-controls="rewards-content"
             aria-selected="${on ? 'true' : 'false'}"${on ? ' aria-current="page"' : ''} tabindex="${on ? '0' : '-1'}">
-      <i class="sub-tab__icon" data-lucide="${esc(icon)}" aria-hidden="true"></i>
       <span class="sub-tab__label">${esc(label)}</span>
     </button>`;
 }
@@ -299,13 +306,13 @@ function renderShell(container) {
   container.replaceChildren();
   container.insertAdjacentHTML('beforeend', `
     <div class="rewards-page app-page app-page--dashboard app-page--columns" data-composition="dashboard">
-      <header class="page-toolbar page-toolbar--narrow rewards-toolbar">
+      <header class="page-toolbar page-toolbar--narrow page-toolbar--tabs-title rewards-toolbar">
         <h1 class="page-toolbar__title" id="rewards-title">${esc(t('rewards.title'))}</h1>
         <div class="page-toolbar__actions"></div>
         <nav class="rewards-tabs page-toolbar__bar" role="tablist" aria-label="${esc(t('rewards.title'))}">
-          ${tabButton('overview', 'trophy', t('rewards.tabOverview'))}
-          ${tabButton('catalog', 'gift', t('rewards.tabCatalog'))}
-          ${tabButton('ledger', 'history', t('rewards.tabLedger'))}
+          ${tabButton('overview', t('rewards.tabPoints'))}
+          ${tabButton('catalog', t('rewards.tabCatalog'))}
+          ${tabButton('ledger', t('rewards.tabLedger'))}
         </nav>
       </header>
       <div class="rewards-content" id="rewards-content"></div>
@@ -483,6 +490,55 @@ function renderStandingRow(member) {
     </li>`;
 }
 
+/* DIE EIGENE KARTE (R20, Kinder-Standards). R19 hatte die eigene Zeile nach
+ * oben geholt - aber es blieb dieselbe Zeile wie die der anderen, und damit
+ * eine Rangliste mit einem Eintrag. Wer selbst sammelt, sieht hier seinen WEG:
+ * der Stand als Zahl im Large-Title-Grad, daneben das naechste Ziel mit
+ * Namen und Preis, dazwischen der Balken, und die eine Handlung, wenn der
+ * Stand reicht. Kein Spiel-Look (rewards.css Kopf): keine Konfetti, keine
+ * Sterne, der Modulton nur im Zeichen des Ziels - der Fuellstand traegt wie
+ * ueberall die Stimme. Dieselbe Zielwahl wie Zeile und Kachel
+ * (`nextRewardHint`, utils/reward-goal.js). */
+function renderOwnCard(member) {
+  const hint = nextRewardHint(member.balance);
+  const goal = Number(member.balance) >= 0 ? nextRewardGoal(member.balance, state.catalog) : null;
+  const target = goal && !goal.reached ? goal.target : null;
+  const canRedeem = !readOnly() && canAffordAny(member.balance);
+  const prev = state.prevBalances?.get(member.id);
+  const startVal = typeof prev === 'number' ? prev : member.balance;
+  const targetHtml = target ? `
+        <p class="rw-own__target">
+          <span class="rw-own__target-icon" aria-hidden="true">${target.icon ? esc(target.icon) : '<i data-lucide="gift" class="icon-md"></i>'}</span>
+          <span class="rw-own__target-name">${esc(target.name)}</span>
+          <span class="rw-own__target-cost">${esc(pointsLabel(target.cost))}</span>
+        </p>` : '';
+  const progress = hint ? `
+        <div class="rw-progress__track rw-own__track" role="progressbar"
+             aria-label="${esc(t('rewards.progressLabel'))}"
+             aria-valuenow="${Math.round(Math.max(0, Math.min(100, hint.pct)))}"
+             aria-valuemin="0" aria-valuemax="100"
+             aria-valuetext="${esc(hint.label)}"><div class="rw-progress__fill" style="--rw-progress:${Math.max(0, Math.min(1, hint.pct / 100))}"></div></div>
+        <p class="rw-own__hint" aria-hidden="true">${esc(hint.label)}</p>`
+    : `<p class="rw-own__hint rw-own__hint--muted">${esc(t('rewards.noRewardsYet'))}</p>`;
+  return `
+      <section class="rw-section rw-section--own" aria-labelledby="rw-own-title">
+        <h2 class="rw-section__title u-section-title" id="rw-own-title">${esc(t('rewards.yourPoints'))}</h2>
+        <div class="rw-own" data-member="${member.id}">
+          <p class="rw-own__balance">
+            <strong class="rw-own__value" data-countup="${member.balance}" data-from="${startVal}">${fmtPoints(startVal)}</strong>
+            <span class="rw-own__unit">${esc(t('rewards.pointsUnit'))}</span>
+          </p>
+          <div class="rw-own__goal">${targetHtml}${progress}</div>
+          <div class="rw-own__actions">
+            <button class="btn btn--ghost rw-own__history" type="button" data-member="${member.id}">${esc(t('rewards.tabLedger'))}</button>
+            ${canRedeem ? `<button class="btn btn--primary rw-redeem-open" type="button" data-member="${member.id}">
+              <i data-lucide="gift" aria-hidden="true"></i>${esc(redeemVerb())}
+            </button>` : ''}
+          </div>
+        </div>
+      </section>`;
+}
+
 // Eltern-Ersteinrichtung: drei Schritte an einem Ort, bis alle erledigt sind.
 function renderSetupHints() {
   // Drei Schritte, die alle etwas ANLEGEN. Eine Aufforderung einzurichten,
@@ -610,20 +666,31 @@ function renderOverview(el) {
           </div>` : '';
   // Anfragen und Punktestaende links, die letzten Buchungen ab der
   // Split-Schwelle rechts daneben (mobil darunter) - `.page-columns`.
+  /* DEINE PUNKTE ZUERST (R19, Critique 2026-10-16, Persona Emma, 8): ihre 30
+   * Punkte standen als zweite Zeile unter Leos 60, an der Faltkante, unter
+   * Anfrage und Taschengeld. Wer selbst sammelt und kein Elternteil ist (und
+   * nicht am Wandtablett handelt), sieht oben die eigene Karte: Stand, Weg
+   * zur naechsten Praemie, Anfragen. Die Punktestaende darunter nennen nur
+   * noch die anderen. */
+  const me = state.overview?.me;
+  const own = !isAdmin() && !actingAsDisplay() ? list.find((m) => m.id === me) : null;
+  const others = own ? list.filter((m) => m.id !== me) : list;
+  const ownSection = own ? renderOwnCard(own) : '';
   el.insertAdjacentHTML('beforeend', `
     <div class="rewards-content__inner">
       ${renderPageColumns({
         main: `
+      ${ownSection}
       ${renderSetupHints()}
       ${renderPendingPanel()}
       ${renderMoneySection()}
-      <section class="rw-section">
+      ${others.length ? `<section class="rw-section">
         <div class="rw-section__head">
           <h2 class="rw-section__title u-section-title">${esc(t('rewards.standings'))}</h2>
           ${adminBar}
         </div>
-        <ul class="row-carrier rw-standings">${list.map(renderStandingRow).join('')}</ul>
-      </section>`,
+        <ul class="row-carrier rw-standings">${others.map(renderStandingRow).join('')}</ul>
+      </section>` : ''}`,
         rail: renderRecentLedger(),
       })}
     </div>`);
@@ -644,7 +711,7 @@ function wireOverview(el) {
   el.querySelectorAll('[data-decide]').forEach((btn) => {
     btn.addEventListener('click', () => decideRedemption(Number(btn.dataset.id), btn.dataset.decide, btn));
   });
-  el.querySelectorAll('.rw-standing__id').forEach((btn) => {
+  el.querySelectorAll('.rw-standing__id, .rw-own__history').forEach((btn) => {
     btn.addEventListener('click', () => openMemberDetail(Number(btn.dataset.member)));
   });
   el.querySelectorAll('[data-setup]').forEach((btn) => {
@@ -867,7 +934,7 @@ function renderLedger(el) {
         rail: renderBalancesRail(),
       })}
     </div>`);
-  el.querySelectorAll('.rw-standing__id').forEach((btn) => {
+  el.querySelectorAll('.rw-standing__id, .rw-own__history').forEach((btn) => {
     btn.addEventListener('click', () => openMemberDetail(Number(btn.dataset.member)));
   });
 
@@ -1072,7 +1139,7 @@ function openBonusModal() {
           </select>
         </div>
         <div class="form-group">
-          <label class="label" for="rw-bonus-points">${esc(t('rewards.pointsSigned'))}</label>
+          <label class="label" for="rw-bonus-points">${esc(t('rewards.pointsSigned'))}${REQUIRED_MARK}</label>
           <input class="input" id="rw-bonus-points" type="number" inputmode="numeric" step="1" placeholder="10" required>
           <p class="rw-hint">${esc(t('rewards.pointsSignedHint'))}</p>
         </div>
@@ -1947,7 +2014,7 @@ async function refreshActiveTab() {
  * sich sonst nicht stellen.
  */
 export const __test = {
-  renderStandingRow, renderRewardCard, renderPendingPanel, renderSetupHints,
+  renderStandingRow, renderOwnCard, renderRewardCard, renderPendingPanel, renderSetupHints,
   readOnly, state,
   // R10 L7: Kopf und Inhalt teilen je Reiter eine Kante (test-dashboard-rewards.js).
   renderCatalog, renderLedger, renderOverview, handleSetupStep,

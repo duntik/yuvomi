@@ -397,6 +397,19 @@
   gap: var(--space-2);
 }
 
+/* Unter der Liste, leise (R20): Etikett und Ghost-Knoepfe auf einer Linie. */
+.schedule-quickstart-actions--more {
+  align-items: center;
+}
+
+/* Zwei Gruppen in der Schichtarten-Liste (R20): mit Uhrzeit, ganztaegig. Den
+ * Abstand zwischen ihnen traegt das Raster des Abschnitts; ab 720px stehen sie
+ * als seine zwei Spalten nebeneinander. */
+.schedule-type-group__title {
+  margin: 0 0 var(--space-2);
+  font-weight: var(--font-weight-semibold);
+}
+
 .schedule-icon-picker {
   display: inline-flex;
   align-items: center;
@@ -479,6 +492,14 @@
 .schedule-stat-card {
   display: grid;
   gap: var(--space-3);
+}
+
+/* EINE GRUNDLINIE NEBENEINANDER (R19, Critique 2026-10-16): die Karten einer
+ * Reihe sind gleich hoch, und die kuerzere verteilte die Resthoehe auf ihre
+ * Zeilen - "Stunden je Schichtart" begann ihre Liste 24px tiefer als
+ * "Schichtanzahl". Die Zeilen stehen oben, die Luft bleibt unten. */
+.schedule-stat-card {
+  align-content: start;
 }
 
 .schedule-stat-filters {
@@ -587,40 +608,11 @@
   margin-bottom: var(--space-1);
 }
 
-.schedule-reminder-settings {
-  margin-bottom: var(--space-4);
-}
-
-.schedule-reminder-settings__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.schedule-reminder-settings__row .toggle-row {
-  flex: 1 1 auto;
-}
-
-.schedule-reminder-settings__row select {
-  width: auto;
-  flex: 0 0 auto;
-}
-
-/* Eine Stundenzahl ist drei Ziffern breit, nicht die ganze Karte: das Feld
- * lief am Desktop 1116px weit (Re-Critique 2026-09-27, A2 P1). */
-.schedule-reminder-settings__row--hours .form-input {
-  inline-size: 10ch;
-  flex: 0 0 auto;
-}
-
+/* Keine Karte in der Karte (R19): die Liste stand auf einer zweiten,
+ * gehobenen Flaeche in der Karte. Die Zeilen stehen direkt in ihr. */
 .schedule-stat-list {
   display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+  gap: var(--space-3);
 }
 
 .schedule-stat-row {
@@ -728,6 +720,7 @@
    * neben die Ueberschrift. */
   .schedule-library--shifts > .schedule-library__head,
   .schedule-library--shifts > .row-carrier,
+  .schedule-library--shifts > .schedule-quickstart-actions--more,
   .schedule-library--shifts > .empty-state {
     grid-column: 1 / -1;
   }
@@ -1082,14 +1075,11 @@
    * .form-field` und `.schedule-stat-filter-actions` bleiben als eigene Zeilen
    * stehen - seit `.schedule-stat-filters` selbst verschwindet, sind sie ohne
    * Wirkung, aber harmlos, und eine von ihnen war ohnehin schon ein gepruefter
-   * Guard (test-schedule.js). `.schedule-reminder-settings` ("Meine
-   * Einstellungen") gehoert hierher aus demselben Grund wie die Tab-Leiste:
-   * sie beantwortet "was gilt fuer MICH", nicht "was stand in der gewaehlten
-   * Spanne" - auf dem Statistik-Blatt druckte sie bisher als allererste Karte
-   * vor der eigentlichen Auswertung. */
+   * Guard (test-schedule.js). "Meine Einstellungen" stehen seit R14 im
+   * Einstellungsblatt (settings/pages/personal-schedule.js), das settings.css
+   * laedt - hier gibt es sie nicht mehr zu verstecken. */
   .schedule-tabs,
   .schedule-today,
-  .schedule-reminder-settings,
   .schedule-stat-filters,
   .schedule-stat-filters .form-field,
   .schedule-stat-filter-actions {

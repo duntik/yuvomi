@@ -7,7 +7,7 @@
 import { api } from '/api.js';
 import { t } from '/i18n.js';
 import { openModal, closeModal, reportFieldError, refocusAfterRender } from '/components/modal.js';
-import { vibrate } from '/utils/ux.js';
+import { vibrate, isImeComposing } from '/utils/ux.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { emptyStateHTML, mountLoadError } from '/utils/empty-state.js';
 import { amountPlaceholder, amountStep, amountIsSavable, smallestUnitLabel } from '/utils/money.js';
@@ -71,9 +71,14 @@ function renderShell() {
 }
 
 // Auslastung → Ton: unter Plan grün, knapp (>85 %) amber, über Plan rot.
+//
+// GENAU AUF PLAN IST KEINE WARNUNG (R20, Re-Critique 2026-10-17 A4 P3). Eine
+// feste Miete ist am Monatsersten zu 100 % gebucht und bleibt es; sie stand den
+// ganzen Monat in Bernstein mit Warndreieck, obwohl nichts mehr kommt. Amber
+// heisst "kurz davor" - wer den Plan genau trifft, ist angekommen, nicht knapp.
 function toneForRatio(ratio, over) {
   if (over) return 'over';
-  if (ratio > 0.85) return 'near';
+  if (ratio > 0.85 && ratio < 1) return 'near';
   return 'under';
 }
 
@@ -200,8 +205,15 @@ function renderRows(plans) {
       : p.over
         ? t('budget.planOverBy', { amount: fmt(Math.abs(p.remaining)) })
         : t('budget.planLeft', { amount: fmt(Math.max(0, p.remaining)) });
+    // DIE KATEGORIE BEHAELT IHRE FARBE (Critique 2026-10-16, D9): der Balken
+    // traegt die Identitaetsfarbe der Kategorie wie in Uebersicht und
+    // Statistik; der ZUSTAND (knapp, ueber Plan) steht als Text mit Icon in der
+    // Fusszeile, nicht als umgefaerbter Balken. Vorher war „Wohnen" hier amber.
+    const fill = view.ctx.categoryColor?.(p.category);
+    const texture = view.ctx.categoryTexture?.(p.category) ?? null;
+    const stateIcon = p.over === null ? '' : p.over ? 'circle-alert' : tone === 'near' ? 'triangle-alert' : '';
     return `
-      <${Tag} ${ro ? '' : 'type="button" '}class="budget-plan-row budget-plan-row--tone-${tone}${ro ? ' budget-plan-row--static' : ''}" data-category="${view.ctx.esc(p.category)}">
+      <${Tag} ${ro ? '' : 'type="button" '}class="budget-plan-row budget-plan-row--tone-${tone}${ro ? ' budget-plan-row--static' : ''}" data-category="${view.ctx.esc(p.category)}"${fill ? ` style="--plan-fill:${fill}"` : ''}${texture ? ` data-texture="${texture}"` : ''}>
         <div class="budget-plan-row__top">
           <span class="budget-plan-row__label">${view.ctx.esc(view.ctx.categoryLabel(p.category))}</span>
           <span class="budget-plan-row__amounts"><strong>${fmt(p.actual)}</strong> / ${fmt(p.planned)}</span>
@@ -209,7 +221,7 @@ function renderRows(plans) {
         <div class="budget-plan-row__track">
           <div class="budget-plan-row__fill" style="--plan-scale:${pct / 100}"></div>
         </div>
-        ${foot ? `<div class="budget-plan-row__foot">${foot}</div>` : ''}
+        ${foot ? `<div class="budget-plan-row__foot">${stateIcon ? `<i data-lucide="${stateIcon}" class="icon-sm" aria-hidden="true"></i>` : ''}<span>${foot}</span></div>` : ''}
         ${ro ? '' : `<span class="sr-only">${t('budget.planEditAction')}</span>`}
       </${Tag}>`;
   }).join('');
@@ -317,7 +329,7 @@ function amountFieldHtml(value) {
 
 function bindEnter(panel, fn) {
   panel.querySelector('#plan-amount')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); fn(); }
+    if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); fn(); }
   });
 }
 
@@ -393,4 +405,4 @@ async function deletePlan(category) {
  * Messflaeche fuer die Nur-lesen-Regel (#1265 P7): die drei Renderer sind reine
  * Funktionen ueber `view`, das der Test mit `ctx` fuellt.
  */
-export const __test = { readOnly, renderSavingsCard, renderRows, view, openAddPlan };
+export const __test = { readOnly, renderSavingsCard, renderRows, view, openAddPlan, toneForRatio };

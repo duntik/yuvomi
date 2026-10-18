@@ -14,6 +14,7 @@ const {
   summarizeReport,
   analyteNames,
   analyteTrend,
+  defaultTrendAnalyte,
   LAB_FLAGS,
 } = await import('../public/utils/health-labs.js');
 
@@ -185,4 +186,66 @@ test('analyteTrend: leerer Name oder leere Eingabe → []', () => {
   assert.deepEqual(analyteTrend([{ id: 1, report_date: '2026-01-01', results: [{ analyte: 'Hb', value_num: 14 }] }], ''), []);
   assert.deepEqual(analyteTrend(null, 'Hb'), []);
   assert.deepEqual(analyteTrend(undefined, 'Hb'), []);
+});
+
+// Critique 2026-10-16: Laborwerte mobil waren eine seitlich scrollende Tabelle,
+// die Bewertung („Niedrig") lag rechts ausserhalb des Bilds. Unter 640px steht
+// jeder Analyt jetzt als Zeile (Name links, Wert rechts, Referenz und
+// Bewertung darunter), auffaellige zuerst.
+test('Laborwerte mobil: Zeilen statt seitlich scrollender Tabelle, auffaellige zuerst (Critique 2026-10-16)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { eachRule } = await import('./css-rules.js');
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('function resultListMarkup(results)'), src.indexOf('function referenceLabel('));
+  assert.match(fn, /const ordered = \[\.\.\.results\.filter\(abnormal\), \.\.\.results\.filter\(\(r\) => !abnormal\(r\)\)\];/, 'auffaellige Werte vorn');
+  assert.match(fn, /const abnormal = \(r\) => r\.flag === 'low' \|\| r\.flag === 'high';/);
+  assert.match(fn, /health-lab-rows__ref">\$\{esc\(t\('health\.labs\.col\.reference'\)\)\}/, 'die Referenz ist beschriftet');
+  assert.match(fn, /flagIndicatorMarkup\(r\.flag\)/, 'die Bewertung kommt als Pfeil plus Wort, wie in der Tabelle');
+  assert.match(src, /\$\{resultListMarkup\(results\)\}/, 'der Befund rendert beide Fassungen');
+  const css = readFileSync(new URL('../public/styles/health.css', import.meta.url), 'utf8');
+  const rules = [...eachRule(css)];
+  const phone = (r) => r.at.some((a) => /max-width:\s*639px/.test(a));
+  assert.ok(rules.some((r) => phone(r) && r.selector.trim() === '.health-lab-table-wrap' && /display:\s*none/.test(r.body)), 'mobil keine Tabelle');
+  assert.ok(rules.some((r) => phone(r) && r.selector.trim() === '.health-lab-rows' && /display:\s*block/.test(r.body)), 'mobil die Zeilen');
+  assert.ok(rules.some((r) => !r.at.length && r.selector.trim() === '.health-lab-rows' && /display:\s*none/.test(r.body)), 'ab 640px die Tabelle');
+});
+
+// Re-Critique 2026-10-17 (Persona Sam): wer per Tastatur einen anderen Befund
+// waehlte, verlor den Fokus an BODY - der Neuaufbau tauschte die Liste aus.
+// Gemessen im Browser (Playwright, 1440 und 390): vorher BODY, nachher die
+// gewaehlte Karte. Der Guard haelt die Verdrahtung: nach renderLabsShell()
+// bekommt die Karte DERSELBEN ID den Fokus.
+test('Laborwerte: die Wahl eines Befunds behaelt den Fokus auf seiner Karte', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('function wireLabs()'), src.indexOf('function wireLabsDetail()'));
+  assert.match(fn, /labs\.selectedReportId = id;\s*renderLabsShell\(\);[\s\S]{0,400}labs\.root\.querySelector\(`\.health-lab-card\[data-report-id="\$\{id\}"\]`\)\?\.focus\(\{ preventScroll: true \}\);/);
+});
+
+// --------------------------------------------------------
+// defaultTrendAnalyte (R20, Re-Critique 2026-10-17 a5 P2-6)
+// --------------------------------------------------------
+
+test('defaultTrendAnalyte: der auffaellige Wert des neuesten Befunds fuehrt, nicht der erste Name', () => {
+  const reports = [
+    { id: 1, report_date: '2026-03-01', results: [
+      { analyte: 'Ferritin', value_num: 40, flag: 'normal' },
+      { analyte: 'Vitamin D', value_num: 24, flag: 'low' },
+    ] },
+    { id: 2, report_date: '2026-09-01', results: [
+      { analyte: 'Ferritin', value_num: 45, flag: 'normal' },
+      { analyte: 'vitamin d', value_num: 18, flag: 'low' },
+      { analyte: 'TSH', value_num: 5, flag: 'high' },
+    ] },
+  ];
+  assert.equal(analyteNames(reports)[0], 'Ferritin', 'Vorbedingung: der erste Name ist unauffaellig');
+  assert.equal(defaultTrendAnalyte(reports), 'Vitamin D', 'auffaellig im neuesten Befund UND mit Verlauf; die Schreibweise der Liste');
+  // Die Listenreihenfolge entscheidet nicht, welcher Befund der neueste ist.
+  assert.equal(defaultTrendAnalyte([...reports].reverse()).toLowerCase(), 'vitamin d');
+  // Ohne Verlauf: der auffaellige Wert trotzdem.
+  assert.equal(defaultTrendAnalyte([reports[1]]), 'vitamin d');
+  // Nichts auffaellig: der erste mit Verlauf, sonst der erste Name.
+  const calm = reports.map((r) => ({ ...r, results: r.results.map((x) => ({ ...x, flag: 'normal' })) }));
+  assert.equal(defaultTrendAnalyte(calm), 'Ferritin');
+  assert.equal(defaultTrendAnalyte([]), null);
 });

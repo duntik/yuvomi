@@ -246,8 +246,12 @@ test('die globale Suche ist von der Uebersicht mit einem Tipp erreichbar, und ni
   global.window ??= { yuvomi: null };
   const user = { display_name: 'Linda' };
   const normal = renderDashboardOverview(user, false, null, { followsDefault: true, canPublish: false });
-  assert.match(normal, /<button class="dashboard-icon-btn" id="dashboard-search"[^>]*aria-label="nav\.search"[^>]*aria-haspopup="dialog"/,
-    'ein benannter Icon-Knopf wie die zwei daneben');
+  // D1 (Critique 2026-10-16): dieselbe Kopf-Icon-Haut wie jeder Modulkopf.
+  assert.match(normal, /<button class="btn btn--secondary btn--icon dashboard-icon-btn" id="dashboard-search"[^>]*aria-label="nav\.search"[^>]*aria-haspopup="dialog"/,
+    'ein benannter Icon-Knopf in der Kopf-Icon-Haut (btn--secondary btn--icon) wie die zwei daneben');
+  for (const id of ['dashboard-wall-enter', 'dashboard-customize-btn']) {
+    assert.match(normal, new RegExp(`<button class="btn btn--secondary btn--icon dashboard-icon-btn" id="${id}"`), `${id}: Kopf-Icon-Haut`);
+  }
   const editing = renderDashboardOverview(user, true, null, { followsDefault: true, canPublish: false });
   assert.doesNotMatch(editing, /id="dashboard-search"/, 'im Anpassen-Modus zaehlt nur Abbrechen oder Speichern');
 });
@@ -825,3 +829,34 @@ test('R14: auf dem Telefon bleibt der Speed-Dial in der Kapsel', () => withStage
   assert.match(__test.renderFab(), /class="page-fab-group"/);
   assert.doesNotMatch(renderDashboardOverview({ display_name: 'Linda' }, false, null, {}), /id="fab-main"/);
 }));
+
+// Critique 2026-10-16: jede Kachel fuehrt mit „Alle" zu ihrer Seite, nur die
+// Familie sagte „Verwalten" fuer denselben Weg. Und die Onboarding-Karte trug
+// Haarlinie plus 28px-Schatten (Detektor gpt-thin-border-wide-shadow): sie
+// nimmt jetzt das Material der schwebenden Tafel (glass.css).
+test('Dashboard: ein Wort fuer den Kopf-Link, Onboarding-Karte als schwebende Tafel (Critique 2026-10-16)', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const { readFileSync } = await import('node:fs');
+  assert.match(dashboardSource, /widgetHeader\('family', t\('dashboard\.familyTitle'\), null, manageHref, null, 'contacts'\)/,
+    'die Familie nimmt das gemeinsame Link-Wort');
+  assert.doesNotMatch(dashboardSource, /t\('dashboard\.manage'\)/);
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const card = [...eachRule(css)].find((r) => !r.at.length && r.selector.trim() === '.onboarding-card');
+  assert.match(card?.body ?? '', /border:\s*none/, 'keine Haarlinie');
+  assert.match(card?.body ?? '', /box-shadow:\s*var\(--glass-shadow-lg\), var\(--glass-inset-elevated\)/, 'Tiefe und Lichtkante der schwebenden Tafel');
+});
+
+// R20 (Re-Critique 2026-10-17, A1 P3): Esc beendete das Anpassen nicht - am
+// Telefon war "Abbrechen" der einzige Weg. Esc nimmt denselben Weg wie der
+// Knopf (mit Rueckfrage bei Aenderungen) und laesst offene Dialoge und Menues
+// ihr eigenes Esc behalten.
+test('R20: Esc beendet das Anpassen wie "Abbrechen", nicht an einem offenen Dialog vorbei', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8');
+  const at = src.indexOf("if (event.key !== 'Escape' || event.defaultPrevented || !isCustomizing) return;");
+  assert.ok(at > 0, 'kein Esc-Ausstieg aus dem Anpassen');
+  const block = src.slice(src.lastIndexOf('if (isCustomizing) {', at), src.indexOf('}, { signal: signal });', at));
+  assert.match(block, /document\.addEventListener\('keydown'/);
+  assert.match(block, /dialog\[open\]/, 'ein offener Dialog behaelt sein Esc');
+  assert.match(block, /requestCancelDashboardConfig\(\)/, 'derselbe Weg wie der Knopf, mit Rueckfrage');
+});

@@ -10913,6 +10913,140 @@ const MIGRATIONS = [
         WHERE birthday_feed_token IS NOT NULL;
     `,
   },
+  {
+    version: 250,
+    description: 'housekeeping: open payment tasks belong to the adults who pay',
+    // DER OFFENE ALTBESTAND DER ZAHLUNGSAUFGABEN (R20, Ulas 2026-10-17). Seit
+    // R20 entsteht eine Zahlungsaufgabe auf `assignees`, zugewiesen der Person,
+    // die eincheckt (wenn sie Betraege sehen darf), und den aktiven Admins.
+    // Aeltere stehen auf `all` und nennen den Lohn jedem Konto mit
+    // Aufgabenrecht, auch einem Kind ohne `housekeeping_view_amounts`.
+    //
+    // Nachgezogen werden nur OFFENE (nicht erledigt, nicht archiviert), die
+    // ueber `housekeeping_work_sessions.payment_task_id` verknuepft sind und
+    // noch auf `all` stehen. Erledigte bleiben stehen (Ulas' Entscheidung);
+    // sie zieht das naechste Bearbeiten ihres Besuchs nach. Gibt es fuer eine
+    // Aufgabe niemanden, dem sie gehoeren darf (Ersteller ohne Betragsrecht und
+    // kein aktiver Admin), wird sie privat fuer die Erstellerin, ohne
+    // Zuweisungen und ohne Beschreibung (die nennt den Lohn) - nie `all`.
+    //
+    // EINGEFROREN - NIE AN DIE LAUFZEITREGEL ANGLEICHEN. Die Regel steht hier
+    // als selbsttragende Kopie von services/payment-task-audience.js im Stand
+    // von Version 250, und sie liest nur Tabellen und Spalten, die es bei 250
+    // gibt. Eine Migration muss fuer immer dasselbe tun: rief sie die
+    // Laufzeitregel auf, aenderte jede spaetere Aenderung dort rueckwirkend,
+    // was 250 auf einer noch nicht migrierten Installation tut, und eine
+    // Spalte, die erst eine juengere Migration anlegt, braeche das
+    // Durchmigrieren alter Installationen ab. Dass beide HEUTE dasselbe
+    // ergeben, haelt der Aequivalenztest in test/test-payment-task-backfill.js;
+    // weicht die Laufzeitregel spaeter bewusst ab, wird dieser Test angepasst,
+    // nicht diese Migration. Wiederholt laufen aendert nichts, die Auswahl
+    // trifft nur `all`.
+    up(database) {
+      const FAMILY_ROLES_AT_250 = new Set(['dad', 'mom', 'parent', 'child', 'grandparent', 'relative', 'other']);
+      const capabilityRow = database.prepare(`
+        SELECT access FROM access_permissions
+        WHERE subject_type = ? AND subject_id = ? AND resource_type = 'capability'
+          AND resource_key = 'housekeeping_view_amounts' AND access IN ('none', 'allow')
+      `);
+      // Betragsrecht wie resolvePermissions() bei 250: Admin immer, sonst
+      // Standard `allow`, dann das Rollenprofil, dann die Mitglied-Zeile.
+      const seesAmounts = (user) => {
+        if (user.role === 'admin') return true;
+        let access = 'allow';
+        if (user.family_role && FAMILY_ROLES_AT_250.has(user.family_role)) {
+          access = capabilityRow.get('role', user.family_role)?.access ?? access;
+        }
+        access = capabilityRow.get('user', String(user.id))?.access ?? access;
+        return access === 'allow';
+      };
+      // Admins als Haushaltsmitglieder, wie householdMemberSql() bei 250 (aktiv,
+      // kein Hauspersonal, kein Gast, kein Wandtablett) - als Text eingefroren.
+      // Die Zuweisung schreibt die Datenbank selbst (INSERT ... SELECT), die
+      // erste Admin-Person holt eine Einzelzeile.
+      const ADMIN_MEMBER_AT_250 = `u.role = 'admin' AND u.deactivated_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM housekeeping_workers hw WHERE hw.user_id = u.id)
+        AND NOT EXISTS (SELECT 1 FROM split_expense_guest_users sg WHERE sg.user_id = u.id)
+        AND NOT EXISTS (SELECT 1 FROM display_accounts da WHERE da.user_id = u.id)`;
+      const firstAdmin = database.prepare(`
+        SELECT u.id FROM users u WHERE ${ADMIN_MEMBER_AT_250} ORDER BY u.id ASC LIMIT 1
+      `);
+      const assignAdmins = database.prepare(`
+        INSERT OR IGNORE INTO task_assignments (task_id, user_id)
+        SELECT ?, u.id FROM users u WHERE ${ADMIN_MEMBER_AT_250}
+      `);
+      const tasks = database.prepare(`
+        SELECT DISTINCT t.id, t.created_by FROM housekeeping_work_sessions s
+        JOIN tasks t ON t.id = s.payment_task_id
+        WHERE t.visibility = 'all' AND t.status <> 'done' AND t.archived_at IS NULL
+        ORDER BY t.id
+      `).all();
+      const readUser = database.prepare('SELECT id, role, family_role, deactivated_at FROM users WHERE id = ?');
+      const update = database.prepare(`
+        UPDATE tasks SET visibility = 'assignees', created_by = ?, assigned_to = ? WHERE id = ?
+      `);
+      const clear = database.prepare('DELETE FROM task_assignments WHERE task_id = ?');
+      const closeTask = database.prepare(`
+        UPDATE tasks SET visibility = 'private', assigned_to = NULL, description = NULL WHERE id = ?
+      `);
+      const assign = database.prepare('INSERT OR IGNORE INTO task_assignments (task_id, user_id) VALUES (?, ?)');
+      for (const task of tasks) {
+        const creator = task.created_by == null ? null : readUser.get(task.created_by);
+        const creatorPays = Boolean(creator && creator.deactivated_at == null && seesAmounts(creator));
+        const owner = creatorPays ? creator.id : firstAdmin.get()?.id;
+        if (owner == null) {
+          // Niemand, dem sie gehoeren darf (kein aktiver Admin, Erstellerin
+          // ohne Betragsrecht): schliessen statt auf `all` lassen - privat fuer
+          // die Erstellerin, ohne Zuweisungen und ohne die Beschreibung, die
+          // den Lohn nennt (wie normalizePaymentTaskAudience, R20).
+          closeTask.run(task.id);
+          clear.run(task.id);
+          continue;
+        }
+        update.run(owner, owner, task.id);
+        clear.run(task.id);
+        if (creatorPays) assign.run(task.id, creator.id);
+        assignAdmins.run(task.id);
+      }
+    },
+  },
+  {
+    version: 251,
+    description: 'users: avatar_key, a random key per profile picture for its address',
+    // Listen tragen statt der Data-URL die Adresse `/api/v1/people/:id/avatar?v=`
+    // (services/person-avatar.js), und `v` ist dieser Schluessel. ZWEI AUFGABEN:
+    //   - Er wechselt mit JEDEM neuen Bild - der Offline-Cache des Service
+    //     Workers ist nach der Adresse geschluesselt, eine gleiche Adresse zeigte
+    //     offline das alte Bild (die Laenge der Data-URL reichte nicht).
+    //   - Er ist nicht zu raten - die Route gibt das Bild nur mit ihm heraus.
+    //     Mit einer Zaehlversion holte jede Sitzung und jedes Wanddisplay per
+    //     Durchzaehlen der ids auch Bilder von Personen, die es in keiner Zeile
+    //     sieht (Hauspersonal, Ausgaben-Gaeste, deaktivierte Konten).
+    // Beides Codex-Review zu #2056.
+    //
+    // TRIGGER STATT DER SCHREIBSTELLEN: das Bild wird an fuenf Stellen
+    // geschrieben, und eine neue sechste vergaesse den Schluessel still.
+    // `reconcileCriticalSchema()` legt Spalte, Schluessel und Trigger nach,
+    // wenn eine Datei sie verloren hat.
+    up: `
+      ALTER TABLE users ADD COLUMN avatar_key TEXT;
+      UPDATE users SET avatar_key = lower(hex(randomblob(16)))
+        WHERE avatar_data IS NOT NULL AND avatar_data <> '';
+      CREATE TRIGGER IF NOT EXISTS trg_users_avatar_key_update
+        AFTER UPDATE OF avatar_data ON users FOR EACH ROW
+        WHEN NEW.avatar_data IS NOT OLD.avatar_data
+        BEGIN
+          UPDATE users SET avatar_key = CASE
+            WHEN NEW.avatar_data IS NULL OR NEW.avatar_data = '' THEN NULL
+            ELSE lower(hex(randomblob(16))) END
+          WHERE id = OLD.id;
+        END;
+      CREATE TRIGGER IF NOT EXISTS trg_users_avatar_key_insert
+        AFTER INSERT ON users FOR EACH ROW
+        WHEN NEW.avatar_data IS NOT NULL AND NEW.avatar_data <> ''
+        BEGIN UPDATE users SET avatar_key = lower(hex(randomblob(16))) WHERE id = NEW.id; END;
+    `,
+  },
 ];
 
 /**
@@ -10928,6 +11062,37 @@ const MIGRATIONS = [
  * und werden mit ihrem gespeicherten Wortlaut wieder angelegt. Die Aufrufer
  * sorgen fuer die Transaktion.
  */
+/** Die Trigger aus Migration 251, derselbe Wortlaut; die Migration bleibt eingefroren. */
+function createAvatarKeyTriggers(database) {
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_users_avatar_key_update
+      AFTER UPDATE OF avatar_data ON users FOR EACH ROW
+      WHEN NEW.avatar_data IS NOT OLD.avatar_data
+      BEGIN
+        UPDATE users SET avatar_key = CASE
+          WHEN NEW.avatar_data IS NULL OR NEW.avatar_data = '' THEN NULL
+          ELSE lower(hex(randomblob(16))) END
+        WHERE id = OLD.id;
+      END;
+    CREATE TRIGGER IF NOT EXISTS trg_users_avatar_key_insert
+      AFTER INSERT ON users FOR EACH ROW
+      WHEN NEW.avatar_data IS NOT NULL AND NEW.avatar_data <> ''
+      BEGIN UPDATE users SET avatar_key = lower(hex(randomblob(16))) WHERE id = NEW.id; END;
+  `);
+}
+
+/**
+ * Nachtrag zu einer nachgetragenen `users.avatar_key` (reconcileCriticalSchema):
+ * Schluessel fuer die vorhandenen Bilder und die Trigger aus Migration 251.
+ */
+function backfillAvatarKey(database) {
+  database.exec(`
+    UPDATE users SET avatar_key = lower(hex(randomblob(16)))
+      WHERE avatar_data IS NOT NULL AND avatar_data <> '' AND avatar_key IS NULL
+  `);
+  createAvatarKeyTriggers(database);
+}
+
 function backfillSeriesAuthored(database) {
   const triggers = database.prepare(`
     SELECT name, sql FROM sqlite_master
@@ -11190,6 +11355,13 @@ const CRITICAL_COLUMNS = [
   // Zeile anfasst) und jede Buchung eines Pushs. Kein Nachtrag: NULL heisst
   // "kein Schnappschuss", der Abruf nimmt den Weg von vorher.
   { table: 'calendar_events', column: 'outbound_snapshot', type: 'TEXT' },
+  // #2056: v251 traegt den Schluessel des Profilbilds nach; ohne die Spalte
+  // scheitern Aufgaben, Termine, Notizen, Uebersicht, Housekeeping und die
+  // Taschengeld-Buchungen (ihre Bildadresse liest sie). MIT NACHTRAG: die
+  // Schluessel der vorhandenen Bilder und die Trigger, die ihn bei jedem neuen
+  // Bild neu wuerfeln, kommen mit der Spalte.
+  { table: 'users', column: 'avatar_key', type: 'TEXT',
+    backfill: backfillAvatarKey },
 ];
 
 /**
@@ -11241,6 +11413,47 @@ function reconcileCriticalSchema(database = db) {
     } catch (err) {
       log.error(`Schema-Reconciliation ${table}.${column} fehlgeschlagen:`, err?.message || err);
     }
+  }
+  reconcileAvatarKeyTriggers(database);
+}
+
+/**
+ * Die Schluessel-Trigger der Profilbilder (Migration 251) - auch wenn NUR sie
+ * fehlen. Der Nachtrag oben laeuft nur mit einer neu angelegten Spalte; ein
+ * Neubau von `users` nimmt Trigger aber nicht mit, und ohne sie behielte ein
+ * neues Bild seinen alten Schluessel (Codex-Review zu #2056). Die Reparatur
+ * wuerfelt dann alle Schluessel neu - was ohne Trigger geschrieben wurde,
+ * steht sonst unter einer falschen oder gar keiner Adresse.
+ */
+function reconcileAvatarKeyTriggers(database) {
+  try {
+    const columns = database.prepare('PRAGMA table_info(users)').all();
+    if (!columns.some((c) => c.name === 'avatar_key')) return;
+    const present = database.prepare(`
+      SELECT COUNT(*) AS n FROM sqlite_master
+      WHERE type = 'trigger' AND name IN ('trg_users_avatar_key_update', 'trg_users_avatar_key_insert')
+    `).get().n;
+    if (present === 2) return;
+    // JEDER SCHLUESSEL NEU, nicht nur die fehlenden: ohne die Trigger kann ein
+    // Bild unter dem alten Schluessel ersetzt worden sein, und dessen
+    // `immutable`-Adresse zeigte aus dem Cache weiter das alte Bild.
+    database.exec('SAVEPOINT reconcile_avatar_key');
+    try {
+      createAvatarKeyTriggers(database);
+      database.exec(`
+        UPDATE users SET avatar_key = CASE
+          WHEN avatar_data IS NULL OR avatar_data = '' THEN NULL
+          ELSE lower(hex(randomblob(16))) END
+      `);
+      database.exec('RELEASE SAVEPOINT reconcile_avatar_key');
+    } catch (err) {
+      database.exec('ROLLBACK TO SAVEPOINT reconcile_avatar_key');
+      database.exec('RELEASE SAVEPOINT reconcile_avatar_key');
+      throw err;
+    }
+    log.warn('Schema-Drift behoben: Trigger fuer users.avatar_key fehlten, wurden neu angelegt und alle Schluessel neu gewuerfelt (#2056).');
+  } catch (err) {
+    log.error('Schema-Reconciliation der avatar_key-Trigger fehlgeschlagen:', err?.message || err);
   }
 }
 

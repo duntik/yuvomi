@@ -225,6 +225,37 @@
   max-width: 100%;
 }
 
+/* INFO-LISTEN-FORM (R19, Critique 2026-10-16: Inventar-Detail mobil 57px je
+ * Feld). Schmal steht eine Textzeile als Label vorn, Wert am Ende, in EINER
+ * Zeile - wie "Info" in den iOS-Einstellungen. Ein langer Wert bricht unter das
+ * Label, statt es zu verdraengen (flex-wrap), und steht dann am Ende seiner
+ * Zeile. Fliesstext (`--multiline`) und Knoten (Chips, Listen, Bild) bleiben
+ * untereinander. Opt-in je Leseansicht (`rowLayout: 'inline'`). */
+@media (max-width: 767px) {
+  .detail-view--inline-rows .detail-row--text:not(.detail-row--multiline) > .detail-row__text {
+    flex-flow: row wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    column-gap: var(--space-3);
+  }
+
+  .detail-view--inline-rows .detail-row--text:not(.detail-row--multiline) .detail-row__label {
+    font-size: var(--type-body);
+    font-weight: var(--font-weight-regular);
+    color: var(--color-text-secondary);
+  }
+
+  .detail-view--inline-rows .detail-row--text:not(.detail-row--multiline) .detail-row__value {
+    margin-inline-start: auto;
+    text-align: end;
+  }
+
+  /* Das Icon steht auf der Mitte der einen Zeile, nicht auf dem Label darueber. */
+  .detail-view--inline-rows .detail-row--text:not(.detail-row--multiline) > .detail-row__icon {
+    margin-block-start: var(--space-0h);
+  }
+}
+
 /* Beschreibungen und andere Fließtexte: Zeilenumbrüche der Quelle behalten,
  * damit eine notierte Adresse ihre Zeilen behält. */
 .detail-row--multiline .detail-row__value {
@@ -239,6 +270,19 @@
   flex-shrink: 0;
   margin-block-start: calc(-1 * var(--space-1));
   margin-inline-start: auto;
+}
+
+/* DER WERT WIRD NICHT ZERHACKT (R19, Critique 2026-10-16). Im 320px-Popover
+ * liess "In Maps oeffnen" dem Ort 130px, und `overflow-wrap: anywhere` brach
+ * "Zahnarztpraxi|s Mueller" mitten im Wort. Der Text beansprucht jetzt
+ * mindestens 10rem; passt die Aktion daneben nicht mehr, rueckt sie in eine
+ * eigene Zeile darunter (am Ende, wie zuvor). */
+.detail-row:has(> .detail-row__action) {
+  flex-wrap: wrap;
+}
+
+.detail-row:has(> .detail-row__action) > .detail-row__text {
+  flex: 1 1 10rem;
 }
 
 /* Benannte Gruppe von Metazeilen (`{ group, rows }`): Abschnittstitel wie in
@@ -512,6 +556,10 @@
 .detail-popover {
   position: fixed;
   z-index: calc(var(--z-modal) - 1);
+  /* Das Termin-Popover haengt am <body>, nicht in `.calendar-page`, und erbte
+   * deren gleich breite Ziffern nicht (R19): Wiederholung "bis 31.12.",
+   * Erinnerungen und Zeiten standen proportional. */
+  font-variant-numeric: tabular-nums;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -617,24 +665,50 @@
   padding: var(--space-4) var(--space-5) 0;
 }
 
-/* MOBIL EINE REIHE IM AUFGABEN-FUSS (Re-Critique 2026-09-28, P8 / A3 P3-2).
+/* EINE REIHE IM AUFGABEN-FUSS, IN JEDER BREITE (Re-Critique 2026-09-28, P8 /
+ * A3 P3-2; Re-Kritik 2026-10-17, P1).
+ *
  * Der Fuss einer offenen Aufgabe brach auf dem Telefon auf zwei Reihen
- * (gemessen 133px; "Aufgabe archivieren" allein 188px). Starten und
- * Archivieren treten dort in EIN Mehr-Menue (task-detail.js,
- * wireDetailDoerMenu-Muster); ihre Knoepfe bleiben verborgen im Fuss, weil
- * das Menue sie ausloest. Am Desktop passen alle Aktionen - dort gibt es den
- * Mehr-Knopf nicht. */
-.detail-view__footer > .task-detail__more {
+ * (gemessen 133px; "Aufgabe archivieren" allein 188px). Starten, Archivieren
+ * und Loeschen traten dort in EIN Mehr-Menue (task-detail.js,
+ * wireDetailMoreMenu); ihre Knoepfe bleiben verborgen im Fuss, weil das Menue
+ * sie ausloest. Am Desktop sollten "alle Aktionen passen" - seit Erledigen der
+ * volle Primaerknopf ist, stimmte das nicht mehr: in der Detailspalte brauchte
+ * der Fuss 756px (Spalte 670px bei 1440, hoechstens 744px), "Erledigen" war
+ * abgeschnitten, "Wer hat erledigt?" lag ausserhalb; im Blatt bei 834px brach
+ * er wieder auf zwei Reihen (133px). Eine Breitenschwelle haelt das nur fuer
+ * Deutsch, deshalb gilt das Mehr-Menue jetzt in JEDER Breite: Mehr,
+ * Bearbeiten, Erledigen und Wer, rund 360px. */
+.detail-view__footer:has(> .task-detail__more) > .task-detail__overflow {
   display: none;
 }
 
+.detail-view__footer > .task-detail__more {
+  display: inline-flex;
+  /* Das Mehr-Menue nimmt den Platz von Loeschen am Anfang ein; Bearbeiten,
+   * Erledigen und Wer bilden die Gruppe am Ende, in der Daumenzone. */
+  order: -1;
+  margin-inline-end: auto;
+}
+
 @media (max-width: 639px) {
-  .detail-view__footer:has(> .task-detail__more) > .task-detail__overflow {
-    display: none;
+  /* Erledigen ist in der Aufgabe der volle Primaerknopf (Ulas 2026-10-16,
+   * withPrimaryEdit `keepPrimary`); Bearbeiten steht davor als Stift ohne
+   * Wort: der Name bleibt fuer Screenreader und als Tooltip, der Fuss bleibt
+   * EINE Reihe. */
+  .detail-view__footer:has(> .task-detail__more) > #detail-view-edit > .btn__label {
+    position: absolute;
+    width: var(--space-px);
+    height: var(--space-px);
+    margin: calc(-1 * var(--space-px));
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 
-  .detail-view__footer > .task-detail__more {
-    display: inline-flex;
+  .detail-view__footer:has(> .task-detail__more) > #detail-view-edit {
+    min-width: var(--target-base);
+    padding-inline: var(--space-2);
   }
 }
 

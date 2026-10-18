@@ -14,11 +14,12 @@ import { initI18n, getLocale, t, formatDate, formatTime } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { initials } from '/utils/initials.js';
 import { emptyHintEl, emptyStateEl } from '/utils/empty-state.js';
-import { wireScrollFade, wireCollapsingHeader, watchNavCapsuleHeight } from '/utils/ux.js';
+import { wireScrollFade, wireCollapsingHeader, watchNavCapsuleHeight, bindNavMinimize } from '/utils/ux.js';
 import { TOAST_SURFACES } from '/utils/toast-surface.js';
+import { inertOutside } from '/utils/background-inert.js';
 import { showToast } from '/utils/toast-show.js';
 import { unknownPathDetour, publicPathDetour, detourPaths } from '/utils/unknown-route.js';
-import { createNavigate, prefetchPathOf, focusMainAfterNavigation } from '/utils/router-navigate.js';
+import { createNavigate, prefetchPathOf, focusMainAfterNavigation, unlessAborted, isCurrentAddress } from '/utils/router-navigate.js';
 import { pageMountTarget } from '/utils/page-mount.js';
 import { friendlyError } from '/utils/friendly-error.js';
 import { BULK_PILL_LAYER, clearBulkPill } from '/utils/bulk-pill.js';
@@ -38,25 +39,27 @@ import { getLastHealthRoute, HEALTH_ROUTES } from '/utils/health-tabs.js';
 import { SCHEDULE_ROUTES } from '/utils/schedule-tabs.js';
 import { activityType } from '/utils/health-activity.js';
 import {
-  SEARCH_SECTIONS, NEW_ACTIONS, searchResultCount, markSegments, paletteCommands,
+  SEARCH_SECTIONS, NEW_ACTIONS, searchResultCount, markSegments, paletteCommands, paletteStatusText,
+  readRecent, rememberRecent, visibleRecent, forgetAllRecent,
 } from '/utils/search-sections.js';
 import { buildHelpRows } from '/utils/help.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { wirePaletteCombobox } from '/utils/palette-combobox.js';
-import { triggerPageFab } from '/utils/fab.js';
+import { triggerPageFab, syncFabName, fabActionLabel } from '/utils/fab.js';
 import { hasLeaveGuard, mayLeave } from '/utils/leave-guard.js';
 import { createUpdateFlow, isUserBusy } from '/utils/app-update.js';
 import { createStartHandoff } from '/utils/start-handoff.js';
+import { showSessionUnreachable, showPageUnreachable, isUnreachableFailure } from '/utils/session-unreachable.js';
 import { wireSheetDrag } from '/utils/sheet-drag.js';
 import {
   handleBackNavigation, closeAllOverlays, consumeOverlayMarker,
-  pushOverlay, dropOverlay, attachOverlay, whenHistorySettled, hasOpenOverlay,
+  pushOverlay, dropOverlay, whenHistorySettled, hasOpenOverlay,
 } from '/utils/overlay-history.js';
 import {
   applyNavBadges, setNavBadge, resetNavBadges, navBadgeRoutes,
   moduleCountsFrom, navBadgeCountsFrom,
 } from '/utils/nav-badges.js';
-import { isNewerVersion, displayVersion, releasesNewForMe } from '/utils/version.js';
+import { isNewerVersion, displayVersion, releasesNewForMe, pendingUpdateFor } from '/utils/version.js';
 import { setMaxUploadBytes } from '/utils/upload-limit.js';
 import { syncWallMode } from '/utils/wall-mode.js';
 import {
@@ -72,13 +75,18 @@ import { handleMasterDetailPopstate } from '/utils/master-detail.js';
 import '/components/datepicker.js';
 import { NAV_ICONS, MODULE_ICON, moduleIconEl } from '/nav-icons.js';
 import {
-  RENAMED_SETTINGS_SOURCE_PATHS, SETTINGS_LEAVES, extensionSettingsPaths, setExtensionSettingsModules, settingsLeafLabel, searchSettings, settingsOptionUrl, settingsSectionUrl,
+  RENAMED_SETTINGS_SOURCE_PATHS, SETTINGS_LEAVES, extensionSettingsPaths, findSettingsLeaf, setExtensionSettingsModules, settingsLeafLabel, searchSettings, settingsOptionUrl, settingsSectionUrl,
 } from '/settings/registry.js';
 import {
   NAV_SECTION,
+  navSectionEntryCounts,
+  navSectionLabelKey,
   resolveMobileNavOrder,
   sortNavigationItems,
 } from '/settings/module-order.js';
+
+/** Haelt die Minimier-Logik der Kapsel (bindNavMinimize); jeder Seitenwechsel faehrt sie aus. */
+let navMinimizer = null;
 
 // --------------------------------------------------------
 // Routen-Definitionen
@@ -97,13 +105,18 @@ import {
 // und dem Einrichtungsbildschirm IST der App-Name der Titel (siehe
 // updateBranding) - dort steht noch keine Seite, auf die er sich beziehen könnte.
 // --------------------------------------------------------
+//
+// Die Zugangsseiten teilen EIN Seitenblatt (`style`). Es stand bis R19 global in
+// index.html und lag damit auch angemeldet auf jedem Start im Weg; als
+// Seitenblatt laedt der Router es nur hier und wartet darauf (loadPageStyle).
+const AUTH_STYLE = '/styles/auth.css';
 const ROUTES = [
-  { path: '/login',    page: '/pages/login.js',    requiresAuth: false, module: null,        titleKey: null },
-  { path: '/setup',    page: '/pages/setup.js',    requiresAuth: false, module: null,        titleKey: null },
-  { path: '/forgot-password', page: '/pages/forgot-password.js', requiresAuth: false, module: null, titleKey: 'forgotPassword.title' },
-  { path: '/reset-password',  page: '/pages/reset-password.js',  requiresAuth: false, module: null, titleKey: 'resetPassword.title' },
-  { path: '/join',     page: '/pages/join.js',     requiresAuth: false, module: null,        titleKey: 'join.title' },
-  { path: '/pair',     page: '/pages/pair-display.js', requiresAuth: false, module: null,  titleKey: 'pairDisplay.title' },
+  { path: '/login',    page: '/pages/login.js',    requiresAuth: false, module: null, style: AUTH_STYLE, titleKey: null },
+  { path: '/setup',    page: '/pages/setup.js',    requiresAuth: false, module: null, style: AUTH_STYLE, titleKey: null },
+  { path: '/forgot-password', page: '/pages/forgot-password.js', requiresAuth: false, module: null, style: AUTH_STYLE, titleKey: 'forgotPassword.title' },
+  { path: '/reset-password',  page: '/pages/reset-password.js',  requiresAuth: false, module: null, style: AUTH_STYLE, titleKey: 'resetPassword.title' },
+  { path: '/join',     page: '/pages/join.js',     requiresAuth: false, module: null, style: AUTH_STYLE, titleKey: 'join.title' },
+  { path: '/pair',     page: '/pages/pair-display.js', requiresAuth: false, module: null, style: AUTH_STYLE, titleKey: 'pairDisplay.title' },
   { path: '/',         page: '/pages/dashboard.js', requiresAuth: true, module: 'dashboard', titleKey: 'dashboard.title' },
   { path: '/tasks',    page: '/pages/tasks.js',     requiresAuth: true, module: 'tasks',     titleKey: 'nav.tasks' },
   { path: '/shopping', page: '/pages/shopping.js',  requiresAuth: true, module: 'shopping',  titleKey: 'nav.shopping' },
@@ -270,13 +283,39 @@ function updateThemeColorForRoute(route) {
 // --------------------------------------------------------
 let activePageStyle = null;
 
+// DIE @import-ZEILEN DER SEITENBLAETTER, damit der Browser sie gleich mitlaedt
+// (Modern-Web-Guidance-Audit, Befund 12). Ein `@import` sieht er erst, wenn
+// das Blatt darueber geladen und gelesen ist - eine zweite Rundreise vor dem
+// ersten Bild der Seite. `preloadStyleImports()` legt sie als `preload` daneben,
+// das `@import` findet die Antwort dann schon vor. Die Tabelle haelt ein Guard
+// in test:frontend-audit gleich mit den @import-Zeilen in public/styles/.
+const PAGE_STYLE_IMPORTS = Object.freeze({
+  '/styles/budget.css': ['/styles/split-expenses.css', '/styles/subscriptions.css'],
+  '/styles/dashboard.css': ['/styles/fasting-controls.css'],
+  '/styles/health.css': ['/styles/fasting-controls.css'],
+});
+const _preloadedStyleImports = new Set();
+
+function preloadStyleImports(href) {
+  for (const imported of PAGE_STYLE_IMPORTS[href] ?? []) {
+    if (_preloadedStyleImports.has(imported)) continue;
+    _preloadedStyleImports.add(imported);
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'style';
+    link.href = imported;
+    document.head.appendChild(link);
+  }
+}
+
 function loadPageStyle(moduleName, routeStyle = null) {
-  if (!moduleName && !routeStyle) return { ready: Promise.resolve(), cleanup: () => {} };
+  if (!moduleName && !routeStyle) return { ready: Promise.resolve(), cleanup: () => {}, abandon: () => {} };
   const href = routeStyle || `/styles/${moduleName}.css`;
   if (activePageStyle?.getAttribute('href') === href) {
-    return { ready: Promise.resolve(), cleanup: () => {} };
+    return { ready: Promise.resolve(), cleanup: () => {}, abandon: () => {} };
   }
 
+  preloadStyleImports(href);
   const link = document.createElement('link');
   link.rel = 'stylesheet';
   link.href = href;
@@ -294,7 +333,76 @@ function loadPageStyle(moduleName, routeStyle = null) {
   return {
     ready,
     cleanup: () => { if (oldLink) oldLink.remove(); },
+    // Die Seite kommt doch nicht (ueberholt): ihr Blatt geht, das alte gilt weiter.
+    abandon: () => {
+      link.remove();
+      if (activePageStyle === link) activePageStyle = oldLink;
+    },
   };
+}
+
+/**
+ * Loest auf, sobald keine Navigation mehr laeuft - hoechstens nach 2 s, damit
+ * ein haengender Seitenaufbau nichts festhaelt. Fuer den nachgereichten Tipp
+ * aus utils/view-transition.js.
+ */
+function navigationIdle() {
+  const until = Date.now() + 2000;
+  return new Promise((resolve) => {
+    const check = () => (!routerState.isNavigating || Date.now() > until ? resolve() : setTimeout(check, 16));
+    check();
+  });
+}
+
+/**
+ * Der zuletzt senkrecht gescrollte Port im Inhalt - in den gedeckelten Modulen
+ * (Kalender, Budget) scrollt nicht `#main-content`, sondern ihr eigener Port.
+ * Als WeakRef: ein abgehaengter Port der Vorseite bleibt nicht im Speicher.
+ */
+let _lastContentPort = null;
+document.addEventListener('scroll', (e) => {
+  const port = e.target;
+  if (port instanceof Element && port.scrollTop > 0 && port.closest('#main-content')) {
+    _lastContentPort = typeof WeakRef === 'function' ? new WeakRef(port) : null;
+  }
+}, { capture: true, passive: true });
+
+/**
+ * Tipp auf den aktiven Tab: die Seite gleitet nach oben (reduzierte Bewegung:
+ * springt). Der Inhalt bleibt, wie er ist - Filter, Auswahl, Aufklapper.
+ */
+function scrollPageToTop() {
+  const main = document.getElementById('main-content');
+  if (!main) return;
+  const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  const port = _lastContentPort?.deref?.();
+  for (const el of new Set([main, port])) {
+    if (el?.isConnected && main.contains(el) && el.scrollTop > 0) el.scrollTo({ top: 0, behavior });
+  }
+}
+
+/**
+ * DER GRUND, MIT DEM EINE SEITE ABGEBROCHEN WIRD - EINMAL ERZEUGT (R20).
+ * `abort()` ohne Grund baut bei jedem Aufruf eine neue `AbortError`-Ausnahme,
+ * und deren Stapel haelt die Funktionen fest, die gerade liefen - den
+ * Seitentausch samt `oldToolbar` und damit den ganzen alten Baum. Weil Module
+ * ihr letztes Signal in einer Variablen tragen (`pageSignal`), blieb so die
+ * Aufgabenliste mit 200 Zeilen nach dem Verlassen im Speicher (Heap-Snapshot,
+ * Re-Critique 2026-10-17 a6 P3). Derselbe Name `AbortError`: wer `err.name`
+ * prueft oder ein `fetch` damit abbricht, sieht keinen Unterschied.
+ */
+const PAGE_LEFT = new DOMException('The page was left.', 'AbortError');
+
+/**
+ * Bringt das ausfahrende Mehr-Blatt samt Abdunklung an sein Ende - vor dem
+ * alten Bild eines Seitenwechsels (utils/view-transition.js, `settle`). Die
+ * Ausfahrt ist eine CSS-Transition; `finish()` setzt sie auf ihren Endwert,
+ * und `getAnimations()` holt eine noch nicht gestartete vorher in den Stil.
+ */
+function settleClosingOverlays() {
+  document.querySelectorAll('.more-sheet, .more-backdrop').forEach((el) => {
+    el.getAnimations?.().forEach((anim) => anim.finish());
+  });
 }
 
 // --------------------------------------------------------
@@ -384,7 +492,7 @@ async function importPage(pagePath) {
 const _prefetchedPages = new Set();
 const _prefetchedStyles = new Set();
 
-function prefetchRoute(path) {
+function prefetchRoute(path, { now = false, priority = null } = {}) {
   if (!path) return;
   // Nach angekündigtem Update nichts mehr vorwärmen: ein modulepreload zieht den
   // kompletten Modulgraph in die Modul-Map und würde neue Seitenmodule gegen die
@@ -398,6 +506,14 @@ function prefetchRoute(path) {
     const link = document.createElement('link');
     link.rel = 'modulepreload';
     link.href = route.page;
+    // modulepreload laedt mit hoher Prioritaet. Das Vorwaermen im Leerlauf
+    // (warmPrimaryRoutes, rund 19 Module) gibt `low` mit, damit es nichts
+    // verdraengt, was die offene Seite gerade braucht; ohne Unterstuetzung
+    // bleibt es beim Standard (Modern-Web-Guidance-Audit, Befund 11). Die
+    // statischen Importe der Seite holt Chrome dabei nicht mit (gemessen:
+    // 15 Seitenmodule, alle `Low`, keine Abhaengigkeit); die kommen erst
+    // beim Aufruf.
+    if (priority) link.fetchPriority = priority;
     document.head.appendChild(link);
   }
 
@@ -405,10 +521,18 @@ function prefetchRoute(path) {
   if (cssHref && !_prefetchedStyles.has(cssHref)) {
     _prefetchedStyles.add(cssHref);
     const link = document.createElement('link');
-    link.rel = 'prefetch';
+    // Die Startroute braucht ihr Blatt SOFORT (Critique R19): `prefetch` legte
+    // es nur in den HTTP-Cache, und weil Blaetter mit `no-cache` ausgeliefert
+    // werden, holte loadPageStyle() es gleich danach ein zweites Mal ueber die
+    // Leitung (gemessen: dashboard.css zweimal, 57 KB und eine Rundreise).
+    // `preload` reicht die Antwort direkt an den <link rel="stylesheet"> weiter.
+    link.rel = now ? 'preload' : 'prefetch';
     link.as = 'style';
     link.href = cssHref;
     document.head.appendChild(link);
+    // Die Startroute laedt ihre Importe gleich mit; beim Vorwaermen im
+    // Leerlauf genuegt das, was loadPageStyle() beim Aufruf nachholt.
+    if (now) preloadStyleImports(cssHref);
   }
 }
 
@@ -421,7 +545,7 @@ function warmPrimaryRoutes() {
   const run = () => {
     try {
       navItems().forEach((item) => {
-        if (item.path && item.path !== routerState.currentPath) prefetchRoute(item.path);
+        if (item.path && item.path !== routerState.currentPath) prefetchRoute(item.path, { priority: 'low' });
       });
     } catch { /* Prefetch ist rein spekulativ — Fehler nie eskalieren. */ }
   };
@@ -481,17 +605,11 @@ let _moduleRefreshTimer = null;
 
 const MOBILE_FAVORITE_COUNT = 3;
 
-// Domänen-Gruppierung der Haupt-Navigation. Die Reihenfolge bestimmt die
-// Sortierung der Sektionen (Overview → Plan → Home); die Label-Keys werden in
-// der Sidebar via t() aufgelöst.
-const NAV_SECTION_LABEL_KEYS = Object.freeze({
-  [NAV_SECTION.overview]: 'nav.sectionOverview',
-  [NAV_SECTION.plan]: 'nav.sectionPlan',
-  [NAV_SECTION.household]: 'nav.sectionHousehold',
-  [NAV_SECTION.people]: 'nav.sectionPeople',
-  [NAV_SECTION.finance]: 'nav.sectionFinance',
-  [NAV_SECTION.customModules]: 'nav.sectionCustomModules',
-});
+// Domänen-Gruppierung der Haupt-Navigation: Sektionen und ihre Namen stehen
+// in settings/module-order.js (NAV_SECTION, navSectionLabelKey). Hier stand
+// eine Abschrift der Namen-Tabelle - die dritte Stelle neben den beiden
+// Modul-Blaettern, und die erste, die eine neue Regel (kein Kopf ueber nur
+// einem Eintrag, R19) nicht mitbekommen haette.
 
 const DEFAULT_APP_NAME = 'Yuvomi';
 const APP_NAME_STORAGE_KEY = 'yuvomi-app-name';
@@ -663,6 +781,9 @@ const navigate = createNavigate(routerState, {
   hasLeaveGuard, mayLeave, whenHistorySettled, consumeOverlayMarker,
   auth: startHandoff.auth, syncPreferencesOnce, startThirdPartyModulePolling, loadReminderStyles, initReminders, initPush,
   armScreensaver,
+  // Nur ein 401 fuehrt zur Anmeldung; jeder andere Fehler der Sitzungspruefung
+  // zeichnet diesen Zustand in #app und versucht selbst erneut (Critique R19).
+  showSessionUnreachable: (err, retry) => showSessionUnreachable(document.getElementById('app'), err, retry),
   rememberScrollPosition, scrollPositionFor, renderPage, adoptPageFab, updateNav, topLevelSection,
   syncWallMode, applyModuleAccentForRoute, updateThemeColorForRoute, updateBranding,
   focusMainContentAfterNavigation, showToast, t,
@@ -767,7 +888,7 @@ function applyStartPreferences(res) {
   }
 }
 
-async function syncThirdPartyModules() {
+async function syncThirdPartyModules({ forceLocales = false } = {}) {
   try {
     const res = await api.get('/modules');
     _thirdPartyModules = selectThirdPartyModuleList(_thirdPartyModules, { ok: true, data: res?.data });
@@ -777,7 +898,7 @@ async function syncThirdPartyModules() {
   setExtensionModules(_thirdPartyModules);
   setExtensionSettingsModules(_thirdPartyModules);
   setExtensionNavMap(_thirdPartyModules);
-  await reloadExtensionLocales(_thirdPartyModules);
+  await reloadExtensionLocales(_thirdPartyModules, { force: forceLocales });
 }
 
 function moduleSnapshot() {
@@ -793,6 +914,9 @@ function moduleSnapshot() {
 function startThirdPartyModulePolling() {
   if (_moduleRefreshTimer || ['split_guest', 'display'].includes(routerState.currentUser?.access_scope)) return;
   _moduleRefreshTimer = setInterval(async () => {
+    // Ein verborgener Tab fragt nicht ab: niemand sieht die Navigation, und
+    // der naechste Takt nach der Rueckkehr holt den Stand nach.
+    if (document.hidden) return;
     const before = moduleSnapshot();
     await syncThirdPartyModules();
     if (before !== moduleSnapshot()) rebuildNavigation();
@@ -1041,13 +1165,20 @@ function syncSidebarAccount(root = document.querySelector('.nav-sidebar__account
   const ink = Boolean(color) && prefersInkText(color);
   avatar.classList.toggle('nav-sidebar__avatar--ink', ink);
   avatar.classList.toggle('nav-sidebar__avatar--on-color', Boolean(color) && !ink);
+  // DIE INITIALEN SIND BILD, NICHT TEXT (R20, axe label-content-name-mismatch
+  // auf allen 60 Ansichten). Als Textknoten zaehlten „LI" zum sichtbaren
+  // Etikett des Knopfs, und sein Name „Konto-Menue, Linda Johnson" enthielt
+  // sie nicht. Sie stehen jetzt als `data-initials` und zeichnen sich per
+  // `::before` (layout.css) - wie ein Bild, das sie vertreten.
+  avatar.replaceChildren();
   if (routerState.currentUser?.avatar_data) {
     const img = document.createElement('img');
     img.src = routerState.currentUser.avatar_data;
     img.alt = '';
-    avatar.replaceChildren(img);
+    avatar.appendChild(img);
+    delete avatar.dataset.initials;
   } else {
-    avatar.textContent = initials(displayName);
+    avatar.dataset.initials = initials(displayName);
   }
   const label = displayName ? t('nav.accountMenu', { name: displayName }) : t('nav.accountMenuAnonymous');
   trigger.dataset.baseLabel = label;
@@ -1289,7 +1420,8 @@ function paintMoreSheetBadges(sheet) {
     const existing = item.querySelector('.more-item__badge');
     if (count > 0) {
       if (existing) existing.replaceWith(moreBadgeEl(count));
-      else item.appendChild(moreBadgeEl(count));
+      // Vor den Pfeil (Lucide uebernimmt die Klasse aufs erzeugte <svg>).
+      else item.insertBefore(moreBadgeEl(count), item.querySelector('.more-item__chevron'));
       // Ansage am Link, nicht am Badge - siehe moreBadgeEl.
       const labelText = item.querySelector('.more-item__label')?.textContent;
       if (labelText) item.setAttribute('aria-label', `${labelText}, ${t('nav.moreBadge', { count })}`);
@@ -1301,38 +1433,77 @@ function paintMoreSheetBadges(sheet) {
 }
 
 /**
- * Baut den dynamischen Body des „Mehr“-Sheets: EIN vierspaltiges Modul-Raster
- * und darunter, im selben Raster, die monochrome System-Reihe (Einstellungen ·
- * Hilfe · Änderungen · Abmelden).
+ * Baut den dynamischen Body des „Mehr“-Sheets: die Module als gruppierte
+ * Zeilenliste in den Sektionen der Seitenleiste und darunter die monochrome
+ * System-Reihe (Einstellungen · Hilfe · Änderungen · Abmelden).
+ *
+ * EINE ZEILENLISTE WIE IN DEN iOS-EINSTELLUNGEN, KEIN RASTER MEHR (R19, Ulas
+ * 2026-10-16). Das Vierer-Raster je Sektion liess Luecken: Planen trug zwei
+ * Kacheln, Finanzen eine, und das Blatt mass bei 390x844 724px (86 % des
+ * Schirms) fuer zwoelf Ziele, von denen jede Gruppe ihre Reihe nur halb
+ * fuellte. Eine Liste hat keine leeren Zellen: jede Gruppe ist so hoch, wie
+ * sie Eintraege hat, der Name steht in voller Laenge auf einer Zeile (keine
+ * Silbentrennung „Haushalts-hilfe" mehr), und das Zaehlbadge sitzt am Ende der
+ * Zeile, wo der Blick es auf iOS sucht. Die Gruppen sind dieselben wie in der
+ * Seitenleiste, mit derselben Regel fuer den Kopf (navSectionLabelKey: ueber
+ * nur einem Eintrag steht keiner).
+ *
+ * Die System-Reihe bleibt eine Reihe aus vier Zielen: sie ist voll besetzt
+ * (keine Luecke), monochrom (Meta, nicht Modul) und kostet als Reihe 64px
+ * statt vier Zeilen.
  *
  * Gibt EINEN Knoten in einem Array zurück (`.more-sheet__body`, der Scroller);
  * beide Aufrufer spreizen das Ergebnis und bleiben davon unberührt.
- *
- * EIN RASTER, KEINE ÜBERSCHRIFTEN. Die Bereichsköpfe (Planen · Haushalt ·
- * Menschen · Finanzen) sind hier ersatzlos weg, und die Reihenfolge verliert
- * dabei nichts: `secondaryMobileItems()` liefert bereits nach Sektion sortiert
- * (sortNavigationItems), die Gruppen standen also nur noch als Beschriftung
- * über einer Ordnung, die das Raster ohnehin hat. Was sie dafür kosteten, war
- * Höhe: vier Köpfe plus vier Gruppenabstände sind auf einem 390er-Schirm rund
- * 150px - mehr als eine ganze Kachelreihe, für eine Auskunft, die man an den
- * Nachbarn ablesen kann. Das Blatt ist ein Sprungbrett, kein Verzeichnis; es
- * soll so wenig Bild nehmen wie möglich.
- *
- * VIER SPALTEN, UND DIE SYSTEM-REIHE IST DIE LETZTE DAVON. Abmelden stand
- * zuletzt als eigene volle Zeile darunter, weil es in der DREIspaltigen
- * Systemreihe unter genau dem Pixel lag, an dem der Daumen „Mehr" getippt
- * hatte. Diese Ursache ist strukturell erledigt: das Blatt endet seit
- * derselben Runde ÜBER der Tab-Leiste (`bottom: --nav-bottom-height`), der Ort
- * des Mehr-Knopfs gehört wieder ihm allein. Damit ist die eigene Zeile nur
- * noch Höhe ohne Auftrag, und die vier System-Ziele füllen die Reihe exakt.
- * Monochrom bleiben sie trotzdem - das ist der Unterschied zu den farbig
- * besiegelten Modulen darüber, und der trägt die Trennung jetzt allein.
  *
  * EINE Quelle der Wahrheit für renderAppShell() UND rebuildNavigation() —
  * beide Pfade müssen dieselbe Struktur erzeugen, sonst zerstört ein
  * Sprachwechsel / Modul-Toggle / Settings-Besuch das Layout.
  * Handle + Suchleiste bleiben davon unberührt (sie tragen Event-Wiring).
  */
+/**
+ * Die Module des Mehr-Blatts, gruppiert nach `section` in der gelieferten
+ * Reihenfolge: je Sektion EINE Liste (`.more-sheet__list`), benannt wie in der
+ * Seitenleiste. Ob eine Sektion einen Kopf bekommt, entscheidet ihre Groesse
+ * in der SEITENLEISTE (`labelCounts`), nicht im Blatt: die Favoriten der
+ * Leiste fehlen hier, und „Planen" darf nicht namenlos werden, nur weil
+ * Kalender und Aufgaben unten in der Leiste stehen - die Gruppen sind
+ * dieselben wie am Desktop.
+ *
+ * @param {Array<object>} modules  bereits nach Sektion sortiert
+ * @param {Map<number, number>} labelCounts  Eintraege je Sektion in der Seitenleiste
+ * @returns {HTMLElement[]}
+ */
+function moreSheetSections(modules, labelCounts) {
+  const out = [];
+  let current;
+  let list = null;
+  for (const item of modules) {
+    const section = item.section ?? null;
+    if (!list || section !== current) {
+      current = section;
+      list = document.createElement('div');
+      list.className = 'more-sheet__list';
+      const group = document.createElement('div');
+      group.className = 'more-sheet__group';
+      const labelKey = section == null ? null : navSectionLabelKey(section, labelCounts.get(section));
+      if (labelKey) {
+        group.setAttribute('role', 'group');
+        const labelId = `more-section-${section}`;
+        group.setAttribute('aria-labelledby', labelId);
+        const label = document.createElement('div');
+        label.className = 'more-sheet__section-label';
+        label.id = labelId;
+        label.textContent = t(labelKey);
+        group.append(label);
+      }
+      group.append(list);
+      out.push(group);
+    }
+    list.appendChild(moreItemEl(item));
+  }
+  return out;
+}
+
 function buildMoreSheetBody() {
   /* EIN scrollender Körper zwischen Griff und Suche und dem Blattrand.
    *
@@ -1357,14 +1528,13 @@ function buildMoreSheetBody() {
   const secondary = secondaryMobileItems();
   const settingsItem = secondary.find((item) => item.module === 'settings');
 
-  // Ein flaches Raster in der Reihenfolge der Sidebar. Die Sortierung nach
-  // Sektion steckt schon in secondaryMobileItems(); hier wird sie nur nicht
-  // mehr mit Überschriften nachgezeichnet.
+  // Je Sektion der Seitenleiste EIN Raster unter ihrem Namen. Die Sortierung
+  // nach Sektion steckt schon in secondaryMobileItems() (sortNavigationItems);
+  // hier wird sie nachgezeichnet, wie die Seitenleiste es tut - eine benannte
+  // Gruppe (role="group" + aria-labelledby), damit die Ordnung auch hoerbar ist.
   const modules = secondary.filter((item) => item.module !== 'settings');
-  const grid = document.createElement('div');
-  grid.className = 'more-sheet__grid';
-  modules.forEach((item) => grid.appendChild(moreItemEl(item)));
-  nodes.push(grid);
+  const labelCounts = navSectionEntryCounts(navItems().filter((item) => item.module !== 'settings'));
+  nodes.push(...moreSheetSections(modules, labelCounts));
 
   const divider = document.createElement('div');
   divider.className = 'more-sheet__divider';
@@ -1445,7 +1615,7 @@ function buildMoreSheetBody() {
  * @param {string|null} previousPath - Pfad vor der Navigation (null beim Kaltstart)
  * @param {number} scrollTarget - Scrollstand der Zielseite (0 vorwärts, gemerkt bei popstate)
  */
-async function renderPage(route, previousPath = null, scrollTarget = 0) {
+async function renderPage(route, previousPath = null, scrollTarget = 0, { signal = null } = {}) {
   const app = document.getElementById('app');
 
   // Den Ladebildschirm (#app-loading) blendet hier bewusst nichts aus: er steht
@@ -1456,10 +1626,22 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
 
   try {
     const style = loadPageStyle(route.thirdPartyModule ? null : route.module, route.style);
-    const [module] = await Promise.all([
+    const loading = Promise.all([
       importPage(route.page),
       style.ready,
     ]);
+
+    // UEBERHOLT (Critique R19, Nachlese 1b): waehrend Modul und Blatt luden,
+    // hat jemand ein anderes Ziel angetippt. Dieses Modul rendert nichts mehr;
+    // sein Blatt geht wieder, und das der stehenden Seite bleibt. Gewartet
+    // wird nur bis zum Abbruch - ein langsames Modul haelt den neueren Tipp
+    // nicht auf (Review #2049).
+    const loaded = await unlessAborted(loading, signal);
+    if (!loaded || signal?.aborted) {
+      style.abandon();
+      return false;
+    }
+    const [module] = await loading;
 
     if (typeof module.render !== 'function') {
       throw new Error(`Seite ${route.page} exportiert keine render()-Funktion.`);
@@ -1481,6 +1663,12 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
     else if (!document.querySelector('.nav-bottom') && routerState.currentUser) {
       renderAppShell(app);
       _navBuiltForUserId = routerState.currentUser.id;
+      // Das Ziel ist schon beim Kaltstart markiert, nicht erst nach dem Rendern
+      // der Seite (Critique R19): auf /settings/personal/notifications stand
+      // "Mehr" sonst ohne Aktivzustand, bis der langsamste Abschnitt fertig
+      // war (gemessen 3,3 s). Bei einem Wechsel macht navigate() das schon vor
+      // renderPage - beim Kaltstart gab es da noch keine Leiste.
+      updateNav(routerState.currentPath);
       // Nebenläufig und still: der Hinweis darf das erste Rendern nicht aufhalten.
       checkForUpdate();
       /* Und die Zahlen an den Nav-Zielen (#868).
@@ -1542,6 +1730,15 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
       // diesem Callback aufgenommen und darf nicht bei 0 stehen. Die Blende
       // des Rueckfalls ist eine Animation und schlaegt den Inline-Wert.
       pageWrapper.style.opacity = '1';
+      // DIE ALTE SEITE GEHT GANZ (R20, Re-Critique 2026-10-17 a6 P3). Jedes
+      // Modul haelt seine Wurzel in einer Modulvariablen (`_container`) - und
+      // mit ihr den ganzen letzten Baum: nach Aufgaben mit 200 Eintraegen hielt
+      // die Uebersicht 37.356 statt 2.054 Knoten, der Heap wuchs von 4,6 auf
+      // 9,7 MB. Das alte Bild hat die View Transition schon; die Kinder der
+      // alten Huelle werden hier geleert, gehalten bleibt nur die leere Huelle.
+      // Was ein Modul ueber den Wechsel retten will (die Kuechen-Leiste), haelt
+      // es selbst und setzt es im neuen render() wieder ein.
+      const oldPages = [...content.children];
       content.replaceChildren(pageWrapper);
       // Scrollport auf Anfang, solange er leer ist. `content` IST der Scrollport
       // (#main-content == .app-content) und überlebt die Navigation; ohne diese
@@ -1553,6 +1750,7 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
       // Wiederherstellung bei popstate darf und soll das dagegen überschreiben,
       // sie steht deshalb unten hinter dem await.
       content.scrollTop = 0;
+      for (const old of oldPages) old.replaceChildren();
       // Der FAB der alten Seite lebt in der Shell und fiele sonst nicht mit ihrem
       // Inhalt weg - er bliebe über der neuen Seite stehen, bis diese adoptiert.
       // Hier und nicht eine Zeile höher: der Scroll-Reset gehört unmittelbar an
@@ -1576,7 +1774,7 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
       // Uhr, stiller Refresh, Wetter- und Wandtimer liefen gegen einen
       // abgehaengten Container weiter und starteten Anfragen hinter der
       // naechsten Seite.
-      _pageController?.abort();
+      _pageController?.abort(PAGE_LEFT);
       _pageController = new AbortController();
 
       // Teardown abgeschlossen: ein evtl. gemerktes Soft-Update-Ziel ist jetzt
@@ -1611,15 +1809,24 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
       wirePageToolbars();
     };
 
+    // Wird die Navigation erst NACH dem Tausch ueberholt, verliert die neue
+    // Seite ihr Signal: sie bricht ihr Laden ab, statt die naechste aufzuhalten.
+    signal?.addEventListener('abort', () => _pageController?.abort(PAGE_LEFT), { once: true });
     const { transition, finished } = await swapPage(swap, {
       content,
       from: previousPath,
       animate: shouldAnimate,
+      // Ein Tipp, der die Blende abbrach, wird nachgereicht (R19) - aber erst,
+      // wenn diese Navigation durch ist: navigate() verwirft jeden Aufruf,
+      // solange `isNavigating` steht.
+      whenSettled: navigationIdle,
+      settle: settleClosingOverlays,
     });
 
-    // Mit View Transition macht der Browser die Blende. Ohne sie (keine API,
-    // reduzierte Bewegung, verdeckter Tab) eine reine Blende ohne Versatz und
-    // ohne Feder: `.page-transition--in`.
+    // Mit View Transition macht der Browser die Blende - seit 2026-10-16 auch
+    // unter reduzierter Bewegung (utils/view-transition.js). Ohne sie (keine
+    // API, verdeckter Tab) eine reine Blende ohne Versatz und ohne Feder:
+    // `.page-transition--in`.
     if (shouldAnimate && !transition) {
       pageWrapper.classList.add('page-transition--in');
 
@@ -1640,7 +1847,14 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
       document.documentElement.classList.remove('navigating');
     }
 
-    await renderPromise;
+    // UEBERHOLT NACH DEM TAUSCH (Review #2049): der Rest von render() laedt
+    // Daten, und nicht jede Seite haengt ihren ersten Abruf an das Signal. Das
+    // Warten endet deshalb mit dem Abbruch, sonst hielte ein haengender Abruf
+    // den neueren Tipp auf. Die Seite steht schon (Eintrag bleibt, `true`);
+    // fertiggestellt wird sie nicht mehr - kein Scroll-Restore, keine
+    // Soft-Update-Freigabe, kein FAB, keine Ansage. Die naechste Navigation
+    // tauscht sie aus.
+    if (!(await unlessAborted(renderPromise, signal))) return true;
 
     // Browser-Zurück/-Vor: gemerkten Stand wiederherstellen, jetzt wo der Inhalt
     // seine volle Höhe hat. Best effort - ist die Seite kürzer als beim Verlassen
@@ -1655,7 +1869,6 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
 
     // FAB Long Loop: Einstiegsanimation nach FAB_SEEN_MAX Views pro Modul deaktivieren
     const pageFab = adoptPageFab();
-    releaseFabHold();
     if (pageFab) {
       // Shortcut-Discoverability (Audit P3): der 'n'-Chord öffnet den FAB — als
       // Tooltip-Titel + aria-keyshortcuts sichtbar bzw. vorlesbar machen.
@@ -1686,7 +1899,6 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
 
   } catch (err) {
     document.documentElement.classList.remove('navigating');
-    releaseFabHold();
     console.error('[Router] Seiten-Render-Fehler:', err);
     if (route.thirdPartyModule?.id) {
       await disableFailedThirdPartyModule(route.thirdPartyModule.id);
@@ -1696,7 +1908,20 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
     // gesamte Navigation und die Fehlerkarte dehnt sich über die Nav-Spalte -
     // die Seite ist dann nur noch per Reload verlassbar. Erst wenn noch keine
     // Shell steht (Auth-Seiten, früher Fehler), ist #app der richtige Ort.
-    renderError(document.getElementById('main-content') ?? app, err);
+    const errorHost = document.getElementById('main-content') ?? app;
+    // OHNE NETZ KEIN ABSTURZ (Re-Critique 2026-10-17): ein Seitenwechsel
+    // offline zeigte "Etwas ist schiefgelaufen" samt Stack. Ein Netzfehler
+    // bekommt den Zustand der Sitzungsseite und zeichnet sich bei `online`
+    // selbst neu; nur ein Fehler im Code der Seite bleibt der Fehlerbildschirm.
+    if (!route.thirdPartyModule && isUnreachableFailure(err)) {
+      const retryPath = `${location.pathname}${location.search}${location.hash}`;
+      showPageUnreachable(errorHost, err, () => navigate(retryPath, false));
+    } else {
+      renderError(errorHost, err, {
+        page: navCatalog().find((n) => n.path === route.path)?.label ?? null,
+        home: route.path !== '/',
+      });
+    }
   } finally {
     // Die Uebergabe gilt der Seite, die DIESER Start zeichnet (utils/start-handoff.js).
     startHandoff.expirePage();
@@ -2107,11 +2332,18 @@ function renderAppShell(container) {
   applySidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
   updateBranding(routerState.currentPath || '/');
 
-  // Klick-Handler für alle Nav-Links
+  // Klick-Handler für alle Nav-Links. Der aktive Tab fuehrt nur nach oben,
+  // wie in einer iOS-Leiste (R20): kein Neuaufbau, kein zweiter Eintrag.
   container.querySelectorAll('[data-route]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
-      navigate(el.dataset.navHref ?? el.dataset.route);
+      const target = el.dataset.navHref ?? el.dataset.route;
+      if (isCurrentAddress(target, location)) {
+        window._closeMoreSheet?.({ restoreFocus: false });
+        scrollPageToTop();
+        return;
+      }
+      navigate(target);
     });
   });
 
@@ -2239,6 +2471,7 @@ function dockFabIntoToolbar(fab) {
     span.textContent = label;
     fab.appendChild(span);
   }
+  syncFabName(fab);
   slot.appendChild(fab);
   /* DAS TASTENKUERZEL WIRD HIER MITGESETZT, nicht nur beim schwebenden Knopf.
    * `adoptPageFab()` gibt beim Andocken `null` zurueck, damit die
@@ -2254,7 +2487,7 @@ function dockFabIntoToolbar(fab) {
 /** Macht den 'n'-Chord am FAB sichtbar bzw. vorlesbar - schwebend wie angedockt. */
 function markFabShortcut(fab) {
   fab.setAttribute('aria-keyshortcuts', 'n');
-  const fabLabel = fab.getAttribute('aria-label');
+  const fabLabel = fabActionLabel(fab);
   if (fabLabel && !/\(n\)$/.test(fab.getAttribute('title') || '')) {
     fab.setAttribute('title', `${fabLabel} (n)`);
   }
@@ -2274,6 +2507,7 @@ function undockFabFromToolbar(fab) {
   if (!layer) return false;
   fab.classList.remove('btn', 'btn--primary', 'page-fab--docked');
   fab.querySelector('.toolbar-new-btn__label')?.remove();
+  syncFabName(fab);
   layer.replaceChildren(fab.closest('.page-fab-group') ?? fab);
   return true;
 }
@@ -2419,23 +2653,19 @@ function clearPageFab() {
  * sprangen zweimal um rund 11px.
  *
  * Gefragt wird VOR `clearPageFab()` - danach gibt es den Vorgaenger nicht mehr:
- *   - `fab-steady`: irgendwo stand ein sichtbarer FAB (schwebend oder im Kopf
- *     angedockt). Der naechste faehrt nicht ein, er steht (layout.css). Gilt,
- *     bis der naechste Wechsel neu fragt - also auch fuer einen Nachzuegler.
- *   - `fab-holding`: der FAB schwebte in der Ebene, die Kapsel haelt seine
- *     Reserve. Faellt mit `releaseFabHold()`, sobald die neue Seite gebaut ist
- *     und ihre eigene `:has()`-Bedingung wieder die Wahrheit sagt.
- * Beim Kaltstart steht kein Vorgaenger: beide Klassen fallen, der FAB faehrt ein.
+ * `fab-steady` heisst, irgendwo stand ein sichtbarer FAB (schwebend oder im
+ * Kopf angedockt). Der naechste faehrt nicht ein, er steht (layout.css). Gilt,
+ * bis der naechste Wechsel neu fragt - also auch fuer einen Nachzuegler. Beim
+ * Kaltstart steht kein Vorgaenger: die Klasse faellt, der FAB faehrt ein.
+ *
+ * Die Kapsel muss seit der Re-Kritik 2026-10-17 nichts mehr halten: ihre
+ * FAB-Reserve steht immer (layout.css, `.nav-bottom__items`), die frueheren
+ * `fab-holding`/`releaseFabHold()` sind entfallen.
  */
 function holdFabAcrossSwap() {
   const root = document.documentElement;
   const floating = document.querySelector('#fab-layer .page-fab:not([hidden])');
   root.classList.toggle('fab-steady', Boolean(floating || document.querySelector('#main-content .page-fab:not([hidden])')));
-  root.classList.toggle('fab-holding', Boolean(floating));
-}
-
-function releaseFabHold() {
-  document.documentElement.classList.remove('fab-holding');
 }
 
 const FAB_SEEN_KEY = (module) => `yuvomi:fabSeen:${module}`;
@@ -2458,7 +2688,9 @@ const SHORTCUTS = [
     // Ausserhalb des Kalenders war `f` ein stiller No-Op (Critique 2026-08-31,
     // Alex-Persona): erst hinwechseln, dann suchen - ein Griff, ein Ziel.
     if (location.pathname !== '/calendar') await navigate('/calendar');
-    document.querySelector('#cal-search')?.click();
+    // Die Suche ist ein Feld im Kopf (renderPageSearch, Critique 2026-10-16);
+    // mobil klappt die Lupe ueber :focus-within zum Feld auf.
+    document.querySelector('#cal-search-input')?.focus();
   } },
   { key: '?',   description: () => t('shortcuts.help'),    action: () => showHelpModal() },
   { key: 'g d', description: () => t('shortcuts.goDash'),  action: () => navigate('/') },
@@ -2613,16 +2845,11 @@ function showHelpModal() {
   // without a keyboard, shortcut rows are useless — show a plain-language guide.
   const coarsePointer = window.matchMedia('(max-width: 1023px)').matches;
   const helpRows = buildHelpRows({ coarsePointer, shortcuts: SHORTCUTS.filter((s) => shortcutApplies(s)), t });
-
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.setAttribute('aria-modal', 'true');
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-  const panel = document.createElement('div');
-  panel.className = 'modal-panel modal-panel--sm';
-  panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', t('help.title'));
+  // DER DIALOG HEISST, WAS ER ZEIGT (R19): am Zeiger listet er die
+  // Tastenkuerzel und heisst „Tastenkombinationen" - wie der Eintrag `?` und
+  // der Befehl in der Palette, die ihn oeffnen. „Hilfe" bleibt die
+  // Klartext-Fassung am Finger.
+  const helpTitle = coarsePointer ? t('help.title') : t('shortcuts.help');
 
   const rows = helpRows.map((r) => r.key
     ? `<div class="help-row">
@@ -2635,15 +2862,24 @@ function showHelpModal() {
        </div>`
   ).join('');
 
-  panel.insertAdjacentHTML('beforeend', `
-    <div class="modal-panel__header">
-      <span class="modal-panel__title">${esc(t('help.title'))}</span>
-      <button class="modal-panel__close btn--ghost" aria-label="${esc(t('common.close'))}">
-        <i data-lucide="x" class="icon-md" aria-hidden="true"></i>
-      </button>
-    </div>
-    <div class="modal-panel__body">
-      <div class="shortcuts-list">${rows}</div>
+  // DER GETEILTE DIALOG (R20, Re-Critique 2026-10-17 A1 P1-2). Hier stand ein
+  // eigenes Overlay mit `aria-modal` am Grund statt am Dialog, einem `span`
+  // als Titel und einem Esc-Listener am Dokument: der Fokus blieb auf der
+  // Seite, Tab lief hinaus, und nach dem Schliessen fand niemand zurueck.
+  // openModal() bringt Top-Layer, Fokusfalle, Esc, Zurueck-Geste und die
+  // Rueckgabe an den Ausloeser mit - wie jeder andere Dialog der App. Nichts
+  // darin ist ungespeichert, also ohne Verwerfen-Rueckfrage.
+  //
+  // Am Zeiger stehen die Kuerzel in ZWEI SPALTEN (`--columns`): zwanzig
+  // Zeilen untereinander ergaben bei 1440x900 852px Einzelspalte.
+  // `--help-rows` haelt die Spalten gleich lang, gelesen wird spaltenweise.
+  const columns = !coarsePointer;
+  openModal({
+    title: helpTitle,
+    size: columns ? 'lg' : 'sm',
+    dirtyGuard: false,
+    content: `
+      <div class="shortcuts-list${columns ? ' shortcuts-list--columns' : ''}"${columns ? ` style="--help-rows:${Math.ceil(helpRows.length / 2)}"` : ''}>${rows}</div>
       <!-- Nutzerhandbuch aus der Community (#799). Es lebt in einem fremden
            Repository und in fremder Regie - deshalb steht die Herkunft im
            Linktext und nicht nur im Hinweis darunter: wer hier klickt,
@@ -2653,21 +2889,8 @@ function showHelpModal() {
           ${esc(t('help.guideLink'))}
         </a>
         <span class="help-guide__hint">${esc(t('help.guideHint'))}</span>
-      </p>
-    </div>
-  `);
-
-  panel.querySelector('.modal-panel__close').addEventListener('click', () => overlay.remove());
-  document.addEventListener('keydown', function onEsc(e) {
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onEsc); }
+      </p>`,
   });
-
-  overlay.appendChild(panel);
-  document.body.appendChild(overlay);
-  // Die Zurueck-Geste schliesst auch diesen Dialog (#871). `attachOverlay`
-  // statt `pushOverlay`, weil er auf drei Wegen per `remove()` verschwindet.
-  attachOverlay(overlay, () => overlay.remove());
-  if (window.lucide) window.lucide.createIcons({ el: panel });
 }
 
 // --------------------------------------------------------
@@ -2704,12 +2927,13 @@ const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** Neuere Version, die noch niemand angesehen hat - oder '' wenn alles gesehen/aktuell. */
 function pendingUpdateVersion() {
-  const latest = localStorage.getItem(UPDATE_LATEST_KEY) || '';
-  if (!latest) return '';
-  if (!isNewerVersion(latest, getAppVersion())) return '';
-  const seen = changelogSeen().latest || '';
-  if (seen && !isNewerVersion(latest, seen)) return '';
-  return latest;
+  // Nur fuer Admins (Critique R19, Regel und Begruendung in utils/version.js).
+  return pendingUpdateFor({
+    latest: localStorage.getItem(UPDATE_LATEST_KEY) || '',
+    current: getAppVersion(),
+    seen: changelogSeen().latest || '',
+    isAdmin: routerState.currentUser?.role === 'admin',
+  });
 }
 
 /**
@@ -3104,11 +3328,17 @@ function initMoreSheet(container, openSearch) {
 
   // Der Marker der Zurueck-Geste, solange das Blatt offen ist (#871).
   let sheetOverlayToken = null;
+  // Die Seite hinter dem Blatt ist gesperrt, solange es offen ist
+  // (utils/background-inert.js). Abdunklung und Mehr-Knopf bleiben bedienbar:
+  // beide schliessen das Blatt.
+  let releaseSheetBackground = null;
 
   function openSheet() {
     lastFocusedBeforeSheet = document.activeElement;
     sheetOverlayToken = pushOverlay(() => closeSheet());
     setOverlayInteractive(sheet, true);
+    releaseSheetBackground?.();
+    releaseSheetBackground = inertOutside(sheet, { keep: [backdrop, currentMoreBtn()] });
     sheet.addEventListener('keydown', moreSheetTrap);
     backdrop.classList.add('more-backdrop--visible');
     currentMoreBtn().setAttribute('aria-expanded', 'true');
@@ -3141,6 +3371,8 @@ function initMoreSheet(container, openSearch) {
       dropOverlay(token);
     }
     setOverlayInteractive(sheet, false);
+    releaseSheetBackground?.();
+    releaseSheetBackground = null;
     sheet.removeEventListener('keydown', moreSheetTrap);
     backdrop.classList.remove('more-backdrop--visible');
     currentMoreBtn().setAttribute('aria-expanded', 'false');
@@ -3283,6 +3515,18 @@ function initSearch(container) {
     setStatus('');
     results.appendChild(emptyHintEl(t('search.emptyHint')));
 
+    // ZULETZT GEOEFFNET (R19): was zuletzt aus der Palette geoeffnet wurde,
+    // steht vor den Kacheln - die Palette ist fuer den Wiederholer da. Nur,
+    // was heute noch erreichbar ist (visibleRecent); leer heisst: kein Kopf.
+    const recent = visibleRecent(readRecent(safeLocalStorage(), routerState.currentUser?.id), recentPlace(navItems()));
+    if (recent.length) {
+      results.appendChild(paletteRowsSection(t('search.recentLabel'), recent, {
+        title: (item) => item.label,
+        meta: (item) => item.context || '',
+        go: (item) => navigate(item.route),
+      }, () => closeSearch({ restoreFocus: false })));
+    }
+
     const scopes = document.createElement('div');
     scopes.className = 'search-scopes';
     const scopesHeading = document.createElement('h3');
@@ -3328,6 +3572,7 @@ function initSearch(container) {
 
   // Der Marker der Zurueck-Geste, solange die Suche offen ist (#871).
   let searchOverlayToken = null;
+  let releaseSearchBackground = null;
 
   function openSearch() {
     // SCHON OFFEN: nur zurueck ins Feld. ⌘K gilt auch aus Eingabefeldern,
@@ -3343,6 +3588,10 @@ function initSearch(container) {
     lastFocusedBeforeSearch = document.activeElement;
     if (searchOverlayToken === null) searchOverlayToken = pushOverlay(() => closeSearch());
     setOverlayInteractive(overlay, true);
+    // Die Seite hinter der Suche ist gesperrt, solange sie offen ist
+    // (utils/background-inert.js).
+    releaseSearchBackground?.();
+    releaseSearchBackground = inertOutside(overlay);
     overlay.classList.add('search-overlay--visible');
     if (!input.value.trim()) renderSearchHint();
     setTimeout(() => input.focus(), 50);
@@ -3362,6 +3611,8 @@ function initSearch(container) {
     // Schließen ins versteckte Overlay und macht eine Phantom-Live-Ansage.
     clearTimeout(searchTimer);
     setOverlayInteractive(overlay, false);
+    releaseSearchBackground?.();
+    releaseSearchBackground = null;
     overlay.classList.remove('search-overlay--visible');
     if (_searchTrapHandler) {
       overlay.removeEventListener('keydown', _searchTrapHandler);
@@ -3387,11 +3638,7 @@ function initSearch(container) {
   // Pfeile schoben frueher den Fokus in die Treffer, und Enter im Feld tat
   // nichts (A1 P1-1).
 
-  const announceCount = (count) => setStatus(
-    count === 0 ? t('search.noResults')
-      : count === 1 ? t('search.resultCountOne', { count })
-      : t('search.resultCountMany', { count }),
-  );
+  const announceCount = (count, opts) => setStatus(paletteStatusText(count, opts, t));
 
   let searchTimer = null;
   input.addEventListener('input', () => {
@@ -3431,12 +3678,12 @@ function initSearch(container) {
       setStatus(t('search.loading'));
       try {
         const data = await api.get(`/search?q=${encodeURIComponent(q)}`);
-        const count = renderSearchResults(results, data, onClose, { local, query: q });
+        const { count, createLabel } = renderSearchResults(results, data, onClose, { local, query: q });
         // Die Daten kommen UNTER die Orte: eine schon bewegte Markierung
         // bleibt, wo sie ist; war noch keine gesetzt, steht sie jetzt oben.
         combo.refresh({ keep: true });
         results.setAttribute('aria-busy', 'false');
-        announceCount(count);
+        announceCount(count, { createLabel });
       } catch {
         // Fehler nicht verschlucken: sichtbare Meldung statt „wirkt wie 0 Treffer".
         // Die Ansage besitzt #search-status; der sichtbare Text bleibt rein
@@ -3452,6 +3699,105 @@ function initSearch(container) {
   });
 
   return openSearch;
+}
+
+/** localStorage, oder null, wo schon der Zugriff wirft (Safari privat, Policy). */
+function safeLocalStorage() {
+  try { return window.localStorage; } catch { return null; }
+}
+
+/**
+ * Der Name eines gemerkten Orts, frisch aus dem, was der Betrachter JETZT
+ * sehen darf: ein Navigationsziel aus `targets` (navItems), ein
+ * Einstellungsblatt ueber `findSettingsLeaf` (prueft die Sichtbarkeit). Was
+ * nicht aufloest, liefert null und faellt aus der Liste.
+ */
+function recentPlace(targets) {
+  const byRoute = new Map(targets.map((item) => [item.navHref ?? item.path, item]));
+  const visible = new Set(targets.map((item) => item.module));
+  return ({ route, module }) => {
+    if (!visible.has(module)) return null;
+    const place = byRoute.get(route);
+    if (place) return { label: place.label };
+    if (module !== 'settings') return null;
+    const leaf = findSettingsLeaf(route.split(/[?#]/)[0], routerState.currentUser);
+    return leaf ? { label: settingsLeafLabel(leaf, t), context: t('nav.settings') } : null;
+  };
+}
+
+/**
+ * Eine Gruppe Palettenzeilen ohne Suchwort - dieselbe Bauart wie die Treffer
+ * (`.search-section` + `.search-result`), damit Combobox, Pfeiltasten und
+ * Haut dieselben sind (utils/palette-combobox.js zaehlt `.search-result`).
+ */
+function paletteRowsSection(label, items, { title, meta, go }, onClose) {
+  const section = document.createElement('div');
+  section.className = 'search-section';
+  const heading = document.createElement('h3');
+  heading.className = 'search-section__heading';
+  heading.textContent = label;
+  const rows = document.createElement('div');
+  rows.className = 'search-section__rows';
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'search-result';
+    const titleEl = document.createElement('span');
+    titleEl.className = 'search-result__title';
+    titleEl.textContent = title(item);
+    btn.appendChild(titleEl);
+    const metaText = meta?.(item) || '';
+    if (metaText) {
+      const metaEl = document.createElement('span');
+      metaEl.className = 'search-result__meta';
+      metaEl.textContent = metaText;
+      btn.appendChild(metaEl);
+    }
+    btn.addEventListener('click', () => {
+      onClose();
+      rememberRecent(safeLocalStorage(), routerState.currentUser?.id, { route: item.route, module: item.module });
+      go(item);
+    });
+    rows.appendChild(btn);
+  }
+  section.append(heading, rows);
+  return section;
+}
+
+/**
+ * Der Befehl fuer „kein Treffer": die Eingabe als neue Aufgabe - oder null,
+ * wo Aufgaben fehlen (abgeschaltet, ausgeblendet) oder nur zu lesen sind.
+ */
+function createTaskFromQuery(query) {
+  const title = String(query ?? '').trim();
+  if (!title) return null;
+  if (!navItems().some((item) => item.module === 'tasks') || navModuleAccess('tasks') !== 'write') return null;
+  return {
+    label: t('search.createTaskNamed', { title }), route: '/tasks', module: 'tasks',
+    context: t('nav.tasks'), create: true, prefillTitle: title,
+  };
+}
+
+/**
+ * Traegt den gesuchten Titel ins Formular „Neue Aufgabe", das triggerPageFab
+ * gerade oeffnet. Das Formular entsteht asynchron (Seitenaufbau, Modal);
+ * gewartet wird hoechstens eine Sekunde, und ein Feld, in das schon jemand
+ * tippt, bleibt, wie es ist.
+ */
+function prefillNewTaskTitle(title, { frames = 60 } = {}) {
+  let left = frames;
+  const step = () => {
+    const input = document.querySelector('#shared-modal-overlay #task-title');
+    if (input) {
+      if (!input.value) {
+        input.value = title;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return;
+    }
+    if (--left > 0) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 /** Text mit markierten Fundstellen als Knoten (`<mark>`), ohne innerHTML. */
@@ -3472,16 +3818,24 @@ function appendMarked(el, text, query) {
  * Rendert die Palette: Orte und Aktionen (lokal) vor den Datentreffern.
  * `data` ist null, solange der Server nicht geantwortet hat (oder unter zwei
  * Zeichen gar nicht gefragt wird).
- * @returns {number} Zahl aller Zeilen - fuer die Ansage
+ * @returns {{ count: number, createLabel: string|null }} Zahl aller waehlbaren
+ *   Zeilen fuer die Ansage - die Zeile „als Aufgabe anlegen" zaehlt mit, und
+ *   ihr Text steht in `createLabel`, damit die Ansage sie nennt.
  */
 function renderSearchResults(container, data, onClose, { local = { places: [], actions: [] }, query = '', silent = false } = {}) {
   container.replaceChildren();
   const localCount = local.places.length + local.actions.length;
   const total = localCount + (data ? searchResultCount(data) : 0);
 
-  if (total === 0) {
+  // KEIN TREFFER IST EIN ANFANG (R20, Re-Critique 2026-10-17 A1 P2-4): wer
+  // etwas sucht, das es nicht gibt, will es oft gerade anlegen. Unter dem
+  // Leerzustand steht dann EIN Befehl, „<Eingabe>" als Aufgabe anzulegen -
+  // nur, wo der Betrachter Aufgaben schreiben darf, und erst, wenn der Server
+  // geantwortet hat (vorher waere „nichts gefunden" eine Vermutung).
+  const createTask = total === 0 && data && !silent ? createTaskFromQuery(query) : null;
+  if (total === 0 && !createTask) {
     if (data && !silent) container.appendChild(emptyHintEl(t('search.noResults')));
-    return 0;
+    return { count: 0, createLabel: null };
   }
 
   // Aktivitätstyp lokalisieren (Preset via labelKey, Freitext unverändert).
@@ -3495,7 +3849,7 @@ function renderSearchResults(container, data, onClose, { local = { places: [], a
   // der Sektion ist die Herkunft damit selbstverstaendlich, die Zeilen
   // bleiben siegelfrei. Die Zeilen selbst liegen in GENAU EINEM Traeger
   // (Zeilenlisten-Regel) statt als Karte pro Treffer.
-  function makeSection(label, sealModule, items, { route, title, meta, go }) {
+  function makeSection(label, sealModule, items, { route, title, meta, go, remember = false, rowSeals = false }) {
     if (!items.length) return;
     const section = document.createElement('div');
     section.className = 'search-section';
@@ -3517,6 +3871,19 @@ function renderSearchResults(container, data, onClose, { local = { places: [], a
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'search-result';
+      // DAS SIEGEL AN DER ZEILE, WO DIE SEKTION GEMISCHT IST (R20): unter
+      // „Gehe zu" und „Neu anlegen" stehen Ziele aus vielen Modulen, und ohne
+      // Siegel sah „Neuer Termin" aus wie „Neue Aufgabe". Datensektionen
+      // tragen es weiter im Kopf - dort ist die Herkunft eine.
+      if (rowSeals && item.module && MODULE_ICON[item.module]) {
+        btn.classList.add('search-result--sealed');
+        const sealEl = document.createElement('span');
+        sealEl.className = 'module-seal module-seal--sm search-result__seal';
+        sealEl.setAttribute('aria-hidden', 'true');
+        sealEl.style.setProperty('--seal-accent', moduleAccentVar(item.module));
+        sealEl.appendChild(moduleIconEl(MODULE_ICON[item.module]));
+        btn.appendChild(sealEl);
+      }
       const titleEl = document.createElement('span');
       titleEl.className = 'search-result__title';
       appendMarked(titleEl, title(item), query);
@@ -3534,6 +3901,13 @@ function renderSearchResults(container, data, onClose, { local = { places: [], a
       }
       btn.addEventListener('click', () => {
         onClose();
+        // Gemerkt wird ein ZIEL (Ort, Einstellung, Datentreffer), kein Befehl
+        // und keine Anlege-Aktion - die Liste heisst "Zuletzt geoeffnet".
+        // NUR ORTE, nur Ziel und Modul - nie ein Name, nie ein Datentreffer
+        // (Sicherheits-Review R19, utils/search-sections.js).
+        if (remember && !item.run && item.route) {
+          rememberRecent(safeLocalStorage(), routerState.currentUser?.id, { route: item.route, module: item.module });
+        }
         if (go) go(item);
         else navigate(route(item));
       });
@@ -3543,26 +3917,22 @@ function renderSearchResults(container, data, onClose, { local = { places: [], a
     container.appendChild(section);
   }
 
+  if (createTask) container.appendChild(emptyHintEl(t('search.noResults')));
+
   // 1. GEHE ZU - Navigationsziele und Einstellungsblaetter.
   makeSection(t('search.goTo'), null, local.places, {
+    remember: true,
+    rowSeals: true,
     title: (item) => item.label,
     meta: (item) => item.context || '',
     go: (item) => (item.run ? item.run() : navigate(item.route)),
   });
-  // 2. NEU ANLEGEN - die Seite oeffnen und ihre Primaeraktion ausloesen, genau
-  //    wie der Kurzbefehl `n` (triggerPageFab: nichts, wo kein FAB zu sehen ist).
-  makeSection(t('search.newSection'), null, local.actions, {
-    title: (item) => item.label,
-    meta: (item) => item.context || '',
-    go: async (item) => {
-      await navigate(item.route);
-      triggerPageFab();
-    },
-  });
 
-  // 3. DATEN - Reihenfolge, Ueberschrift, Ziel und Zweitzeile je Trefferart:
+  // 2. DATEN - Reihenfolge, Ueberschrift, Ziel und Zweitzeile je Trefferart:
   // utils/search-sections.js (test:search-permissions prueft sie gegen die
-  // Antwort des Servers).
+  // Antwort des Servers). SIE STEHEN VOR DEN ANLEGE-BEFEHLEN (R20, Re-Critique
+  // 2026-10-17, Alex): wer „Zahnarzt" tippt, sucht den Termin, nicht „Neuer
+  // Termin" - bei 1280x800 lagen die Treffer unter sechs Befehlen und der Falz.
   // `dateKey` ist der Kalendertag in der ANZEIGEZONE: der Termin-Treffer baut
   // daraus den Tag seines Links (#1607), und ein synchronisierter Termin liegt
   // als Instant in der Zeile - sein UTC-Tag waere der falsche.
@@ -3578,11 +3948,25 @@ function renderSearchResults(container, data, onClose, { local = { places: [], a
     });
   }
 
+  // 3. NEU ANLEGEN - die Seite oeffnen und ihre Primaeraktion ausloesen, genau
+  //    wie der Kurzbefehl `n` (triggerPageFab: nichts, wo kein FAB zu sehen ist).
+  //    Ohne jeden Treffer steht hier allein „als Aufgabe anlegen".
+  makeSection(t('search.newSection'), null, createTask ? [createTask] : local.actions, {
+    rowSeals: true,
+    title: (item) => item.label,
+    meta: (item) => item.context || '',
+    go: async (item) => {
+      await navigate(item.route);
+      triggerPageFab();
+      if (item.prefillTitle) prefillNewTaskTitle(item.prefillTitle);
+    },
+  });
+
   // Die Siegel-Icons kommen als data-lucide-Platzhalter; der Treffer-Pfad
   // rendert sie selbst (der Leerzustands-Pfad tut es bereits genauso).
   window.lucide?.createIcons({ el: container });
 
-  return total;
+  return createTask ? { count: 1, createLabel: createTask.label } : { count: total, createLabel: null };
 }
 
 // Read-only-Modus für ein Modul anwenden (#467): FAB via <html data-module-readonly>
@@ -3691,9 +4075,10 @@ function navItems({ catalog = false } = {}) {
     { path: '/',          label: t('nav.dashboard'), module: 'dashboard', section: NAV_SECTION.overview },
     // Plan
     { path: '/calendar',  label: t('nav.calendar'),  module: 'calendar',  section: NAV_SECTION.plan },
-    { path: '/schedule',  label: t('nav.schedule'),  module: 'schedule',  section: NAV_SECTION.plan },
     { path: '/tasks',     label: t('nav.tasks'),     module: 'tasks',     section: NAV_SECTION.plan },
+    { path: '/rewards',   label: t('nav.rewards'),   module: 'rewards',   section: NAV_SECTION.plan },
     { path: '/notes',     label: t('nav.notes'),     module: 'notes',     section: NAV_SECTION.plan },
+    { path: '/schedule',  label: t('nav.schedule'),  module: 'schedule',  section: NAV_SECTION.plan },
     // Haushalt — Kitchen-Gruppe zuerst, dann die übrigen Haushalts-Module
     { path: '/meals',     label: t('nav.meals'),     module: 'meals',    section: NAV_SECTION.household, kitchenGroup: true },
     { path: '/recipes',   label: t('nav.recipes'),   module: 'recipes',  section: NAV_SECTION.household, kitchenGroup: true },
@@ -3703,12 +4088,11 @@ function navItems({ catalog = false } = {}) {
     { path: '/waste',     label: t('nav.waste'),     module: 'waste',    section: NAV_SECTION.household },
     { path: '/documents', label: t('nav.documents'), module: 'documents',   section: NAV_SECTION.household },
     { path: '/inventory', label: t('nav.inventory'), module: 'inventory',   section: NAV_SECTION.household },
-    { path: '/rewards',   label: t('nav.rewards'),   module: 'rewards',     section: NAV_SECTION.household },
     // Menschen
     { path: '/contacts',  label: t('nav.contacts'),  module: 'contacts',    section: NAV_SECTION.people },
     { path: '/birthdays', label: t('nav.birthdays'), module: 'birthdays',   section: NAV_SECTION.people },
     { path: '/health',    label: t('nav.health'),    module: 'health',      section: NAV_SECTION.people },
-    // Finanzen
+    // Finanzen - ein einziger Eintrag, deshalb ohne Kopf (navSectionLabelKey)
     { path: '/budget',    label: t('nav.budget'),    module: 'budget',      section: NAV_SECTION.finance },
     // Settings ist am Ende gepinnt (siehe unten).
     { path: '/settings',  navHref: '/settings?view=domains', label: t('nav.settings'),  module: 'settings',    section: NAV_SECTION.household },
@@ -3838,12 +4222,19 @@ function sidebarNavItems() {
   // Jede sichtbare Sektion wird ein role="group" mit aria-labelledby auf ihr Label
   // — so ist die visuelle Gruppierung für Screenreader hörbar (statt verwaister
   // Label-Divs zwischen Links). Items landen im aktuellen Gruppen-Container.
+  // Eine Sektion mit nur EINEM Eintrag bekommt keinen Kopf und keine Gruppe
+  // (navSectionLabelKey, R19): ihr Eintrag steht direkt in der Liste, mit der
+  // Luft einer Gruppe davor (`.nav-item--headerless`, layout.css).
+  const items = navItems();
+  const entryCounts = navSectionEntryCounts(items.filter((item) => item.module !== 'settings'));
+  let headerless = false;
   const startSection = (section) => {
     if (section === currentSection) return;
     currentSection = section;
+    headerless = false;
     if (HEADERLESS_SECTIONS.has(section)) { currentGroup = null; return; }
-    const labelKey = NAV_SECTION_LABEL_KEYS[section];
-    if (!labelKey) { currentGroup = null; return; }
+    const labelKey = navSectionLabelKey(section, entryCounts.get(section));
+    if (!labelKey) { currentGroup = null; headerless = true; return; }
     const labelId = `nav-section-${section}`;
     const label = document.createElement('div');
     label.className = 'nav-section-label';
@@ -3859,10 +4250,11 @@ function sidebarNavItems() {
   };
 
   const appendNavEl = (el) => {
+    if (!currentGroup && headerless) el.classList.add('nav-item--headerless');
     (currentGroup ?? { appendChild: (n) => elements.push(n) }).appendChild(el);
   };
 
-  navItems().forEach((item) => {
+  items.forEach((item) => {
     // Settings ist gepinnt und gehört zu keiner sichtbaren Sektionsgruppe —
     // der Aufrufer hebt es aus der Liste heraus und hängt es als Geschwister
     // an die Sidebar-Spalte (siehe dort, und layout.css zum entfallenen Rand).
@@ -3881,6 +4273,17 @@ function sidebarNavItems() {
       // ":last-child a". Der Aufrufer erkennt sie und hängt den Eintrag
       // ausserhalb des Scrollers ein.
       el.classList.add('nav-item--pinned-end');
+      // DIESELBE PILLE AUCH HIER (Critique 2026-10-16, R18/D6). Der Eintrag
+      // liegt ausserhalb des Scrollers, die Pille der Liste erreicht ihn also
+      // nie - er trug deshalb noch den alten 3px-Streifen und eine statische
+      // Toenung. Jetzt bringt er eine eigene Pille mit (dieselbe Klasse, also
+      // dasselbe Material), und positionSidebarIndicator() laesst sie von der
+      // Stelle der Listenpille hergleiten.
+      const pill = document.createElement('span');
+      pill.className = 'nav-sidebar__indicator nav-sidebar__indicator--pinned';
+      pill.setAttribute('aria-hidden', 'true');
+      pill.style.opacity = '0';
+      el.prepend(pill);
       elements.push(el);
       return;
     }
@@ -3931,7 +4334,9 @@ function setMobileNavOrder(order) {
 }
 
 async function refreshThirdPartyModules() {
-  await syncThirdPartyModules();
+  // Nach Installation oder Update: Sprachdateien koennen sich bei gleicher
+  // Version geaendert haben, deshalb ohne Fingerabdruck-Vergleich neu laden.
+  await syncThirdPartyModules({ forceLocales: true });
   rebuildNavigation();
 }
 
@@ -4121,6 +4526,30 @@ function placeNavIndicator(indicator, apply) {
 }
 
 /**
+ * Laesst die Pille des gepinnten Eintrags von einer Bildschirmhoehe her an
+ * ihren Platz gleiten (FLIP): erst ohne Uebergang auf den Startpunkt, dann
+ * mit dem Uebergang der Pille (layout.css, reduced-motion schaltet ihn ab)
+ * zurueck auf null. `fromTop` null heisst: ohne Weg einblenden.
+ */
+function glidePillFrom(pill, fromTop) {
+  if (pill.style.opacity !== '0') return;
+  if (fromTop != null) {
+    pill.style.opacity = '';
+    startGlideAt(pill, fromTop - pill.getBoundingClientRect().top);
+  }
+  pill.style.transform = '';
+  pill.style.opacity = '';
+}
+
+/** Setzt eine Pille ohne Uebergang auf einen Startpunkt; der naechste Wert gleitet. */
+function startGlideAt(pill, y) {
+  pill.style.transition = 'none';
+  pill.style.transform = `translateY(${y}px)`;
+  pill.getBoundingClientRect();
+  pill.style.transition = '';
+}
+
+/**
  * Positioniert den morphenden Indikator in der Sidebar auf dem aktiven Nav-Item.
  */
 function positionSidebarIndicator() {
@@ -4128,10 +4557,28 @@ function positionSidebarIndicator() {
   const indicator = container?.querySelector('.nav-sidebar__indicator');
   if (!indicator) return;
   const active = container.querySelector('.nav-item[aria-current="page"]');
+  const pinnedPill = document.querySelector('.nav-sidebar > .nav-item--pinned-end > .nav-sidebar__indicator--pinned');
   if (!active) {
+    // Der gepinnte Eintrag (Einstellungen) ist aktiv: seine eigene Pille
+    // gleitet von dort her, wo die Listenpille gerade stand, und die
+    // Listenpille tritt ab. Ohne sichtbare Vorgaengerin erscheint sie still.
+    if (pinnedPill?.parentElement?.getAttribute('aria-current') === 'page') {
+      const from = indicator.style.opacity !== '0' && indicator.getClientRects().length
+        ? indicator.getBoundingClientRect().top : null;
+      glidePillFrom(pinnedPill, from);
+    }
     indicator.style.opacity = '0';
     return;
   }
+  // Zurueck in die Liste: die Listenpille startet an der Stelle der
+  // gepinnten (unterhalb der Liste, vom Scroller beschnitten) und gleitet
+  // herauf - dieselbe Bewegung in die Gegenrichtung.
+  // Nur ein schon platzierter Indikator gleitet - die erste Platzierung
+  // springt weiter (placeNavIndicator).
+  if (pinnedPill && pinnedPill.style.opacity !== '0' && indicator.dataset.placed === '1') {
+    startGlideAt(indicator, pinnedPill.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop);
+  }
+  if (pinnedPill) pinnedPill.style.opacity = '0';
   // Aktives Item in den Sichtbereich holen (Audit F-01): bei überlaufender
   // Liste lagen Item UND Pille sonst unsichtbar unterhalb der Falte — die
   // Navigation verlor ihren „Du bist hier"-Anker. Manuelles Scrollen statt
@@ -4226,7 +4673,7 @@ function moreItemEl({ path, navHref, label, icon, module: mod, accent, navId }) 
   else if (mod) a.style.setProperty('--item-module-accent', moduleAccentVar(mod));
   const well = document.createElement('div');
   // Markensiegel (Block 2): das Well nimmt Form und Material vom Baustein,
-  // die Grid-Groesse und die Akzent-Weiterleitung stehen in layout.css.
+  // die Zeilengroesse und die Akzent-Weiterleitung stehen in layout.css.
   well.className = 'module-seal more-item__icon-well';
   well.appendChild(moduleIconEl(icon, 'more-item__icon'));
   const span = document.createElement('span');
@@ -4236,13 +4683,18 @@ function moreItemEl({ path, navHref, label, icon, module: mod, accent, navId }) 
   a.appendChild(span);
 
   // Der Zaehlstand kommt spaeter (siehe paintMoreSheetBadges) und nur, wenn es
-  // einen gibt. Die Kachel bleibt ohne ihn vollstaendig - ein Badge ist eine
-  // Zugabe, kein Bestandteil.
+  // einen gibt. Die Zeile bleibt ohne ihn vollstaendig - ein Badge ist eine
+  // Zugabe, kein Bestandteil. Er steht VOR dem Pfeil, wie in iOS.
   const count = _moduleCounts[navId ?? mod];
   if (count > 0) {
     a.appendChild(moreBadgeEl(count));
     a.setAttribute('aria-label', `${label}, ${t('nav.moreBadge', { count })}`);
   }
+  const chevron = document.createElement('i');
+  chevron.dataset.lucide = 'chevron-right';
+  chevron.className = 'more-item__chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+  a.appendChild(chevron);
   return a;
 }
 
@@ -4316,7 +4768,16 @@ function setMoreButtonState(moreBtn, activeSecondary) {
   replaceNavIcon(moreBtn, '.nav-item__icon', 'more-horizontal');
 }
 
-function updateNav(path) {
+function updateNav(rawPath) {
+  // Ein neuer Ort beginnt oben - mit ausgefahrener Kapsel (R19).
+  navMinimizer?.expand();
+  // EINE SEKTION JE ZIEL, an jedem Aufruf (Critique R19). Die Navigation
+  // reicht `topLevelSection()` schon herein, der Neuaufbau der Leiste
+  // (rebuildNavigation, nach Sprache, Modulen oder dem Nachladen der
+  // Erweiterungen beim Kaltstart) aber den rohen Pfad: auf
+  // /settings/personal/notifications fand "Mehr" dann kein Ziel und stand
+  // ohne Aktivzustand da. Idempotent - ein schon gekuerzter Pfad bleibt.
+  const path = topLevelSection(rawPath);
   const kitchenDestination = currentKitchenDestination();
   document.querySelectorAll('[data-route]').forEach((el) => {
     if (el.dataset.navId === 'kitchen' && kitchenDestination) {
@@ -4379,7 +4840,7 @@ function updateNav(path) {
   });
 }
 
-function renderError(container, err) {
+function renderError(container, err, { page = null, home = false } = {}) {
   // Der globale Fehlerbildschirm laeuft ueber dieselbe Grammatik wie jeder
   // Leerzustand im Modul. Er hatte `role="alert"` und einen Ausweg schon
   // richtig, aber seinen Titel als <div> - auf einem Bildschirm, der nichts
@@ -4389,16 +4850,29 @@ function renderError(container, err) {
   // die einzige verwertbare Information (Name, Meldung, Stack) lag frueher nur
   // in der Browserkonsole. Zugeklappt beigelegt stoert sie das Layout nicht,
   // ist aber ohne DevTools erreichbar und kopierbar.
+  //
+  // WAS KAPUTT IST, UND WAS NICHT (Re-Critique 2026-10-17, A1: "Fehlerseite
+  // generisch"). Steht die Shell, ist nur EINE Seite gescheitert: der Titel
+  // nennt sie mit ihrem Namen aus der Navigation, der Hinweis sagt, dass der
+  // Rest weiterlaeuft, und neben "Neu laden" fuehrt ein zweiter Weg zur
+  // Uebersicht - ein Neuladen derselben kaputten Seite ist nicht der einzige
+  // Ausweg. Ohne Shell (Start gescheitert) bleibt der allgemeine Titel.
+  const cause = friendlyError(err);
+  const reload = {
+    label: t('common.reload'),
+    attrs: { id: 'error-reload-btn' },
+    onClick: () => location.reload(),
+  };
   const state = emptyStateEl({
     variant: 'error',
-    title: t('common.errorOccurred'),
-    description: friendlyError(err),
+    title: page ? t('common.pageFailedTitle', { page }) : t('common.errorOccurred'),
+    // Ein Absatz, nicht der Hinweis-Kasten: der Satz gehoert zur Ursache.
+    description: page ? `${cause} ${t('common.pageFailedHint')}` : cause,
+    className: 'page-crash',
     details: { summary: t('common.errorDetails'), text: errorDetails(err) },
-    action: {
-      label: t('common.reload'),
-      attrs: { id: 'error-reload-btn' },
-      onClick: () => location.reload(),
-    },
+    actions: home
+      ? [reload, { label: t('common.toOverview'), tone: 'secondary', attrs: { id: 'error-home-btn' }, onClick: () => navigate('/') }]
+      : [reload],
   });
   // Fokusziel: nach einem Absturz soll die Ansage beim Screenreader ankommen
   // und die Tastatur nicht im abgeraeumten Baum haengen.
@@ -4577,6 +5051,9 @@ function forgetSessionState() {
   stopThirdPartyModulePolling();
   stopReminders();
   stopPush();
+  // Die zuletzt geoeffneten Orte der Palette (R19): Ziele eines Kontos
+  // gehoeren nicht dem naechsten am selben Geraet.
+  forgetAllRecent(safeLocalStorage());
   // Und der Foto-Bildschirmschoner (#1919): ohne Sitzung fragt er nichts mehr
   // an - sein 401 zeichnete sonst die Anmeldeseite ueber ein halb
   // ausgefuelltes Formular. Scharf macht ihn navigate(), sobald es wieder
@@ -4756,6 +5233,11 @@ function observeNavCapsule() {
   // Dieselbe Kapsel, ihre HOEHE: umbrechende Labels machen sie hoeher als
   // --nav-height-mobile, und die Zone darunter muss mitwachsen (Review zu #1475).
   watchNavCapsuleHeight(items);
+  // Und sie minimiert sich beim Lesen (iOS-26-Muster, R19): abwaerts flacher
+  // und ohne Labels, aufwaerts, oben und am Seitenende wieder ganz. An der
+  // JEWEILS aktuellen Kapsel - nach Logout/Login ist es eine neue (Review #2049).
+  const nav = items.closest('.nav-bottom');
+  if (nav) navMinimizer = bindNavMinimize(navMinimizer, nav);
 }
 observeNavCapsule();
 
@@ -4905,7 +5387,7 @@ if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
     }
     // Nur ein Hinweis an den Browser (modulepreload): ausgefuehrt wird nichts,
     // und nach einem angekuendigten Update unterlaesst prefetchRoute() ihn (#616).
-    prefetchRoute(location.pathname);
+    prefetchRoute(location.pathname, { now: true });
 
     await initI18n();
     initExtensionI18n();

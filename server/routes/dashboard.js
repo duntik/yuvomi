@@ -17,7 +17,7 @@ import {
   asksHouseholdAudience, householdAudienceAnswer, householdAudienceShows, householdVisibleWhere, visibilityWhere,
 } from '../services/visibility.js';
 import { resolveBudgetMode } from '../services/budget-visibility.js';
-import { hiddenModulesFor } from '../permissions.js';
+import { hiddenModulesFor, requestHasCapability } from '../permissions.js';
 import { birthdaysSwitchedOff, modulesLeftOut } from '../services/household-modules.js';
 import { documentViewer } from '../services/document-links.js';
 import { householdMemberSql, memberOrderSql, memberPositionSql } from '../services/household-members.js';
@@ -35,6 +35,7 @@ import { activeCatalog, ledgerBalanceSql } from '../services/rewards.js';
 import { moneyParams, moneyReader, moneyVisibleSql } from '../services/reward-money.js';
 import { MEAL_COOK_COLUMNS_SQL, MEAL_COOK_JOIN_SQL } from '../services/meal-cook.js';
 import { clampEventLimit } from '../../public/utils/dashboard-event-limit.js';
+import { personAvatarUrlSql } from '../services/person-avatar.js';
 
 const log = createLogger('Dashboard');
 
@@ -182,7 +183,7 @@ function emptyBudget(month) {
 const ASSIGNED_USERS_SQL = `(
   SELECT json_group_array(json_object(
     'id', u.id, 'display_name', u.display_name, 'color', u.avatar_color,
-    'avatar_data', u.avatar_data
+    'avatar_data', ${personAvatarUrlSql('u')}
   ))
   FROM task_assignments ta JOIN users u ON u.id = ta.user_id
   WHERE ta.task_id = t.id
@@ -1265,7 +1266,9 @@ router.get('/', (req, res) => {
       presentSince: openSession?.check_in || null,
       workerName: openWorker?.worker_name || null,
       visitsThisMonth: month.visits,
-      unpaidAmount: month.unpaid,
+      // Der offene Lohn ist Geld (R20): ohne `housekeeping_view_amounts` -
+      // so starten neue Kinderkonten - kommt er als `null`, wie im Modul.
+      unpaidAmount: requestHasCapability(d, req, 'housekeeping_view_amounts') ? month.unpaid : null,
       lastVisit: lastRow?.check_in || null,
     };
   } catch (err) {

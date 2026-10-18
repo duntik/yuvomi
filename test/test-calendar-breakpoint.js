@@ -112,8 +112,9 @@ test('Desktop -> Telefon: die Woche wird zum 3-Tage-Fenster, das Label nennt die
     const page = mountPage();
     phone = true;
     await calendar.onPhoneQueryChange();
-    assert.deepEqual(page.columns(), ['2026-06-16', '2026-06-17', '2026-06-18'], 'drei Spalten um den Cursor');
-    assert.match(page.label(), /^calendar\.dayRangeLabel\b.*2026-06-16.*2026-06-18/, 'das Label nennt die sichtbaren Tage, nicht die KW');
+    // R20: das Fenster beginnt am Cursor (vorher gestern, heute, morgen).
+    assert.deepEqual(page.columns(), ['2026-06-17', '2026-06-18', '2026-06-19'], 'drei Spalten ab dem Cursor');
+    assert.match(page.label(), /^calendar\.dayRangeLabel\b.*2026-06-17.*2026-06-19/, 'das Label nennt die sichtbaren Tage, nicht die KW');
     assert.equal(page.nextLabel(), calendar.periodArrowLabels(calendar.periodStepOf('week', { mobile: true })).next,
       'der Pfeil nennt den Schritt des 3-Tage-Fensters');
   });
@@ -132,16 +133,16 @@ test('Telefon -> Desktop: die Woche zeigt wieder sieben Tage unter der KW', asyn
 });
 
 test('Cursor am Wochenrand: das Telefonfenster reicht in die Nachbarwoche und wird nachgeladen', async () => {
-  // Montag: am Telefon steht der Sonntag davor in der ersten Spalte - der
-  // liegt ausserhalb der geladenen Desktop-Woche.
+  // Samstag: am Telefon stehen seit R20 Samstag, Sonntag und der Montag
+  // danach - der liegt ausserhalb der geladenen Desktop-Woche.
   phone = false;
-  await withWeek({ cursor: '2026-06-15' }, async (requests) => {
-    assert.equal(calendar.state.rangeFrom, '2026-06-15', 'geladen ist die Desktop-Woche ab Montag');
+  await withWeek({ cursor: '2026-06-20' }, async (requests) => {
+    assert.equal(calendar.state.rangeTo, '2026-06-21', 'geladen ist die Desktop-Woche bis Sonntag');
     const page = mountPage();
     phone = true;
     await calendar.onPhoneQueryChange();
-    assert.deepEqual(page.columns(), ['2026-06-14', '2026-06-15', '2026-06-16']);
-    assert.equal(calendar.state.rangeFrom, '2026-06-14', 'das geladene Fenster beginnt am ersten sichtbaren Tag');
+    assert.deepEqual(page.columns(), ['2026-06-20', '2026-06-21', '2026-06-22']);
+    assert.equal(calendar.state.rangeTo, '2026-06-22', 'das geladene Fenster endet am letzten sichtbaren Tag');
     assert.ok(requests.some((p) => p.startsWith('/calendar?from=')), 'die Termine des neuen Fensters wurden geholt');
   });
 });
@@ -157,24 +158,35 @@ test('Gleiches Fenster: der Wechsel zeichnet neu, ohne nachzuladen', async () =>
   });
 });
 
-// R17 Schritt 8: eingeklappt (Telefon) faltet die Suche ins Ansichtsmenue. Ihr
-// Knopf ist dann `display: none` - `focus()` darauf tut nichts, und nach Esc in
-// der Suche stand der Fokus auf dem Dokument. Er geht an den Menue-Knopf.
-test('Suche schliessen: der Fokus geht an den Suchknopf, gefaltet an das Ansichtsmenue', () => {
-  const stage = (visible) => {
-    const focused = [];
-    const menu = { focus: () => focused.push('menu') };
-    const toolbar = { querySelector: (sel) => (sel === '[data-collapse-fold-menu]' ? menu : null) };
-    const toggle = {
-      setAttribute() {}, removeAttribute() {}, classList: { remove() {} },
-      getClientRects: () => (visible ? [{}] : []),
-      closest: (sel) => (sel === '.cal-toolbar' ? toolbar : null),
-      focus: () => focused.push('search'),
-    };
-    const container = { querySelector: (sel) => (sel === '#cal-search' ? toggle : null) };
-    calendar.closeSearchForTest(container);
-    return focused;
+// D1 (Critique 2026-10-16): die Suche ist das Feld im Kopf. Schliesst sie
+// (gefundener Termin, Ansichtswechsel), leert sich das Feld mit - ein
+// stehender Begriff ueber der wiederhergestellten Ansicht behauptete eine
+// Suche, die nicht mehr laeuft - und der Loeschen-Knopf geht mit.
+test('Suche schliessen: das Feld im Kopf leert sich, sein Loeschen-Knopf verschwindet', () => {
+  const clear = { hidden: false };
+  const input = {
+    value: 'Arzt',
+    closest: (sel) => (sel === '.page-search__control' ? { querySelector: () => clear } : null),
   };
-  assert.deepEqual(stage(true), ['search'], 'sichtbar: zurueck an den Knopf der Suche');
-  assert.deepEqual(stage(false), ['menu'], 'gefaltet: an den Knopf, ueber den die Suche erreicht wurde');
+  const container = { querySelector: (sel) => (sel === '#cal-search-input' ? input : null) };
+  calendar.closeSearchForTest(container);
+  assert.equal(input.value, '', 'das Feld ist leer');
+  assert.equal(clear.hidden, true, 'der Loeschen-Knopf ist weg');
+});
+
+test('das Kuerzel f trifft das Suchfeld, das der Kalender rendert', async () => {
+  // Seit die Kalendersuche ein Feld im Kopf ist (`renderPageSearch`,
+  // `#cal-search-input`), gibt es den Knopf `#cal-search` nicht mehr. Der
+  // Router klickte ihn per `?.click()` weiter an: `f` wechselte in den
+  // Kalender und tat dann still nichts.
+  const { readFileSync } = await import('node:fs');
+  const router = readFileSync(new URL('../public/router.js', import.meta.url), 'utf8');
+  const cal = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const action = router.match(/key: 'f',[\s\S]*?\} \},/)?.[0] ?? '';
+  const ids = [...action.matchAll(/querySelector\('#([\w-]+)'\)/g)].map((m) => m[1]);
+  assert.ok(ids.length > 0, 'die f-Aktion sucht ein Element per ID');
+  for (const id of ids) {
+    assert.match(cal, new RegExp(`id: '${id}'|id="${id}"`), `#${id} rendert der Kalender nicht`);
+  }
+  assert.match(action, /\.focus\(\)/, 'das Feld bekommt den Fokus - mobil klappt die Lupe per :focus-within auf');
 });

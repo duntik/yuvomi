@@ -30,6 +30,7 @@ import {
 } from './services/display-accounts.js';
 import { deleteBirthdayArtifacts, syncBirthdayArtifacts } from './services/birthdays.js';
 import { syncFastingRemindersForUser } from './services/fasting-reminders.js';
+import { revokePaymentTasksForUsers } from './services/payment-task-audience.js';
 import * as oidcClient from 'openid-client';
 import {
   isOidcEnabled,
@@ -52,7 +53,7 @@ import { accountIdsByEmail, emailMatchKey } from './utils/email-match.js';
 import {
   resolvePermissions, buildSessionModuleAccess, clientPermissions,
   invitePresetPermissions, isValidInvitePreset, writeSubjectPermissions,
-  INVITE_PRESET_DEFAULT,
+  applyChildStartPermissions, INVITE_PRESET_DEFAULT,
 } from './permissions.js';
 import { isAdminRequest, requireAdmin } from './middleware/require-admin.js';
 import { EMAIL_IN_USE_MESSAGE, emailsTakenByOtherAccounts, storedAccountEmails } from './services/contact-identity.js';
@@ -2186,6 +2187,13 @@ export function buildInviteRoutes(targetRouter, {
             }
             writeSubjectPermissions(getDb(), 'user', newUserId, parsed);
           }
+          // Kinder-Startrechte (R20) NACH der Vorlage: sie liest den Stand,
+          // den Rollenprofil und Vorlage schon ergeben, und verschaerft nur.
+          // Gilt auch bei der Vorlage 'role' - ein neues Kinderkonto startet
+          // nie mit Budget, Fasten oder den Loehnen der Haushaltshilfe.
+          applyChildStartPermissions(getDb(), {
+            id: newUserId, role: invite.role, family_role: invite.family_role,
+          });
           syncFamilyMemberArtifacts(getDb(), newUserId, {
             displayName,
             // Die eingeladene Adresse wird zur Kontaktadresse: ohne sie fände der
@@ -3439,6 +3447,11 @@ router.post('/users', requireAuth, requireAdmin, csrfMiddleware, async (req, res
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `)
         .run(username, display_name, hash, avatar_color, normalizedAvatarData ?? null, role, family_role);
+      // Kinder-Startrechte (R20): in derselben Transaktion wie das Konto, damit
+      // es nie einen Moment mit Budget und Haushaltshilfe-Loehnen gibt.
+      applyChildStartPermissions(db.get(), {
+        id: Number(created.lastInsertRowid), role, family_role,
+      });
       syncFamilyMemberArtifacts(db.get(), created.lastInsertRowid, {
         displayName: display_name,
         phone: memberFields.values.phone,
@@ -3605,6 +3618,9 @@ router.patch('/users/:id', requireAuth, requireAdmin, csrfMiddleware, async (req
       });
       if (nextRole !== existing.role || familyRole !== existing.family_role) {
         syncFastingRemindersForUser(db.get(), userId);
+        // Herabstufung oder ein Rollenprofil ohne Betraege: die Zahlungs-
+        // aufgaben dieses Kontos gelten neu (services/payment-task-audience.js).
+        revokePaymentTasksForUsers(db.get(), [userId]);
       }
     });
 
@@ -3882,7 +3898,12 @@ router.patch('/me/password', requireAuth, csrfMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found.', code: 404 });
 
     const { valid } = await verifyPassword(current_password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Current password is incorrect.', code: 401 });
+    // 400 mit Grund, nicht 401 (Re-Critique 2026-10-17): ein 401 heisst in
+    // dieser App "Sitzung weg" - api.js loeste darauf auth:expired aus, und wer
+    // sich beim alten Passwort vertippte, landete ohne Meldung auf der
+    // Anmeldung, die Eingaben verloren, obwohl die Sitzung gueltig war.
+    // Dieselbe Form wie ein falscher Code beim zweiten Faktor (invalid_code).
+    if (!valid) return res.status(400).json({ error: 'Current password is incorrect.', code: 400, reason: 'wrong_password' });
 
     const hash = await hashPassword(new_password);
     db.get().prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.authUserId);

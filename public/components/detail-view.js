@@ -22,6 +22,7 @@ import { t } from '/i18n.js';
 import {
   openModal, closeModal, mountFooter, refreshDirtySnapshot, forgetRestore,
   focusFirstField, updateHeaderAction, rememberFocus, restoreFocusAfterClose,
+  dockNextModal,
 } from '/components/modal.js';
 import { pushOverlay, dropOverlay } from '/utils/overlay-history.js';
 import { durationToken } from '/utils/ux.js';
@@ -92,7 +93,10 @@ export function detailRowEl({ icon, label, value, node, multiline = false, actio
   if (!hasContent) return null;
 
   const row = document.createElement('div');
-  row.className = multiline ? 'detail-row detail-row--multiline' : 'detail-row';
+  // `--text`: der Wert ist reiner Text (kein Knoten mit Chips, Liste, Bild) -
+  // nur solche Zeilen duerfen in der Info-Listen-Form nebeneinander stehen.
+  row.className = ['detail-row', multiline && 'detail-row--multiline', !(node instanceof HTMLElement) && 'detail-row--text']
+    .filter(Boolean).join(' ');
 
   if (icon) {
     const i = document.createElement('i');
@@ -320,9 +324,13 @@ function personAvatarEl(person) {
  * Zeilen ohne Inhalt fallen weg, statt als leere Zeile dazustehen - eine
  * Detailansicht zeigt, was da ist, und schweigt über den Rest.
  */
-function detailBodyEl({ accentColor, head, sections = [] }) {
+function detailBodyEl({ accentColor, head, sections = [], rowLayout = 'stacked' }) {
   const view = document.createElement('div');
-  view.className = 'detail-view';
+  // `rowLayout: 'inline'` (R19): schmal stehen Label und Wert einer Textzeile
+  // in EINER Zeile, Label vorn, Wert am Ende - wie eine Info-Liste in iOS.
+  // Opt-in je Modul (Inventar), weil die anderen Leseansichten Fliesstext und
+  // Termine tragen, fuer die das Untereinander die richtige Form ist.
+  view.className = rowLayout === 'inline' ? 'detail-view detail-view--inline-rows' : 'detail-view';
 
   const headEl = detailHeadEl(head);
   if (headEl) view.appendChild(headEl);
@@ -382,7 +390,38 @@ function detailGroupEl({ group, rows = [] }) {
  * Sheet-Modus vom Fußzeilen-Umzug in modal.js erfasst wird und unter der Falz
  * stehen bleibt statt mitzuscrollen.
  */
-function detailFooterEl(actions = [], close = closeDetailView) {
+/**
+ * BEARBEITEN IST UEBERALL DER PRIMAERKNOPF AM FUSS (R19, Ulas 2026-10-16).
+ * Die Critique fand es mal gefuellt am Fuss (Kontakte, Inventar, Termine,
+ * Notizen), mal umrandet im Kopf (Aufgaben-Blatt, jede Detailspalte, Abos,
+ * Geburtstage am Desktop) - dieselbe Handlung in zwei Gewichten an zwei
+ * Orten. Jetzt steht sie in Blatt, Popover und Detailspalte als EIN
+ * gefuellter Knopf am Ende der Fusszeile, und weil ein Fuss nur EINE
+ * Hauptaktion hat, treten andere Primaerknoepfe dort zurueck (sekundaer).
+ * `edit.primary: false` gibt es nicht mehr als Ausweg.
+ *
+ * DIE AUSNAHME HEISST `keepPrimary` (Ulas 2026-10-16, nur Aufgaben): wer
+ * eine Aufgabe oeffnet, will sie meist abhaken. Dort bleibt der EIGENE
+ * Primaerknopf des Aufrufers (Erledigen bzw. Wieder oeffnen) gefuellt, und
+ * Bearbeiten tritt als sekundaerer Knopf direkt davor. Auch dann gibt es genau
+ * EINEN Primaerknopf: weitere treten zurueck. Hat der Aufrufer keinen (etwa
+ * eine abgelegte Aufgabe), wird Bearbeiten wie ueberall der Primaerknopf.
+ *
+ * @param {Array} actions   die Objektaktionen der Ansicht
+ * @param {object|null} edit der Bearbeiten-Knopf ({ id, label, onClick, dock? })
+ * @param {{ keepPrimary?: boolean }} [opts]
+ * @returns {Array}
+ */
+export function withPrimaryEdit(actions = [], edit = null, { keepPrimary = false } = {}) {
+  const list = (actions ?? []).filter(Boolean);
+  const keep = keepPrimary ? list.findIndex((action) => action.variant === 'primary') : -1;
+  if (!edit) return list;
+  const stepped = list.map((action, i) => (action.variant === 'primary' && i !== keep ? { ...action, variant: 'secondary' } : action));
+  if (keep < 0) return [...stepped, { icon: 'pencil', ...edit, variant: 'primary' }];
+  return [...stepped.slice(0, keep), { icon: 'pencil', ...edit, variant: 'secondary' }, ...stepped.slice(keep)];
+}
+
+export function detailFooterEl(actions = [], close = closeDetailView) {
   const visible = actions.filter((a) => a && !a.hidden);
   if (!visible.length) return null;
 
@@ -414,7 +453,11 @@ function detailFooterEl(actions = [], close = closeDetailView) {
       if (action.icon) btn.title = action.label;
     }
     if (typeof action.onClick === 'function') {
-      btn.addEventListener('click', () => action.onClick({ close, button: btn }));
+      btn.addEventListener('click', () => {
+        // In der Detailspalte legt sich das Formular IN die Spalte (R19).
+        if (action.dock) dockNextModal(btn.closest('.split-view__detail'));
+        action.onClick({ close, button: btn });
+      });
     }
     footer.appendChild(btn);
   });
@@ -572,6 +615,20 @@ async function switchToForm(panel, opts, state) {
       // sonst scrollt die Primäraktion weg und ein „Speichern" mit
       // type="submit" löst außerhalb seines Formulars kein submit aus (#543).
       state.formFooter = mountFooter(panel);
+      // ABBRECHEN FUEHRT IN DIE LESEANSICHT (R19, Critique 2026-10-16: "Aufgabe
+      // bearbeiten" hatte mobil vier Auswege - Zurueck, x, Abbrechen,
+      // Papierkorb). Kopf-"Zurueck" und Fuss-"Abbrechen" taten fast dasselbe,
+      // nur Abbrechen schloss das ganze Blatt. Jetzt ist Abbrechen der eine
+      // Rueckweg (wie in Apples Bearbeiten-Modus), das x schliesst, und der
+      // Kopfknopf faellt weg (unten). Capture-Phase: vor dem delegierten
+      // `close-modal` der Seite. Ein Formular ohne Abbrechen behaelt "Zurueck".
+      state.formCancel = state.formFooter?.querySelector('[data-action="close-modal"]') ?? null;
+      state.formCancel?.addEventListener('click', (event) => {
+        if (state.mode !== 'form') return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        switchToDetail(panel, opts, state);
+      }, { capture: true });
     } else {
       // Zweiter Besuch: das Formular steht noch, samt allem, was der Nutzer
       // hineingeschrieben hat. Ein Neuaufbau würde diese Eingaben verwerfen.
@@ -601,8 +658,11 @@ async function switchToForm(panel, opts, state) {
     // „übernehmen" - und weil die Leseansicht danach wieder den gespeicherten
     // Stand zeigt, läse sich das Versprechen wie ein Datenverlust. Gespeichert
     // wird ausschließlich über „Speichern" in der Formular-Fußzeile.
+    // Traegt der Fuss ein Abbrechen, ist DAS der Rueckweg (R19) - der Kopf
+    // zeigt dann nur das x.
     label: t('common.back'),
     onClick: () => switchToDetail(panel, opts, state),
+    hidden: Boolean(state.formCancel),
   });
   state.mode = 'form';
 }
@@ -650,7 +710,8 @@ function openAsSheet(opts, token) {
     mode: 'detail',
     detailPane: null, formPane: null,
     detailFooter: null, formFooter: null,
-    primaryEdit: Boolean(opts.edit?.primary),
+    // Immer, sobald es ein Bearbeiten gibt (R19, withPrimaryEdit).
+    primaryEdit: Boolean(opts.edit),
   };
   let panelRef = null;
   // BEARBEITEN ALS HAUPTAKTION UNTEN (Critique 2026-09-24, Persona Casey).
@@ -659,8 +720,9 @@ function openAsSheet(opts, token) {
   // erreichbarste. Mit `edit.primary` wandert Bearbeiten als Primaerknopf an
   // das Ende der Fusszeile (Daumenzone), Löschen bleibt zurueckgenommen am
   // Anfang, und der Kopfknopf erscheint erst im Formular - als „Zurück".
-  // Opt-in, weil nicht jedes Blatt Bearbeiten als Hauptabsicht hat: in der
-  // Aufgabe ist es das Erledigen.
+  // Seit R19 fuer JEDES Blatt mit Bearbeiten (withPrimaryEdit): vorher
+  // Opt-in, und die Aufgabe trug Erledigen als Primaerknopf und Bearbeiten
+  // umrandet im Kopf.
   const { primaryEdit } = state;
 
   openModal({
@@ -692,15 +754,11 @@ function openAsSheet(opts, token) {
       body.replaceChildren(pane);
       state.detailPane = pane;
 
-      const footer = detailFooterEl(primaryEdit
-        ? [...(opts.actions ?? []), {
-          id: 'detail-view-edit',
-          label: opts.edit.label ?? t('common.edit'),
-          variant: 'primary',
-          icon: 'pencil',
-          onClick: () => switchToForm(panel, opts, state),
-        }]
-        : opts.actions);
+      const footer = detailFooterEl(withPrimaryEdit(opts.actions, primaryEdit ? {
+        id: 'detail-view-edit',
+        label: opts.edit.label ?? t('common.edit'),
+        onClick: () => switchToForm(panel, opts, state),
+      } : null, { keepPrimary: opts.keepPrimary }));
       if (footer) {
         body.appendChild(footer);
         // Die Fußzeile entstand erst jetzt, nach dem Umzug in openModal - also
@@ -807,18 +865,14 @@ function openAsPopover(opts) {
   // allein in eine zweite Zeile. Jetzt folgt es derselben Reihenfolge - in
   // 286px Innenbreite teilen sich Löschen und Maps die erste Zeile, Bearbeiten
   // steht als Hauptaktion unten am Ende, so weit von Löschen weg wie im Sheet.
-  // Ohne `edit.primary` bleibt Bearbeiten der Sekundaerknopf vorne.
+  // Seit R19 immer so (withPrimaryEdit), nicht mehr nur mit `edit.primary`.
   const edit = opts.edit?.standalone ? {
     label: opts.edit.label ?? t('common.edit'),
     id: 'detail-popover-edit',
     onClick: () => { closeDetailView(); opts.edit.standalone(); },
-    ...(opts.edit.primary ? { variant: 'primary', icon: 'pencil' } : { variant: 'secondary' }),
   } : null;
-  const actions = opts.edit?.primary
-    ? [...(opts.actions ?? []), edit]
-    : [edit, ...(opts.actions ?? [])];
 
-  const footer = detailFooterEl(actions);
+  const footer = detailFooterEl(withPrimaryEdit(opts.actions, edit, { keepPrimary: opts.keepPrimary }));
   if (footer) {
     footer.classList.add('detail-popover__footer');
     popover.appendChild(footer);
@@ -928,9 +982,10 @@ function openAsPopover(opts) {
  * fremdes, gerade offenes Modal.
  *
  * Kopf wie in Mail: Titel links, „Bearbeiten" rechts. „Bearbeiten" fuehrt ins
- * regulaere Formular-Modal (`edit.standalone`), wie aus dem Popover - eine
- * Spalte neben der Liste ist ein Leseort, und das Formular hat im Modal seine
- * Fusszeile, seinen Dirty-Check und seine Fokusfuehrung.
+ * regulaere Formular-Modal (`edit.standalone`) - seit R19 legt es sich dabei
+ * deckungsgleich in diese Spalte (`dock`, components/modal.js dockNextModal):
+ * man bearbeitet, wo man liest, und das Formular behaelt seine Fusszeile,
+ * seinen Dirty-Check, seine Fokusfuehrung und den einen History-Marker.
  */
 function openInPane(opts, token) {
   const pane = opts.pane;
@@ -942,16 +997,18 @@ function openInPane(opts, token) {
   const edit = opts.edit?.standalone ? {
     label: opts.edit.label ?? t('common.edit'),
     id: 'detail-pane-edit',
-    icon: 'pencil',
+    // Das Formular legt sich in diese Spalte (R19), statt als Fenster darueber.
+    dock: true,
     onClick: () => opts.edit.standalone(),
   } : null;
 
   const view = document.createElement('div');
   view.className = 'detail-view__pane detail-view--in-pane';
-  view.appendChild(detailPaneHeaderEl({ title: opts.title ?? '', actions: edit ? [edit] : [] }));
+  view.appendChild(detailPaneHeaderEl({ title: opts.title ?? '' }));
   let bodyEl = detailBodyEl(opts);
   view.appendChild(bodyEl);
-  const footer = detailFooterEl(opts.actions, close);
+  // Bearbeiten als Primaerknopf am Ende des (klebenden) Fusses - wie im Blatt.
+  const footer = detailFooterEl(withPrimaryEdit(opts.actions, edit, { keepPrimary: opts.keepPrimary }), close);
   if (footer) {
     // In der Spalte ist die Fusszeile Teil des Inhalts, kein Modal-Fuss: die
     // Klassen des Modal-Fusses holte sonst dessen Umzug- und Sticky-Logik an.
@@ -986,7 +1043,9 @@ function openInPane(opts, token) {
  * @param {HTMLElement} [opts.pane]      - Koerper der Detailspalte (Liste + Detail); hat Vorrang
  * @param {Array}  [opts.sections]       - Metazeilen, siehe detailRowEl
  * @param {Array}  [opts.actions]        - Objektaktionen in der Fußzeile
- * @param {Object} [opts.edit]           - { label?, title?, ready?, primary?, mount(panel, pane), standalone() }
+ * @param {Object} [opts.edit]           - { label?, title?, ready?, mount(panel, pane), standalone() }
+ * @param {boolean} [opts.keepPrimary]  - der eigene Primaerknopf der Aktionen bleibt, Bearbeiten
+ *                                         tritt sekundaer davor (nur Aufgaben, withPrimaryEdit)
  *                                         `primary`: im Sheet als Primaerknopf am Ende der Fusszeile statt im Kopf,
  *                                         im Popover ebenso am Ende statt als Sekundaerknopf vorne
  *                                         `ready` ist ein Promise, auf das der

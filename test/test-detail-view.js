@@ -18,6 +18,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -202,8 +203,9 @@ test('im Sheet steht Bearbeiten als Hauptaktion unten, Löschen zurückgenommen 
   const sheet = src.slice(src.indexOf('function openAsSheet'), src.indexOf('// Präsentation: Popover'));
   // Der Knopf entsteht in der FUSSZEILE, als Primaerknopf, NACH den Aktionen
   // des Aufrufers - also am Ende, in der Daumenzone.
-  assert.match(sheet, /\[\.\.\.\(opts\.actions \?\? \[\]\), \{\s*id: 'detail-view-edit',[\s\S]{0,120}variant: 'primary'/,
-    'mit edit.primary gehört Bearbeiten als Primärknopf ans Ende der Fußzeile');
+  assert.match(sheet, /detailFooterEl\(withPrimaryEdit\(opts\.actions, primaryEdit \? \{\s*id: 'detail-view-edit',/,
+    'Bearbeiten gehört als Primärknopf ans Ende der Fußzeile');
+  assert.match(sheet, /primaryEdit: Boolean\(opts\.edit\)/, 'R19: in jedem Blatt mit Bearbeiten, nicht mehr als Option');
   // Oben bleibt kein zweites Bearbeiten stehen; der Kopfknopf erscheint erst im
   // Formular, als „Zurück".
   assert.match(sheet, /hidden: primaryEdit/, 'der Kopfknopf muss in der Leseansicht verborgen sein');
@@ -212,28 +214,21 @@ test('im Sheet steht Bearbeiten als Hauptaktion unten, Löschen zurückgenommen 
   // Löschen steht am ANFANG - logisch, damit RTL es nicht an das Ende schiebt.
   const css = await detailCss();
   assert.match(css, /\.detail-view__action--start \{\s*margin-inline-end: auto;/, 'Löschen muss am Anfang stehen, auch in RTL');
-  // Der Kalender nimmt die Option; sein Löschen bleibt zurückgenommen.
+  // Der Kalender: sein Löschen bleibt zurückgenommen.
   const cal = await calendarJs();
   const detail = cal.slice(cal.indexOf('async function openEventDetail('), cal.indexOf('async function loadReminderForEvent('));
-  assert.match(detail, /primary: true,/, 'der Termin-Sheet setzt Bearbeiten nicht als Hauptaktion');
   assert.match(detail, /id: 'detail-delete',[\s\S]{0,80}variant: 'danger-ghost',[\s\S]{0,40}align: 'start'/,
     'Löschen bleibt destruktiv gestylt und am Anfang, nicht an der Primärposition');
 });
 
 test('im Popover gilt dieselbe Ordnung wie im Sheet: Löschen am Anfang, Bearbeiten primär am Ende (Re-Kritik 2026-09-25)', async () => {
   const src = await detailJs();
-  const popover = src.slice(src.indexOf('function openAsPopover'), src.indexOf('const footer = detailFooterEl(actions)'));
-  // Mit edit.primary kommt Bearbeiten NACH den Aktionen des Aufrufers - sonst
-  // steht Löschen direkt daneben und sein `--start` wirkt nicht, weil es nicht
-  // mehr das erste Element ist.
-  assert.match(popover, /opts\.edit\?\.primary\s*\?\s*\[\.\.\.\(opts\.actions \?\? \[\]\), edit\]/,
-    'mit edit.primary gehört Bearbeiten ans Ende der Popover-Fußzeile');
-  assert.match(popover, /opts\.edit\.primary \? \{ variant: 'primary'/,
-    'mit edit.primary ist Bearbeiten auch im Popover der Primärknopf');
-  // Ohne die Option bleibt alles wie bisher (Kontakte, Inventar, Budget ...).
-  assert.match(popover, /:\s*\[edit, \.\.\.\(opts\.actions \?\? \[\]\)\]/,
-    'ohne edit.primary steht Bearbeiten weiter vorne');
-  assert.match(popover, /: \{ variant: 'secondary' \}/, 'ohne edit.primary bleibt Bearbeiten sekundär');
+  const popover = src.slice(src.indexOf('function openAsPopover'), src.indexOf("footer.classList.add('detail-popover__footer')"));
+  // Bearbeiten kommt NACH den Aktionen des Aufrufers - sonst steht Löschen
+  // direkt daneben und sein `--start` wirkt nicht. Seit R19 immer, nicht mehr
+  // nur mit `edit.primary`.
+  assert.match(popover, /detailFooterEl\(withPrimaryEdit\(opts\.actions, edit, \{ keepPrimary: opts\.keepPrimary \}\)\)/,
+    'Bearbeiten gehört als Primärknopf ans Ende der Popover-Fußzeile');
 });
 
 test('beide Fußzeilen werden aufbewahrt statt verworfen', async () => {
@@ -674,10 +669,12 @@ test('die Aufgaben-Detailansicht führt die Leseinformationen der Karte', async 
   assert.match(head, /subtitleLabel: t\('tasks\.dueDateLabel'\)/);
   assert.match(head, /people: task\.assigned_users \?\? \[\]/, 'Zugewiesene als Avatare im Kopf');
   assert.match(src, /head: taskDetailHead\(task\),/);
-  // Erledigen ist die Hauptaktion: der EINE Primaerknopf im Fuss.
+  // Erledigen ist die Hauptaktion: der EINE Primaerknopf im Fuss - fuer eine
+  // erledigte Aufgabe seit R19 (Ulas 2026-10-16) entsprechend Wieder oeffnen.
   const steps = src.slice(src.indexOf('const STATUS_ACTIONS = {'), src.indexOf('/** Prioritätsbadge'));
   assert.equal(steps.match(/id: 'task-detail-finish'[^}]*variant: 'primary'/g)?.length, 2, 'offen und in Arbeit');
-  assert.equal(steps.match(/variant: 'primary'/g)?.length, 2, 'nur Erledigen ist primaer');
+  assert.equal(steps.match(/id: 'task-detail-reopen'[^}]*variant: 'primary'/g)?.length, 1, 'erledigt: Wieder oeffnen');
+  assert.equal(steps.match(/variant: 'primary'/g)?.length, 3, 'sonst ist nichts primaer');
 });
 
 /* DETAILANSICHTEN MIT KOPF (Critique R18, 2026-10-07). Termin, Aufgabe und
@@ -1195,4 +1192,142 @@ test('Klick neben das Popover schliesst es und loest darunter nichts aus', async
       if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k];
     }
   }
+});
+
+// R19 (Critique 2026-10-16): Inventar-Detail mobil - Label ueber dem Wert,
+// 45px je Feld (565px fuer zwoelf Zeilen). Die Info-Listen-Form stellt Label
+// und Wert einer Textzeile schmal in EINE Zeile (371px); opt-in je Leseansicht.
+test('R19: schmal stehen Label und Wert einer Textzeile in einer Zeile, wo die Ansicht es waehlt', async () => {
+  const dv = await read('public/components/detail-view.js');
+  const css = await read('public/styles/detail-view.css');
+  const inv = await read('public/pages/inventory.js');
+  assert.match(dv, /function detailBodyEl\(\{ accentColor, head, sections = \[\], rowLayout = 'stacked' \}\)/);
+  assert.match(dv, /rowLayout === 'inline' \? 'detail-view detail-view--inline-rows' : 'detail-view'/);
+  assert.match(dv, /!\(node instanceof HTMLElement\) && 'detail-row--text'/, 'nur reine Textwerte - Chips, Listen und Bild bleiben untereinander');
+  assert.match(inv, /rowLayout: 'inline',/, 'das Inventar waehlt die Form');
+  const { eachRule } = await import('./css-rules.js');
+  const inline = [...eachRule(css)].filter((r) => r.at.some((a) => /max-width:\s*767px/.test(a))
+    && r.selector.includes('.detail-view--inline-rows .detail-row--text:not(.detail-row--multiline)'));
+  const text = inline.find((r) => r.selector.trim().endsWith('> .detail-row__text'));
+  assert.match(text?.body ?? '', /flex-flow:\s*row wrap/, 'eine Zeile, ein langer Wert bricht unter das Label');
+  assert.ok(inline.some((r) => r.selector.trim().endsWith('.detail-row__value') && /text-align:\s*end/.test(r.body)), 'der Wert am Ende');
+});
+
+// R19 (Critique 2026-10-16, Heuristik 3): "Aufgabe bearbeiten" hatte mobil vier
+// Auswege - Zurueck, x, Abbrechen, Papierkorb. Im Formular einer Leseansicht
+// ist Abbrechen jetzt der eine Rueckweg in die Leseansicht, der Kopfknopf
+// "Zurueck" faellt dann weg; und der Countdown liegt ausgeschaltet hinter
+// "Weitere Einstellungen" wie Wiederholung und Erinnerung.
+test('R19: im Formular einer Leseansicht fuehrt Abbrechen zurueck, der Kopf traegt kein zweites Zurueck', async () => {
+  const dv = await read('public/components/detail-view.js');
+  const form = dv.slice(dv.indexOf('async function switchToForm('), dv.indexOf('function switchToDetail('));
+  assert.match(form, /state\.formCancel = state\.formFooter\?\.querySelector\('\[data-action="close-modal"\]'\) \?\? null;/);
+  assert.match(form, /state\.formCancel\?\.addEventListener\('click', \(event\) => \{[\s\S]*?event\.stopImmediatePropagation\(\);\s*switchToDetail\(panel, opts, state\);[\s\S]*?\}, \{ capture: true \}\);/,
+    'vor dem delegierten close-modal der Seite, und nur im Formular');
+  assert.match(form, /label: t\('common\.back'\),\s*onClick: \(\) => switchToDetail\(panel, opts, state\),\s*hidden: Boolean\(state\.formCancel\),/,
+    'mit Abbrechen im Fuss kein Kopf-Zurueck');
+  const tasks = await read('public/pages/tasks.js');
+  assert.match(tasks, /const countdownTucked = !task\?\.countdown;/);
+  assert.match(tasks, /\$\{countdownTucked \? '' : countdownHtml\}/, 'ein gesetzter Countdown bleibt im Hauptteil');
+  assert.match(tasks, /\$\{countdownTucked \? `<div class="task-form__tucked">\$\{countdownHtml\}<\/div>` : ''\}/, 'ausgeschaltet hinter dem Aufklapper');
+  assert.match(tasks, /countdown \? t\('dashboard\.countdownTitle'\) : null,/, 'und die Zeile des Aufklappers nennt ihn');
+});
+
+// R19 (Critique 2026-10-16, "Bearbeiten: mal gefuellt primaer, mal umrandet
+// sekundaer"): Bearbeiten ist in Blatt, Popover und Detailspalte EIN
+// gefuellter Knopf am Ende des Fusses; ein anderer Primaerknopf (Aufgabe:
+// Erledigen) tritt dort zurueck.
+test('R19: Bearbeiten ist ueberall der eine Primaerknopf am Ende des Fusses', async () => {
+  const src = await detailJs();
+  // withPrimaryEdit als Programm: die Funktion ist rein und haengt an keinem
+  // Import, also laeuft ihr Quelltext hier fuer sich.
+  const fnSrc = src.slice(src.indexOf('export function withPrimaryEdit('), src.indexOf('export function detailFooterEl('));
+  const withPrimaryEdit = new Function(`${fnSrc.replace('export function', 'function')}; return withPrimaryEdit;`)();
+  const out = withPrimaryEdit([
+    { id: 'finish', variant: 'primary' }, { id: 'archive', variant: 'ghost' }, null,
+  ], { id: 'edit', label: 'Bearbeiten', onClick() {} });
+  assert.deepEqual(out.map((a) => [a.id, a.variant]), [['finish', 'secondary'], ['archive', 'ghost'], ['edit', 'primary']]);
+  assert.equal(out.at(-1).icon, 'pencil');
+  assert.deepEqual(withPrimaryEdit([{ id: 'finish', variant: 'primary' }], null).map((a) => a.variant), ['primary'],
+    'ohne Bearbeiten bleibt der Primaerknopf des Aufrufers');
+  // DIE AUSNAHME DER AUFGABE (Ulas 2026-10-16): `keepPrimary` laesst den
+  // eigenen Primaerknopf stehen, Bearbeiten tritt sekundaer DAVOR - und auch
+  // dann gibt es genau einen gefuellten Knopf.
+  const kept = withPrimaryEdit([
+    { id: 'archive', variant: 'ghost' }, { id: 'finish', variant: 'primary' }, { id: 'other', variant: 'primary' },
+  ], { id: 'edit', onClick() {} }, { keepPrimary: true });
+  assert.deepEqual(kept.map((a) => [a.id, a.variant]),
+    [['archive', 'ghost'], ['edit', 'secondary'], ['finish', 'primary'], ['other', 'secondary']]);
+  assert.deepEqual(withPrimaryEdit([{ id: 'archive', variant: 'ghost' }], { id: 'edit' }, { keepPrimary: true }).map((a) => [a.id, a.variant]),
+    [['archive', 'ghost'], ['edit', 'primary']], 'ohne eigenen Primaerknopf wird Bearbeiten primaer');
+  const pane = src.slice(src.indexOf('function openInPane('), src.indexOf('// Öffentliche API'));
+  assert.match(pane, /detailPaneHeaderEl\(\{ title: opts\.title \?\? '' \}\)/, 'die Detailspalte traegt Bearbeiten nicht mehr im Kopf');
+  assert.match(pane, /detailFooterEl\(withPrimaryEdit\(opts\.actions, edit, \{ keepPrimary: opts\.keepPrimary \}\), close\)/, 'sondern am Ende ihres Fusses');
+  assert.match(src, /if \(action\.dock\) dockNextModal\(btn\.closest\('\.split-view__detail'\)\)/, 'das Formular legt sich weiter in die Spalte');
+  assert.doesNotMatch(src, /opts\.edit\??\.primary/, 'keine Option mehr, die Bearbeiten zuruecknimmt');
+  for (const page of ['inventory', 'contacts', 'calendar']) {
+    const js = readFileSync(new URL(`../public/pages/${page}.js`, import.meta.url), 'utf8');
+    assert.doesNotMatch(js, /^\s*primary: true,$/m, `${page}: tote Option edit.primary`);
+  }
+  // Die Aufgabe auf dem Telefon: mit Bearbeiten am Ende bleibt der Fuss EINE
+  // Reihe - Loeschen tritt zu Starten und Archivieren ins Mehr-Menue (dort
+  // weiter destruktiv gefaerbt), Bearbeiten steht als Stift vor dem vollen
+  // Erledigen (Ulas 2026-10-16).
+  const task = readFileSync(new URL('../public/components/task-detail.js', import.meta.url), 'utf8');
+  assert.match(task, /const overflowIds = \['task-detail-start', 'task-detail-archive', 'task-detail-delete'\];/);
+  const more = task.slice(task.indexOf('function wireDetailMoreMenu('), task.indexOf('const DOER_BUTTON_ID'));
+  assert.match(more, /popover-menu__item--danger/, 'Loeschen bleibt im Menue destruktiv');
+  const css = await detailCss();
+  assert.doesNotMatch(css, /#task-detail-finish > \.btn__label/, 'Erledigen mobil wieder als voller Knopf');
+  assert.match(css, /\.detail-view__footer:has\(> \.task-detail__more\) > #detail-view-edit > \.btn__label \{/, 'Bearbeiten mobil als Stift ohne Wort');
+  assert.match(task, /keepPrimary: true,/, 'die Aufgabe behaelt ihren Primaerknopf');
+  const recipes = readFileSync(new URL('../public/pages/recipes.js', import.meta.url), 'utf8');
+  const recipePane = recipes.slice(recipes.indexOf('function renderRecipePane('), recipes.indexOf('function openRecipeNarrow('));
+  assert.match(recipePane, /withPrimaryEdit\(/, 'die Rezeptspalte folgt derselben Regel');
+});
+
+// Re-Critique 2026-10-17 (A4 P3): im Inventar stand der 2px-Streifen im
+// Modulton 16px unter der Haarlinie der Kopfzeile - eine Doppellinie, die
+// nichts sagte (das Modul nennt der Kopf der Seite). Ein Streifen traegt eine
+// Aussage (Marken-, Kalenderfarbe), nie nur den Modulton - wie seit R18 bei
+// Geburtstagen und Terminen.
+test('R20: keine Leseansicht zieht einen Farbstreifen im blossen Modulton', async () => {
+  const { readdirSync } = await import('node:fs');
+  const dir = new URL('../public/pages/', import.meta.url);
+  const hits = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+    const src = readFileSync(new URL(file, dir), 'utf8');
+    for (const m of src.matchAll(/accentColor:\s*'var\(--module-[a-z-]+\)'/g)) hits.push(`${file}: ${m[0]}`);
+  }
+  assert.deepEqual(hits, []);
+});
+
+/* Fremde Adressen als Link: nur http(s) wird zum href. Die Website eines
+ * Kontakts kommt ungeprueft aus dem vCard-Feld URL (CardDAV), die Rezept-URL
+ * aus Formular, API und Rezept-Anbietern. Stand dort `javascript:...`, wurde es
+ * ein klickbarer Link - heute bremst das nur die CSP (script-src ohne
+ * unsafe-inline), eine zweite Schicht gab es nicht.
+ */
+test('externalHref laesst nur http(s) als Linkziel durch', async () => {
+  const { externalHref } = await import('../public/utils/html.js');
+  assert.equal(typeof externalHref, 'function', 'utils/html.js exportiert externalHref');
+  assert.equal(externalHref('https://example.org/a?b=1'), 'https://example.org/a?b=1');
+  assert.equal(externalHref('  HTTP://example.org  '), 'HTTP://example.org');
+  assert.equal(externalHref('javascript:alert(1)'), '');
+  assert.equal(externalHref(' JavaScript:alert(1)'), '');
+  assert.equal(externalHref('data:text/html,<b>x</b>'), '');
+  assert.equal(externalHref('www.example.org'), '', 'ohne Schema kein relativer Link in die App');
+  assert.equal(externalHref(null), '');
+});
+
+test('Kontakt-Website und Rezept-URL laufen durch externalHref', async () => {
+  const contacts = await read('public/pages/contacts.js');
+  assert.match(contacts, /externalHref\(contact\.website\)/, 'contacts.js: Website');
+  assert.doesNotMatch(contacts, /href: contact\.website\b/, 'contacts.js: roher Wert als href');
+  const recipes = await read('public/pages/recipes.js');
+  assert.match(recipes, /externalHref\(recipe\.recipe_url\)/, 'recipes.js: Rezept-Link');
+  assert.doesNotMatch(recipes, /link\.href = recipe\.recipe_url/, 'recipes.js: roher Wert als href');
+  const meals = await read('public/pages/meals.js');
+  assert.match(meals, /externalHref\(meal\.recipe_url\)/, 'meals.js: Rezept-Knopf der Mahlzeitkarte');
+  assert.doesNotMatch(meals, /href="\$\{esc\(meal\.recipe_url\)\}"/, 'meals.js: roher Wert als href');
 });

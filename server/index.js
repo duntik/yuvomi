@@ -73,6 +73,8 @@ import screensaverRouter from './routes/screensaver.js';
 import remindersRouter from './routes/reminders.js';
 import searchRouter from './routes/search.js';
 import familyRouter from './routes/family.js';
+import personAvatarsRouter from './routes/people.js';
+import { isPersonAvatarRead, inlineAvatarUrls } from './services/person-avatar.js';
 // ZWEI IMPORTZEILEN FUER EINE DATEI, ABSICHTLICH. `test:openapi-coverage`
 // findet die Routen eines Routers, indem es hier Namen auf Dateien abbildet -
 // und seine Muster kennen den reinen Default-Import und den reinen
@@ -640,6 +642,16 @@ app.use('/api/v1', (req, res, next) => {
 // `authScopes === null` und steigen in derselben Zeile aus wie vorher.
 app.use('/api/v1', (req, res, next) => {
   if (req.authScopes == null) return next();
+  // DAS PROFILBILD EINER PERSON IST KEIN MODUL (routes/people.js). Ein Display
+  // bekommt seine Adresse in den Zeilen, die es lesen darf (Aufgaben, Termine,
+  // Uebersicht); haengte das Bild an einem Modul, stuende an der Wand neben
+  // jedem Termin ein kaputtes Bild. NUR FUER DAS DISPLAY: ein Token bekommt die
+  // Bilder als Data-URL in den Zeilen selbst (`inlineAvatarUrls` unten) und
+  // braucht die Route nicht - fuer jedes Token offen, holte eines mit
+  // `weather:read` per Durchzaehlen der ids jedes Profilbild (Codex-Review zu
+  // #2056). Nur GET, nur dieser Pfad. Ein Ausgaben-Gast ist am Gate davor
+  // schon abgewiesen.
+  if (req.authMethod === 'display' && isPersonAvatarRead(req.method, req.path)) return next();
   // Ein gekoppeltes Display darf zusaetzlich zu seinen Modulen eine Handvoll
   // Geruestpfade LESEN (display-scopes.js, `DISPLAY_READ_PATHS`): die eigene
   // Zeile, die Darstellungseinstellungen, die Modulliste, die Personen fuer
@@ -727,6 +739,19 @@ app.use('/api/v1', csrfMiddleware);
 // `Idempotency-Key` mitkommt, und liegt hinter Auth, Scopes und CSRF - ein
 // abgewiesener Aufruf darf keinen Schlüssel verbrauchen.
 app.use('/api/v1', idempotencyMiddleware);
+// Ein API-Token bekommt Profilbilder weiter als Data-URL statt als Adresse
+// (services/person-avatar.js, `inlineAvatarUrls`): sein Client schickt beim
+// Bildabruf kein Bearer-Token mit. Nur die App selbst bekommt die Adresse.
+// HINTER der Idempotenz: so speichert sie die Antwort, die das Token bekam,
+// und eine Wiederholung gibt genau diese zurueck - davor setzte sie beim
+// Wiederholen das Bild von jetzt ein (Codex-Review zu #2056).
+app.use('/api/v1', (req, res, next) => {
+  if (req.authMethod !== 'api_token') return next();
+  const json = res.json.bind(res);
+  const lookup = (id) => db.get().prepare('SELECT avatar_data FROM users WHERE id = ?').get(id)?.avatar_data ?? null;
+  res.json = (body) => json(inlineAvatarUrls(body, lookup));
+  return next();
+});
 app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/tasks', tasksRouter);
 app.use('/api/v1/shopping', shoppingRouter);
@@ -755,6 +780,7 @@ app.use('/api/v1/screensaver', screensaverRouter);
 app.use('/api/v1/reminders', remindersRouter);
 app.use('/api/v1/search', searchRouter);
 app.use('/api/v1/family', familyRouter);
+app.use('/api/v1/people', personAvatarsRouter);
 // Die Personenliste fuer den Picker eines Tabletts (#1209) haengt VOR dem
 // Administrator-Router: der traegt `requireAdmin` auf dem ganzen Router, und ein
 // Display ist ein Mitglied ohne Adminrecht. Express nimmt den ersten Router, der

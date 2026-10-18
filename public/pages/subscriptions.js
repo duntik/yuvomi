@@ -4,7 +4,7 @@
  */
 
 import { api } from '/api.js';
-import { closeModal, confirmModal, confirmOverModal, openModal, advancedSection, reportFieldError, refocusAfterRender, captureModalContext, isModalContextCurrent, isOwnModalOpen } from '/components/modal.js';
+import { closeModal, confirmModal, confirmOverModal, openModal, advancedSection, reportFieldError, reportFieldErrors, refocusAfterRender, captureModalContext, isModalContextCurrent, isOwnModalOpen } from '/components/modal.js';
 import {
   formatDate,
   getLocale,
@@ -14,6 +14,7 @@ import {
   t,
 } from '/i18n.js';
 import { esc, REQUIRED_MARK } from '/utils/html.js';
+import { isImeComposing } from '/utils/ux.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { emptyStateHTML, mountLoadError } from '/utils/empty-state.js';
 import { todayKey } from '/utils/date.js';
@@ -22,6 +23,7 @@ import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
 import { redrawList, collapseRow } from '/utils/list-motion.js';
 import { formatMoney, amountPlaceholder, amountStep, applyAmountFormat, amountIsSavable, smallestUnitLabel } from '/utils/money.js';
 import { attachOverlay } from '/utils/overlay-history.js';
+import { inertOutside } from '/utils/background-inert.js';
 import { isNavModuleReadOnly } from '/permissions.js';
 import { openDetailView } from '/components/detail-view.js';
 import { rowActionHtml } from '/utils/row-action.js';
@@ -811,7 +813,7 @@ function renderSummary() {
   // dann „0,00 €" mit leerem Balken, direkt neben „Kein Budgetlimit -
   // Unbegrenzt". Wo kein Budget gesetzt ist, gibt es keine Zahl dafuer; den
   // Zustand nennt die Karte daneben. Drei Karten sind die Grundform der Reihe
-  // (panel.css), `--quad` traegt die Reihe nur mit vier.
+  // (panel.css) - seit R19 auch MIT Budget: es steht in der Kostenkarte.
   const budgetFlow = hasBudget
     ? { label: t(isOverBudget ? 'subscriptions.overBudget' : 'subscriptions.remainingBudget'),
       amount: money(Math.abs(summary.remaining_budget)), tone: isOverBudget ? 'negative' : '' }
@@ -826,21 +828,22 @@ function renderSummary() {
     lead: true,
     flows: [{ label: t('subscriptions.activeCount', { count: summary.active_count }) }, budgetFlow],
   })}
-    <section class="metric-grid metric-grid--led${hasBudget ? ' metric-grid--quad' : ''} budget-glance-details${state.summaryExpanded ? ' is-expanded' : ''}" id="subscriptions-summary-details">
+    <section class="metric-grid metric-grid--led budget-glance-details${state.summaryExpanded ? ' is-expanded' : ''}" id="subscriptions-summary-details">
+      ${/* KOSTEN UND BUDGET IN EINER KARTE (R19, Critique 2026-10-16). Zwei
+         Karten sagten "113,60 €" und "90,00 €" nebeneinander, den Vergleich
+         musste man selbst ziehen. Jetzt "113,60 € von 90,00 €" mit dem Balken
+         darunter - dieselbe Form wie das Ziel im Plan (budget.planTargetOf);
+         die Reihe hat damit immer drei Karten. */ ''}
       <article class="metric-card ${leadCardClass(money(used))}">
         <div class="metric-card__label">${t('subscriptions.monthlyCost')}</div>
-        <div class="metric-card__value">${money(used)}</div>
-        <div class="metric-card__note">${t('subscriptions.activeCount', { count: summary.active_count })}</div>
-      </article>
-      ${hasBudget ? `<article class="metric-card">
-        <div class="metric-card__label">${t('subscriptions.monthlyBudget')}</div>
-        <div class="metric-card__value">${money(budget)}</div>
-        <div class="metric-card__progress${isOverBudget ? ' metric-card__progress--over' : isNearBudget ? ' metric-card__progress--near' : ''}"
+        <div class="metric-card__value">${money(used)}${hasBudget ? ` <span class="metric-card__of">${esc(t('budget.planTargetOf', { amount: money(budget) }))}</span>` : ''}</div>
+        ${hasBudget ? `<div class="metric-card__progress${isOverBudget ? ' metric-card__progress--over' : isNearBudget ? ' metric-card__progress--near' : ''}"
              role="progressbar" aria-label="${esc(t('subscriptions.monthlyBudget'))}"
              aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}" aria-valuetext="${realPercentage}%">
           <span style="--fill:${percentage / 100}"></span>
-        </div>
-      </article>` : ''}
+        </div>` : ''}
+        <div class="metric-card__note">${t('subscriptions.activeCount', { count: summary.active_count })}</div>
+      </article>
       <article class="metric-card${isOverBudget ? ' metric-card--over' : ''}">
         <div class="metric-card__label">${isOverBudget ? '<i data-lucide="triangle-alert" class="icon-sm" aria-hidden="true"></i>' : ''}${hasBudget ? (isOverBudget ? t('subscriptions.overBudget') : t('subscriptions.remainingBudget')) : t('subscriptions.noBudgetLimit')}</div>
         <div class="metric-card__value">${hasBudget ? money(Math.abs(summary.remaining_budget)) : t('subscriptions.unlimited')}</div>
@@ -1106,6 +1109,12 @@ function renderCard(subscription) {
             ${status.badgeClass === 'subscription-status--active' ? '' : `<span class="subscription-status ${status.badgeClass}">${status.label}</span>`}
           </span>
           <span class="subscription-card__meta">
+            ${/* SCHMAL STEHT DIE BESCHREIBUNG IN DER META-ZEILE (R19, Critique
+                 2026-10-16): hinter dem Namen blieben ihr bei 390px 40-60px
+                 ("Lind...", "Bis zu 6 Ko..."), der Name selbst kuerzte mit
+                 ("Microsoft 365 Fa..."). Immer genau eine der beiden Fassungen
+                 (subscriptions.css), wie beim Turnus. */ ''}
+            <span class="subscription-card__meta-desc">${esc(subscription.description || rowCategoryLabel(subscription))}</span>
             ${completed ? '' : `<span class="subscription-card__due${overdue ? ' subscription-card__due--overdue' : ''}"><i data-lucide="${overdue ? 'triangle-alert' : 'calendar-clock'}" aria-hidden="true"></i><span>${formatDate(subscription.next_payment_date)} ·</span> <span>${dueLabel(subscription)}</span></span>`}
             <span class="subscription-card__meta-cycle">${cycleLabel(subscription)}</span>
             <span class="subscription-card__meta-extra">${esc(rowPaymentMethodLabel(subscription))}</span>
@@ -1327,12 +1336,17 @@ function wireCombobox(panel, id) {
       open();
       (visible[Math.min(active + 1, visible.length - 1)] || visible[0])?.focus();
     }
-    if (event.key === 'Enter' && visible.length) {
+    if (event.key === 'Enter' && visible.length && !isImeComposing(event)) {
       event.preventDefault();
       event.stopPropagation();
       selectFromKeyboard(visible[0]);
     }
-    if (event.key === 'Escape') close();
+    if (event.key === 'Escape' && !root.querySelector('.subscriptions-combobox__options').hidden) {
+      // Offene Liste: Esc schliesst nur sie. preventDefault sagt dem Modal
+      // (onEscape), dass das Esc verbraucht ist - sonst ginge das Formular mit.
+      event.preventDefault();
+      close();
+    }
   });
   options.forEach((option) => {
     option.addEventListener('pointerdown', (event) => {
@@ -1350,6 +1364,7 @@ function wireCombobox(panel, id) {
         visible[Math.max(0, Math.min(visible.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
       }
       if (event.key === 'Escape') {
+        event.preventDefault();
         close();
         search.focus();
       }
@@ -1739,16 +1754,18 @@ async function saveSubscription(panel, existing, searchedLogoData = null) {
   if (readOnly()) return;
   const dateInput = panel.querySelector('#subscription-next-date');
   const currencyInput = panel.querySelector('#subscription-currency');
-  if (!isDateInputValid(dateInput.value)) {
+  // Alle Feldfehler auf einmal, Fokus aufs erste im Bild (Critique R19): bis
+  // hierher brach die Pruefung beim ersten ab, ein Fehler je Klick.
+  const fieldErrors = [];
+  const nextDateValid = isDateInputValid(dateInput.value);
+  if (!nextDateValid) {
     // Fehler am Feld statt als ortloser Toast (geteiltes Muster, Critique P1).
-    reportFieldError(dateInput, t('subscriptions.invalidDate'));
-    return;
+    fieldErrors.push([dateInput, t('subscriptions.invalidDate')]);
   }
   if (!currencyInput.value) {
     // Die Meldung klebt am sichtbaren Suchfeld der Combobox, nicht am
     // versteckten Wert-Input.
-    reportFieldError(panel.querySelector('#subscription-currency-search'), t('subscriptions.currencyRequired'));
-    return;
+    fieldErrors.push([panel.querySelector('#subscription-currency-search'), t('subscriptions.currencyRequired')]);
   }
   // Ende-Bedingung (#594): nur das aktive Zusatzfeld liefert einen Wert.
   const endType = panel.querySelector('#subscription-end-type').value;
@@ -1758,28 +1775,24 @@ async function saveSubscription(panel, existing, searchedLogoData = null) {
   if (endType === 'on_date') {
     const endDateInput = panel.querySelector('#subscription-end-date');
     if (!isDateInputValid(endDateInput.value)) {
-      reportFieldError(endDateInput, t('subscriptions.invalidDate'));
-      return;
-    }
-    endDate = parseDateInput(endDateInput.value);
-    // Dieselbe Regel wie der Server (endConfigErrors), vor dem Absenden und am
-    // Feld statt als Toast (Review-Runde 1 zu #2010). Ein abgeschlossenes Abo
-    // mit Enddatum steht immer nach seinem Ende: wer es wieder aufnimmt,
-    // braucht ein spaeteres. Bleibt es abgeschlossen, gilt der Vergleich nicht.
-    if (!staysCompleted && endDate < parseDateInput(dateInput.value)) {
-      reportFieldError(endDateInput, t('subscriptions.errorEndBeforeNextPayment'));
-      return;
+      fieldErrors.push([endDateInput, t('subscriptions.invalidDate')]);
+    } else {
+      endDate = parseDateInput(endDateInput.value);
+      // Dieselbe Regel wie der Server (endConfigErrors), vor dem Absenden und am
+      // Feld statt als Toast (Review-Runde 1 zu #2010). Ein abgeschlossenes Abo
+      // mit Enddatum steht immer nach seinem Ende: wer es wieder aufnimmt,
+      // braucht ein spaeteres. Bleibt es abgeschlossen, gilt der Vergleich nicht.
+      if (nextDateValid && !staysCompleted && endDate < parseDateInput(dateInput.value)) {
+        fieldErrors.push([endDateInput, t('subscriptions.errorEndBeforeNextPayment')]);
+      }
     }
   } else if (endType === 'after_count') {
     const countInput = panel.querySelector('#subscription-end-count');
     const count = Number(countInput.value);
     if (!Number.isInteger(count) || count < 1) {
-      reportFieldError(countInput, t('subscriptions.endCountInvalid'));
-      return;
-    }
-    if (!staysCompleted && count <= Number(existing?.occurrences_done || 0)) {
-      reportFieldError(countInput, t('subscriptions.errorOccurrenceCountTooLow'));
-      return;
+      fieldErrors.push([countInput, t('subscriptions.endCountInvalid')]);
+    } else if (!staysCompleted && count <= Number(existing?.occurrences_done || 0)) {
+      fieldErrors.push([countInput, t('subscriptions.errorOccurrenceCountTooLow')]);
     }
     occurrenceCount = count;
   }
@@ -1787,19 +1800,20 @@ async function saveSubscription(panel, existing, searchedLogoData = null) {
   // sich das vorhandene Abo überhaupt noch speichern lässt. Das gilt aber fürs
   // ganze Feld: ohne diese Prüfung wäre aus 12,5 JPY anschliessend auch
   // 12,555 JPY speicherbar, also mehr Bruch als die feste Schrittweite zuliess.
+  // Ohne Waehrung gibt es kein Raster - dann meldet nur das Waehrungsfeld.
   const amountInput = panel.querySelector('#subscription-amount');
   const amountValue = Number(amountInput.value);
   const targetCurrency = currencyInput.value.trim().toUpperCase();
-  if (!amountIsSavable(amountValue, targetCurrency, {
+  if (targetCurrency && !amountIsSavable(amountValue, targetCurrency, {
     original: existing?.amount ?? null,
     originalCurrency: existing?.currency ?? null,
   })) {
-    reportFieldError(amountInput, t('common.amountPrecisionRequired', {
+    fieldErrors.push([amountInput, t('common.amountPrecisionRequired', {
       currency: targetCurrency,
       step: smallestUnitLabel(targetCurrency),
-    }));
-    return;
+    })]);
   }
+  if (reportFieldErrors(fieldErrors)) return;
 
   const submit = panel.querySelector('[type="submit"]');
   submit.disabled = true;
@@ -1863,7 +1877,11 @@ function logoOptionsMarkup(options) {
 }
 
 function openLogoPickerModal(panel, initialQuery, onSelect) {
-  panel.querySelector('.subscriptions-logo-picker-modal')?.remove();
+  // Der Knopf "Logo suchen", der den Picker oeffnet - dorthin geht der Fokus zurueck.
+  const opener = document.activeElement;
+  const stale = panel.querySelector('.subscriptions-logo-picker-modal');
+  stale?._releaseBackground?.();
+  stale?.remove();
   panel.insertAdjacentHTML('beforeend', `
     <div class="subscriptions-logo-picker-modal" role="dialog" aria-modal="true" aria-labelledby="subscription-logo-picker-title">
       <div class="subscriptions-logo-picker-panel">
@@ -1890,10 +1908,22 @@ function openLogoPickerModal(panel, initialQuery, onSelect) {
     </div>
   `);
   const overlay = panel.querySelector('.subscriptions-logo-picker-modal');
+  // Das Abo-Formular darunter ist gesperrt, solange der Picker offen ist
+  // (utils/background-inert.js); freigegeben VOR der Fokus-Rueckgabe.
+  overlay._releaseBackground = inertOutside(overlay);
   const results = overlay.querySelector('#subscription-logo-results');
   const input = overlay.querySelector('#subscription-logo-search-input');
   let options = [];
-  const close = () => overlay.remove();
+  const close = () => {
+    // Mit dem Picker ginge das fokussierte Suchfeld weg, und der Fokus fiele auf
+    // body - aus der Fokusfalle des Abo-Formulars heraus (Codex-Review zu #2055).
+    const hadFocus = overlay.contains(document.activeElement);
+    overlay._releaseBackground();
+    overlay.remove();
+    if (!hadFocus) return;
+    const target = opener?.isConnected ? opener : panel.querySelector('#subscription-find-logo');
+    target?.focus();
+  };
   // Der Picker liegt ueber dem Abo-Formular; die Zurueck-Geste meint ihn (#871).
   attachOverlay(overlay, close);
   const search = async () => {
@@ -1926,7 +1956,12 @@ function openLogoPickerModal(panel, initialQuery, onSelect) {
     close();
   });
   overlay.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') close();
+    if (event.key === 'Escape') {
+      // Esc meint den Picker, nicht das Abo-Formular darunter (onEscape in
+      // modal.js wertet preventDefault als "schon erledigt").
+      event.preventDefault();
+      close();
+    }
   });
   overlay.querySelector('#subscription-logo-picker-close').addEventListener('click', close);
   overlay.querySelector('#subscription-logo-search-form').addEventListener('submit', async (event) => {
@@ -2239,6 +2274,7 @@ function openMetadataModal() {
       // im Panel zu klicken bzw. das ganze Modal via Escape zu schließen.
       panel.querySelectorAll('.subscriptions-metadata-row__edit input').forEach((input) => {
         input.addEventListener('keydown', (event) => {
+          if (isImeComposing(event)) return;
           if (event.key !== 'Enter' && event.key !== 'Escape') return;
           event.preventDefault();
           event.stopPropagation();

@@ -22,12 +22,15 @@ import { redrawList, collapseRow } from '/utils/list-motion.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
 import { amountPlaceholder, amountStep, amountIsSavable, smallestUnitLabel } from '/utils/money.js';
 import { maxUploadBytes, maxUploadMb } from '/utils/upload-limit.js';
-import { isNavModuleReadOnly } from '/permissions.js';
+import { holdDocumentAttachStyle } from '/components/document-attach.js';
+import { isNavModuleReadOnly, canSeeHousekeepingAmounts } from '/permissions.js';
 import { pathAccess, mayWritePath } from '/utils/module-access.js';
 import { todayKey } from '/utils/date.js';
 import { displayTimeZone, zonedDateKey } from '/utils/timezone.js';
 import { USER_COLOR_DEFAULT } from '/utils/color.js';
 import { renderPageColumns } from '/utils/page-layout.js';
+import { rowMenuHtml } from '/utils/row-action.js';
+import { installPopoverMenus } from '/utils/popover-menu.js';
 
 
 
@@ -163,7 +166,6 @@ function mayManageWorkers() {
 const READ_SAFE_CONTROLS = [
   '.housekeeping-tab',
   '[data-open-visit]',
-  '[data-visit-report]',
   '[data-open-worker]',
   '.housekeeping-staff-row__select',
   '#housekeeping-report-prev',
@@ -197,8 +199,40 @@ function readOnlyLatch(event) {
   event.stopPropagation();
 }
 
+/**
+ * Sieht dieser Nutzer Loehne, Zahlungen und Betraege (R20)? Ohne das Recht
+ * schickt der Server die Felder als `null` (server/routes/housekeeping.js,
+ * `housekeeping_view_amounts`). Die Seite fragt BEIDES: das Recht aus
+ * /auth/me und die Antwort selbst - eine `null` darf nie als „0,00 €" stehen.
+ */
+function amountsHidden(value) {
+  return !canSeeHousekeepingAmounts() || value === null;
+}
+
+/** Von-bis eines Besuchs - die Auskunft, die ohne Betraege bleibt. */
+function visitTimeText(visit) {
+  if (!visit?.check_in) return '';
+  const from = formatTime(visit.check_in);
+  return visit.check_out && visit.check_out !== visit.check_in ? `${from}-${formatTime(visit.check_out)}` : from;
+}
+
 function money(value) {
   return getNumberFormat({ style: 'currency', currency: state.currency }).format(Number(value || 0));
+}
+
+/**
+ * Der Betrag ueber einer Diagrammsaeule: ganze Betraege ohne Nachkommastellen
+ * (R20, Re-Critique 2026-10-17 a5 P2-5). "380,00 €" lief bei 390px in seiner
+ * Spalte ueber die Kante; "380 €" traegt dieselbe Auskunft. Krumme Betraege
+ * behalten ihre Stellen - gerundet wuerde aus 57,50 € eine Zahl, die nie
+ * gezahlt wurde.
+ */
+function chartMoney(value) {
+  const amount = Number(value || 0);
+  const whole = Number.isInteger(amount);
+  return getNumberFormat({
+    style: 'currency', currency: state.currency, ...(whole ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : {}),
+  }).format(amount);
 }
 
 function urgencyLabel(status) {
@@ -314,13 +348,15 @@ async function loadData() {
   state.currency = prefs.data?.currency ?? 'EUR';
 }
 
-function renderTabButton(tab, icon, label) {
+// TEXT-REITER OHNE ICON (D3, Critique 2026-10-16): vier Bereiche sind Text-
+// Reiter wie ueberall; mit Zeichen davor lief "Haushaltshilfen" bei 390px
+// aus der Leiste.
+function renderTabButton(tab, label) {
   const on = state.tab === tab;
   return `
     <button class="housekeeping-tab sub-tab${on ? ' sub-tab--active' : ''}" type="button" role="tab"
             data-tab-id="${esc(tab)}" aria-controls="housekeeping-content"
             aria-selected="${on ? 'true' : 'false'}"${on ? ' aria-current="page"' : ''} tabindex="${on ? '0' : '-1'}">
-      <i class="sub-tab__icon" data-lucide="${esc(icon)}" aria-hidden="true"></i>
       <span class="sub-tab__label">${esc(label)}</span>
     </button>
   `;
@@ -355,6 +391,12 @@ function updateHousekeepingFab() {
       onClick: () => openStaffModal(null, content()),
     });
   } else {
+    // BEWUSST OHNE FAB auf „Uebersicht" und „Berichte" (Critique 2026-10-16,
+    // D5 geprueft): dort gibt es nichts anzulegen. Ein Besuch entsteht nur
+    // ueber Ein- und Auschecken - ein Zustandswechsel an der Karte der
+    // Haushaltshilfe, kein Anlegen -, und die Berichte lesen. Ein FAB, der dort
+    // „Aufgabe" anlegte, waere ein Weg in einen anderen Reiter; einer, der
+    // eincheckte, ein zweiter Weg neben dem Knopf an der Karte.
     setPageFabAction(fab, { hidden: true, dockLabel: fab.dataset?.dockLabel || t('newLabel.tasks') });
   }
 }
@@ -392,14 +434,16 @@ function renderShell(container) {
   // Liste auf dem Lesemass, daneben Kennzahlen bzw. das Protokoll.
   container.insertAdjacentHTML('beforeend', `
     <section class="housekeeping-page app-page app-page--dashboard app-page--columns" data-composition="dashboard" aria-labelledby="housekeeping-title">
-      <header class="page-toolbar page-toolbar--narrow housekeeping-toolbar">
+      <header class="page-toolbar page-toolbar--narrow page-toolbar--tabs-title housekeeping-toolbar">
         <h1 class="page-toolbar__title" id="housekeeping-title">${esc(t('housekeeping.title'))}</h1>
         <div class="page-toolbar__actions"></div>
         <nav class="housekeeping-tabs page-toolbar__bar" role="tablist" aria-label="${esc(t('housekeeping.bottomNav'))}">
-          ${renderTabButton('dashboard', 'layout-dashboard', t('housekeeping.dashboard'))}
-          ${renderTabButton('tasks', 'list-checks', t('housekeeping.tasks'))}
-          ${renderTabButton('reports', 'file-text', t('housekeeping.reports'))}
-          ${renderTabButton('staff', 'users-round', t('housekeeping.staffTitle'))}
+          ${/* R20: die Reiter heissen nach ihrem Inhalt, nicht wie die Kapsel-
+                Tabs "Uebersicht" und "Aufgaben" darunter (Re-Critique a5). */ ''}
+          ${renderTabButton('dashboard', t('housekeeping.tabVisits'))}
+          ${renderTabButton('tasks', t('housekeeping.tabChores'))}
+          ${renderTabButton('reports', t('housekeeping.reports'))}
+          ${renderTabButton('staff', t('housekeeping.staffTitle'))}
         </nav>
       </header>
       <div class="housekeeping-period" id="housekeeping-period" hidden></div>
@@ -556,7 +600,7 @@ function renderWorkerSummary() {
       </div>
       <div class="housekeeping-worker-strip__identity">
         <strong>${esc(worker.display_name)}</strong>
-        <span>${esc(session ? `${t('housekeeping.visitRecordedAt')} ${formatTime(session.check_in)}` : (worker.rate_type === 'hourly' ? `${money(worker.hourly_rate)}/${t('housekeeping.rateHourly')}` : `${money(worker.daily_rate)} · ${scheduleLabel(worker.payment_schedule)}`))}</span>
+        <span>${esc(session ? `${t('housekeeping.visitRecordedAt')} ${formatTime(session.check_in)}` : amountsHidden(worker.daily_rate) ? t('housekeeping.notHereToday') : (worker.rate_type === 'hourly' ? `${money(worker.hourly_rate)}/${t('housekeeping.rateHourly')}` : `${money(worker.daily_rate)} · ${scheduleLabel(worker.payment_schedule)}`))}</span>
       </div>
       ${readOnly() ? presenceSignHtml(checkedIn) : `
       <button class="btn ${checkedIn ? 'btn--secondary' : 'btn--primary'} housekeeping-check-small" type="button"
@@ -611,17 +655,30 @@ function renderDashboard(content) {
     // Balken skalierte deshalb nicht mit seiner Karte. Der Wert ist DATEN
     // (0..1), die Geometrie gehoert dem Stylesheet; dieselbe Bauart wie
     // `--span-from/--span-to` am Wetterbalken und `--bar-scale` im Budget.
-    // Der Mindestanteil haelt einen Monat ohne Zahlung sichtbar.
-    const scale = Math.max(0.06, row.total / maxPayment);
+    // Der Mindestanteil haelt einen kleinen Betrag sichtbar. Ein Monat OHNE
+    // Zahlung bleibt leer (R19): seit der Server alle sechs Monate liefert,
+    // stuende sonst ueber jeder Null ein Stummel, als waere etwas gezahlt.
+    const scale = row.total > 0 ? Math.max(0.06, row.total / maxPayment) : 0;
+    // BEZAHLT UNTEN, OFFEN DARUEBER (R20, Re-Critique 2026-10-17 a5 P2-5).
+    // Die Saeule ist die Summe der Besuche eines Monats; ihr bezahlter Teil
+    // steht voll, der offene als Tint derselben Serie - die Legende darunter
+    // nennt beide, und "Offene Zahlungen" im Abschnittskopf findet sich in
+    // der Saeule wieder. Vorher war die Saeule eine Kapsel in einer vollen
+    // Bahn (las sich als Fortschritt), und ueber jedem leeren Monat stand
+    // "0,00 €". Ein Monat ohne Besuch traegt jetzt nur die Grundlinie.
+    const paidShare = row.total > 0 ? Math.max(0, Math.min(1, (row.total - (row.pending || 0)) / row.total)) : 0;
+    const name = row.total > 0
+      ? `${formatMonthLabel(row.month)}: ${money(row.total)}${row.pending > 0 ? ` (${t('housekeeping.paymentPending')} ${money(row.pending)})` : ''}`
+      : `${formatMonthLabel(row.month)}: ${money(0)}`;
     // Wert sichtbar am Balken statt nur im Hover-title: das Chart trug sonst
     // keine ablesbare Achse oder Zahl (Audit A2-23).
     return `
-      <div class="housekeeping-chart__bar-wrap">
-        <span class="housekeeping-chart__value">${esc(money(row.total))}</span>
-        <div class="housekeeping-chart__track" title="${esc(formatMonthLabel(row.month))} ${esc(money(row.total))}">
-          <div class="housekeeping-chart__bar" style="--bar-scale:${scale.toFixed(4)}"></div>
+      <div class="housekeeping-chart__bar-wrap" role="listitem" aria-label="${esc(name)}">
+        <span class="housekeeping-chart__value" aria-hidden="true">${row.total > 0 ? esc(chartMoney(row.total)) : ''}</span>
+        <div class="housekeeping-chart__track" title="${esc(name)}" aria-hidden="true">
+          ${row.total > 0 ? `<div class="housekeeping-chart__bar" style="--bar-scale:${scale.toFixed(4)};--paid-share:${(paidShare * 100).toFixed(1)}%"></div>` : ''}
         </div>
-        <span>${esc(formatMonthLabel(row.month, { month: 'short' }))}</span>
+        <span aria-hidden="true">${esc(formatMonthLabel(row.month, { month: 'short' }))}</span>
       </div>
     `;
   }).join('');
@@ -629,7 +686,6 @@ function renderDashboard(content) {
   const recentVisits = (state.recentVisits || []).slice(0, 5);
   const recentRows = recentVisits.map((visit) => visitRowHtml(visit, {
     dateText: formatDate(visit.check_in),
-    actionsHtml: `${visitEditActionHtml(visit, formatDate(visit.check_in))}`,
     className: 'housekeeping-staff-log-row',
   })).join('');
 
@@ -683,7 +739,7 @@ function renderDashboard(content) {
          "Ueberschrift ueber Inhalt"): der Titel stand IN der Karte, als
          einziges Modul neben dem Budget. Der Abschnitt (.housekeeping-section)
          traegt keine Flaeche, die Karte darunter nur noch den Inhalt. -->
-    <div class="housekeeping-dashboard-columns">
+    <div class="housekeeping-dashboard-columns${amountsHidden(data.monthly_payments) ? ' housekeeping-dashboard-columns--single' : ''}">
     <section class="housekeeping-section">
       <div class="housekeeping-section-heading">
         <h2 class="u-section-title">${esc(t('housekeeping.recentVisits'))}</h2>
@@ -694,17 +750,21 @@ function renderDashboard(content) {
       </div>
       </div>
     </section>
-    <section class="housekeeping-section">
+    ${amountsHidden(data.monthly_payments) ? '' : `<section class="housekeeping-section">
       <div class="housekeeping-section-heading">
         <h2 class="u-section-title">${esc(t('housekeeping.payments'))}</h2>
         <span>${esc(t('housekeeping.pendingPayments'))}: ${esc(money(data.pending_payments || 0))}</span>
       </div>
       <div class="housekeeping-card">
-      <div class="housekeeping-chart" aria-label="${esc(t('housekeeping.monthlyPayments'))}">
+      <div class="housekeeping-chart"${bars ? ' role="list"' : ''} aria-label="${esc(t('housekeeping.monthlyPayments'))}">
         ${bars || `<p class="housekeeping-muted">${esc(t('housekeeping.noPaymentData'))}</p>`}
       </div>
+      ${bars ? `<ul class="housekeeping-chart__legend" aria-hidden="true">
+        <li><span class="housekeeping-chart__swatch"></span>${esc(t('housekeeping.paymentPaid'))}</li>
+        <li><span class="housekeeping-chart__swatch housekeeping-chart__swatch--pending"></span>${esc(t('housekeeping.paymentPending'))}</li>
+      </ul>` : ''}
       </div>
-    </section>
+    </section>`}
     </div>
   `);
   if (window.lucide) window.lucide.createIcons({ el: content });
@@ -715,19 +775,11 @@ function renderDashboard(content) {
     content.querySelectorAll('[data-worker-check]').forEach((btn) => {
       btn.addEventListener('click', () => toggleSession(document.querySelector('.page-transition') || document.body, btn.dataset.workerCheck));
     });
-    content.querySelectorAll('[data-edit-visit]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const visit = (state.recentVisits || []).find((v) => String(v.id) === btn.dataset.editVisit);
-        if (visit) openVisitEditModal(visit, content, { onDone: renderDashboard });
-      });
-    });
   }
-  content.querySelectorAll('[data-open-visit]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const visit = (state.recentVisits || []).find((v) => String(v.id) === btn.dataset.openVisit);
-      if (visit) openVisitReportModal(visit, null, { onRefresh: () => { if (content.isConnected) renderDashboard(content); } });
-    });
-  });
+  wireVisitRows(content, state.recentVisits || [], async () => {
+    await loadData();
+    if (content.isConnected) renderDashboard(content);
+  }, { onEdit: (visit) => openVisitEditModal(visit, content, { onDone: renderDashboard }) });
 }
 
 /**
@@ -1005,7 +1057,9 @@ function taskSummaryHtml() {
   const pending = data.pending_tasks ?? 0;
   const finished = data.finished_tasks_this_month ?? 0;
   return `
-    <section class="metric-grid budget-glance-details housekeeping-task-summary" aria-label="${esc(t('housekeeping.tasks'))}">
+    ${/* EINE GRUPPE, KEINE ZWEITE REGION „Aufgaben" (R20, axe landmark-unique):
+         die Liste daneben ist schon die Region dieses Namens. */ ''}
+    <div class="metric-grid budget-glance-details housekeeping-task-summary" role="group" aria-label="${esc(t('housekeeping.tasks'))}">
       <article class="metric-card${pending > 0 ? '' : ' metric-card--empty'}">
         <div class="metric-card__label">${esc(t('housekeeping.pendingChores'))}</div>
         <div class="metric-card__value">${esc(pending)}</div>
@@ -1014,7 +1068,7 @@ function taskSummaryHtml() {
         <div class="metric-card__label">${esc(t('housekeeping.finishedChores'))}</div>
         <div class="metric-card__value">${esc(finished)}</div>
       </article>
-    </section>`;
+    </div>`;
 }
 
 function drawTasks(content) {
@@ -1230,68 +1284,113 @@ async function unpayVisit(visit, onUnpaid) {
   }
 }
 
-/* Bearbeiten und Loeschen bietet eine Besuchszeile nur an, wenn der Server es
- * fuer genau diesen Besuch zugesteht (`can_edit`, `can_delete`, #1135). Vorher
- * standen beide Knoepfe an jeder Zeile, und ein Mitglied lernte erst beim
- * Speichern, dass ein bezahlter Besuch abgerechnet ist. Die Admin-Regel wird
- * hier nicht nachgebaut. Wo Bearbeiten fehlt, fuehrt der Knopf zum Bericht:
- * lesen darf jede Person, die die Zeile sieht.
- *
- * `readOnly()` steht ZUSAETZLICH da (#1265 P6). Der Server rechnet das
- * Modulrecht schon in die Felder ein, aber die Felder sind so alt wie die
- * letzte Antwort, und ein Rechtewechsel kommt ohne Neuladen an. */
 /**
- * DIE EINE BESUCHSZEILE (Re-Critique 2026-09-27, A3 P2-4 / R10 L10).
+ * DIE EINE BESUCHSZEILE (Re-Critique 2026-09-27, A3 P2-4 / R10 L10; R18/D6
+ * seit 2026-10-16).
  *
  * Derselbe Besuch stand in zwei Grammatiken: in der Uebersicht mit dem Datum
- * als Titel, in den Berichten mit Avatar und Namen als Titel - zehnmal „Maria
- * Silva" untereinander, das Datum klein im Meta. Ein Besuch ist ein Ereignis
- * an einem Tag; das Datum fuehrt, die Person steht im Meta (entfaellt, wo die
- * Liste schon einer Person gehoert: Personal-Protokoll). Uebersicht, Berichte
- * und Protokoll bauen die Zeile hier; nur die Aktionen und die Datumsform
- * (ohne Jahr, wo der Monat im Kopf steht) geben die Aufrufer.
+ * als Titel, in den Berichten mit Avatar und Namen als Titel. Ein Besuch ist
+ * ein Ereignis an einem Tag; das Datum fuehrt, die Person steht im Meta
+ * (entfaellt, wo die Liste schon einer Person gehoert: Personal-Protokoll).
+ *
+ * SEIT D6 AUCH DIESELBEN AKTIONEN. Bis hierher trug die Uebersicht einen Stift
+ * (der den Koerper doppelte, der selbst nichts tat), die Berichte Geldschein +
+ * Bericht, das Protokoll Geldschein + Stift + Papierkorb - drei Zeilen fuer
+ * einen Besuch. Jetzt: der KOERPER oeffnet den Einsatzbericht (die
+ * Leseansicht, die jede Person sehen darf und in deren Fuss Bezahlen steht),
+ * und EIN Mehr-Knopf traegt Bearbeiten, Bezahlen und Loeschen - jeweils nur,
+ * wenn der Server es fuer diesen Besuch zugesteht (`can_edit`, `can_mark_paid`,
+ * `can_delete`, #1135). Warum etwas fehlt, steht in der Metazeile.
+ *
+ * `readOnly()` steht ZUSAETZLICH da (#1265 P6): die Felder sind so alt wie
+ * die letzte Antwort, ein Rechtewechsel kommt ohne Neuladen an.
  *
  * @param {object} visit
- * @param {{ dateText: string, actionsHtml?: string, showWorker?: boolean,
+ * @param {{ dateText: string, visitDate?: string, showWorker?: boolean,
  *           paymentText?: string, className?: string }} opts
  */
-function visitRowHtml(visit, { dateText, actionsHtml = '', showWorker = true, paymentText, className = '' } = {}) {
+function visitRowHtml(visit, { dateText, visitDate = dateText, showWorker = true, paymentText, className = '' } = {}) {
+  // Ohne Betragsrecht (R20) nennt die Zeile die Zeit statt Betrag und Zahlstatus.
+  const hidden = amountsHidden(visit.total_amount);
   const meta = [
     showWorker ? (visit.worker_name || t('housekeeping.unnamedWorker')) : null,
-    money(visit.total_amount),
-    paymentText ?? visitPaymentMeta(visit),
+    hidden ? visitTimeText(visit) : money(visit.total_amount),
+    hidden ? null : (paymentText ?? visitPaymentMeta(visit)),
   ].filter(Boolean).join(' · ');
   return `
     <article class="list-row housekeeping-visit-row${className ? ` ${className}` : ''}">
-      <div class="list-row__main">
-        <div class="list-row__name">${esc(dateText)}</div>
-        <div class="list-row__meta">${esc(meta)}</div>
-      </div>
-      <div class="list-row__actions">
-        ${actionsHtml}
-      </div>
+      <button type="button" class="list-row__main list-row__main--interactive" data-open-visit="${esc(visit.id)}">
+        <span class="list-row__name">${esc(dateText)}</span>
+        <span class="list-row__meta">${esc(meta)}</span>
+      </button>
+      ${visitMenuHtml(visit, visitDate)}
     </article>`;
 }
 
-function visitEditActionHtml(visit, visitDate) {
-  if (visit.can_edit && !readOnly()) {
-    return `<button class="row-action" type="button" data-edit-visit="${esc(visit.id)}"
-                aria-label="${esc(t('housekeeping.editVisit'))}: ${esc(visitDate)}">
-          <i data-lucide="edit-2" class="icon-md" aria-hidden="true"></i>
-        </button>`;
-  }
-  return `<button class="row-action" type="button" data-open-visit="${esc(visit.id)}"
-                aria-label="${esc(t('housekeeping.openVisitReport'))}: ${esc(visitDate)}">
-          <i data-lucide="file-text" class="icon-md" aria-hidden="true"></i>
-        </button>`;
+/** Der Mehr-Knopf einer Besuchszeile - leer, wo der Server nichts zugesteht. */
+function visitMenuHtml(visit, visitDate) {
+  if (readOnly()) return '';
+  const id = esc(visit.id);
+  return rowMenuHtml({
+    id: `housekeeping-visit-menu-${id}`,
+    label: t('common.moreActionsNamed', { name: visitDate }),
+    items: [
+      visit.can_edit
+        ? { action: 'edit-visit', icon: 'pencil', label: t('common.edit'), attrs: { 'data-edit-visit': visit.id } }
+        : null,
+      !visit.paid_at && visit.can_mark_paid
+        ? { action: 'pay-visit', icon: 'banknote', label: t('housekeeping.markPaid'), attrs: { 'data-pay-visit': visit.id } }
+        : null,
+      visit.can_delete
+        ? { action: 'delete-visit', icon: 'trash-2', label: t('common.delete'), danger: true, attrs: { 'data-delete-visit': visit.id } }
+        : null,
+    ],
+  });
 }
 
-function visitDeleteActionHtml(visit, visitDate) {
-  if (!visit.can_delete || readOnly()) return '';
-  return `<button class="row-action row-action--danger" type="button" data-delete-visit="${esc(visit.id)}"
-                aria-label="${esc(t('housekeeping.deleteVisit'))}: ${esc(visitDate)}">
-          <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>
-        </button>`;
+/**
+ * Verdrahtet die Besuchszeilen einer Liste - in allen drei Reitern derselbe
+ * Satz Wege. `refresh` laedt nach und zeichnet den Reiter neu.
+ */
+function wireVisitRows(content, visits, refresh, { onEdit } = {}) {
+  installPopoverMenus(content);
+  const find = (id) => visits.find((item) => String(item.id) === String(id));
+  content.querySelectorAll('[data-open-visit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const visit = find(btn.dataset.openVisit);
+      if (visit) openVisitReportModal(visit, null, { onRefresh: () => { if (content.isConnected) return refresh(); } });
+    });
+  });
+  // Alles darunter schreibt; bei `read` haengt es gar nicht erst.
+  if (readOnly()) return;
+  content.querySelectorAll('[data-edit-visit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const visit = find(btn.dataset.editVisit);
+      if (visit) (onEdit ? onEdit(visit) : openVisitEditModal(visit, content));
+    });
+  });
+  content.querySelectorAll('[data-pay-visit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const visit = find(btn.dataset.payVisit);
+      if (visit) payVisit(visit, refresh);
+    });
+  });
+  content.querySelectorAll('[data-delete-visit]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const visit = find(btn.dataset.deleteVisit);
+      if (!visit) return;
+      if (!await confirmModal(t('housekeeping.deleteVisitConfirm'),
+        { danger: true, confirmLabel: t('common.delete'), detail: t('housekeeping.deleteVisitConfirmDetail') })) return;
+      try {
+        await api.delete(`/housekeeping/visits/${visit.id}`);
+        window.yuvomi?.showToast(t('housekeeping.visitDeletedToast'), 'success');
+        await refresh();
+        refocusAfterRender();
+      } catch (err) {
+        window.yuvomi?.showToast(err.message, 'danger');
+      }
+    });
+  });
 }
 
 /* Warum die Knoepfe fehlen, steht in der Metazeile, wo der Zahlstatus die
@@ -1531,39 +1630,45 @@ function renderReports(content) {
     // `aria-label` der Aktionen behaelt das volle Datum.
     return visitRowHtml(visit, {
       dateText: formatDayMonth(visit.check_in),
+      visitDate,
       paymentText: paid ? t('housekeeping.paymentPaid') : t('housekeeping.paymentPending'),
       className: 'list-row--tight housekeeping-report-item housekeeping-report-item--visit',
-      actionsHtml: `${!visit.can_mark_paid || readOnly() ? '' : `
-        <button class="row-action" type="button" data-pay-report="${visit.id}"
-                aria-label="${esc(t('housekeeping.markPaid'))}: ${esc(visitDate)}">
-          <i data-lucide="banknote" class="icon-md" aria-hidden="true"></i>
-        </button>`}
-        <button class="row-action" type="button" data-visit-report="${visit.id}"
-                aria-label="${esc(t('housekeeping.openVisitReport'))}: ${esc(visitDate)}">
-          <i data-lucide="file-text" class="icon-md" aria-hidden="true"></i>
-        </button>`,
     });
   }).join('');
 
+  // MOBIL DIE KURZZEILE WIE IN DER UEBERSICHT (Critique 2026-10-16): die drei
+  // Kacheln standen unter 640px als 2+1-Raster - die dritte allein in ihrer
+  // Reihe. Die Zeile nennt alle drei, ein Aufklapper haette nichts mehr zu
+  // zeigen; ab 640px stehen die Karten (`budget-glance-details`) in der Spalte.
   // Kennzahlen | Besuche: mobil stehen die Kennzahlen ueber der Liste (DOM-
   // Reihenfolge), ab der Split-Schwelle ruecken sie als Zusammenfassung in die
   // Seitenspalte neben die Liste (`railFirst`).
+  // Ohne Betragsrecht (R20) bleibt nur die Zahl der Besuche.
+  const noAmounts = amountsHidden(state.visitReport?.totals ?? null);
   content.insertAdjacentHTML('beforeend', renderPageColumns({
     railFirst: true,
     rail: `
-    <section class="metric-grid" aria-label="${esc(t('housekeeping.visitReports'))}">
+    ${metricGlanceHtml({
+    label: t('housekeeping.reportVisitsCount'),
+    value: String(visits.length),
+    flows: noAmounts ? [] : [
+      { label: t('housekeeping.pendingPayments'), amount: money(totals.pending || 0) },
+      { label: t('housekeeping.paymentPaid'), amount: money(totals.paid || 0) },
+    ],
+  })}
+    <section class="metric-grid budget-glance-details" aria-label="${esc(t('housekeeping.visitReports'))}">
       <article class="metric-card">
         <div class="metric-card__label">${esc(t('housekeeping.reportVisitsCount'))}</div>
         <div class="metric-card__value">${esc(visits.length)}</div>
       </article>
-      <article class="metric-card">
+      ${noAmounts ? '' : `<article class="metric-card">
         <div class="metric-card__label">${esc(t('housekeeping.pendingPayments'))}</div>
         <div class="metric-card__value">${esc(money(totals.pending || 0))}</div>
       </article>
       <article class="metric-card">
         <div class="metric-card__label">${esc(t('housekeeping.paymentPaid'))}</div>
         <div class="metric-card__value">${esc(money(totals.paid || 0))}</div>
-      </article>
+      </article>`}
     </section>`,
     main: `
     <section class="housekeeping-reports${rows ? ' row-carrier' : ''}" aria-label="${esc(t('housekeeping.recentReports'))}">
@@ -1575,27 +1680,12 @@ function renderReports(content) {
   if (window.lucide) window.lucide.createIcons({ el: content });
   syncReportPeriod(content);
 
-  content.querySelectorAll('[data-visit-report]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const visit = visits.find((item) => String(item.id) === btn.dataset.visitReport);
-      if (visit) openVisitReportModal(visit, content);
-    });
-  });
-
-  // Bezahlen direkt an der Ausstehend-Zeile (Audit R2, A2-14): derselbe Flow
-  // wie im Personal-Einsatzlog, hier gegen die Berichtsliste. Bei `read`
-  // haengt er nicht - Monatswahl und Bericht lesen nur.
-  if (readOnly()) return;
-  content.querySelectorAll('[data-pay-report]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const visit = visits.find((item) => String(item.id) === btn.dataset.payReport);
-      if (!visit) return;
-      payVisit(visit, async () => {
-        await loadData();
-        renderReports(content);
-      });
-    });
-  });
+  // Dieselben Wege wie in Uebersicht und Protokoll (wireVisitRows); bei
+  // `read` haengen nur Monatswahl und Bericht.
+  wireVisitRows(content, visits, async () => {
+    await loadData();
+    if (content.isConnected) renderReports(content);
+  }, { onEdit: (visit) => openVisitEditModal(visit, content, { onDone: renderReports }) });
 }
 
 /* DER EINSATZBERICHT IST DIE LESEANSICHT EINES BESUCHS (#1265 P6). Bei
@@ -1606,6 +1696,12 @@ function renderReports(content) {
  * Dialog ihm gibt: nach Stunden die Minuten und der daraus berechnete Betrag,
  * sonst der Tagessatz. */
 function visitWorkDetailsHtml(visit) {
+  if (amountsHidden(visit.daily_rate)) {
+    return visit.rate_type === 'hourly' && visit.minutes_worked != null
+      ? `
+          <div><dt>${esc(t('housekeeping.minutesWorked'))}</dt><dd>${esc(visit.minutes_worked)}</dd></div>`
+      : '';
+  }
   if (visit.rate_type === 'hourly') {
     return `
           <div><dt>${esc(t('housekeeping.minutesWorked'))}</dt><dd>${esc(visit.minutes_worked ?? 0)}</dd></div>
@@ -1674,15 +1770,16 @@ function openVisitReportModal(visit, content = null, { onRefresh = null } = {}) 
           </div>
           <div>
             <strong>${esc(visit.worker_name || t('housekeeping.unnamedWorker'))}</strong>
-            <span>${esc(scheduleLabel(visit.payment_schedule))}</span>
+            ${amountsHidden(visit.total_amount) ? '' : `<span>${esc(scheduleLabel(visit.payment_schedule))}</span>`}
           </div>
         </div>
         <dl class="housekeeping-report-details">
-          <div><dt>${esc(t('housekeeping.lastVisit'))}</dt><dd>${esc(formatDate(visit.check_in))} · ${esc(formatTime(visit.check_in))}</dd></div>
+          <div><dt>${esc(t('housekeeping.lastVisit'))}</dt><dd>${esc(formatDate(visit.check_in))} · ${esc(amountsHidden(visit.total_amount) ? visitTimeText(visit) : formatTime(visit.check_in))}</dd></div>
           ${visitWorkDetailsHtml(visit)}
+          ${amountsHidden(visit.total_amount) ? '' : `
           <div><dt>${esc(t('housekeeping.extras'))}</dt><dd>${esc(money(visit.extras))}</dd></div>
           <div><dt>${esc(t('housekeeping.totalPayment'))}</dt><dd>${esc(money(visit.total_amount))}</dd></div>
-          <div><dt>${esc(t('housekeeping.paymentStatus'))}</dt><dd>${esc(paid ? t('housekeeping.paymentPaid') : t('housekeeping.paymentPending'))}</dd></div>
+          <div><dt>${esc(t('housekeeping.paymentStatus'))}</dt><dd>${esc(paid ? t('housekeeping.paymentPaid') : t('housekeeping.paymentPending'))}</dd></div>`}
           ${visit.payment_task_id ? `<div><dt>${esc(t('housekeeping.paymentTask'))}</dt><dd>#${esc(visit.payment_task_id)}</dd></div>` : ''}
           ${visit.calendar_event_id ? `<div><dt>${esc(t('housekeeping.calendarEvent'))}</dt><dd>#${esc(visit.calendar_event_id)}</dd></div>` : ''}
           ${visitReceiptDetailHtml(visit)}
@@ -1794,16 +1891,12 @@ function renderStaff(content) {
       window.yuvomi?.showToast(err.message, 'danger');
     }
   });
-  content.querySelectorAll('[data-open-visit]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const visit = state.staffVisits.find((item) => String(item.id) === btn.dataset.openVisit);
-      if (visit) openVisitReportModal(visit, null, {
-        onRefresh: async () => {
-          await loadStaffVisits();
-          if (content.isConnected) renderStaff(content);
-        },
-      });
-    });
+  // Die Besuchszeilen (Bericht lesen; Bearbeiten, Bezahlen, Loeschen im
+  // Mehr-Knopf) verdrahtet wireVisitRows - bei `read` nur den Bericht.
+  wireVisitRows(content, state.staffVisits, async () => {
+    await loadData();
+    await loadStaffVisits();
+    if (content.isConnected) renderStaff(content);
   });
   // Alles darunter schreibt. Die lesenden Wege - Person waehlen, Monat, Bericht -
   // stehen deshalb davor und haengen auch bei `read`.
@@ -1819,62 +1912,6 @@ function wireStaffWrites(content) {
       openStaffModal(worker, content);
     });
   });
-  content.querySelectorAll('[data-edit-visit]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const visit = state.staffVisits.find((item) => String(item.id) === btn.dataset.editVisit);
-      if (visit) openVisitEditModal(visit, content);
-    });
-  });
-  content.querySelectorAll('[data-pay-visit]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const visit = state.staffVisits.find((item) => String(item.id) === btn.dataset.payVisit);
-      if (!visit) return;
-      payVisit(visit, async () => {
-        await loadData();
-        await loadStaffVisits();
-        renderStaff(content);
-      });
-    });
-  });
-  content.querySelectorAll('[data-delete-visit]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const visit = state.staffVisits.find((item) => String(item.id) === btn.dataset.deleteVisit);
-      if (!visit) return;
-      if (!await confirmModal(t('housekeeping.deleteVisitConfirm'),
-        { danger: true, confirmLabel: t('common.delete'), detail: t('housekeeping.deleteVisitConfirmDetail') })) return;
-      try {
-        await api.delete(`/housekeeping/visits/${visit.id}`);
-        window.yuvomi?.showToast(t('housekeeping.visitDeletedToast'), 'success');
-        await loadData();
-        await loadStaffVisits();
-        renderStaff(content);
-        refocusAfterRender();
-      } catch (err) {
-        window.yuvomi?.showToast(err.message, 'danger');
-      }
-    });
-  });
-}
-
-/* Der Bezahl-Knopf des Personal-Protokolls. Er traegt keinen Zustand, den die
- * Zeile nicht schon nennt: der Zahlstatus steht in der Metazeile
- * (`visitPaymentMeta()`), siehe renderStaffVisitLog().
- *
- * DIE ANTWORT FOLGT DEM DATENSATZ UND DEM RECHT (#1265 P6). Bei
- * `housekeeping: read` faellt der Knopf ganz weg. Vorher stand er dort als
- * `disabled` mit der Beschriftung „Als bezahlt markieren" - ein Versprechen fuer
- * eine Beruehrung, die nichts tut. Dasselbe gilt fuer einen UNBEZAHLTEN Besuch,
- * dessen Bezahlen der Server nicht anbietet (`can_mark_paid`): das ist genau die
- * Lage bei `read`, so wie der Server sie meldet. Uebrig bleibt der gesperrte
- * Knopf am bezahlten Besuch mit Schreibrecht - er stand schon vor #1265 so da
- * und ist nicht Teil dieser Regel. */
-function staffLogPayHtml(visit, visitDate) {
-  const paid = !!visit.paid_at;
-  if (readOnly() || (!paid && !visit.can_mark_paid)) return '';
-  return `<button class="row-action" type="button" data-pay-visit="${visit.id}" ${visit.can_mark_paid ? '' : 'disabled'}
-                  aria-label="${esc(paid ? t('housekeeping.paymentPaid') : t('housekeeping.markPaid'))}: ${esc(visitDate)}">
-            <i data-lucide="banknote" class="icon-md" aria-hidden="true"></i>
-          </button>`;
 }
 
 function renderStaffVisitLog() {
@@ -1891,9 +1928,6 @@ function renderStaffVisitLog() {
       dateText: visitDate,
       showWorker: false,
       className: 'housekeeping-staff-log-row',
-      actionsHtml: `${staffLogPayHtml(visit, visitDate)}
-          ${visitEditActionHtml(visit, visitDate)}
-          ${visitDeleteActionHtml(visit, visitDate)}`,
     });
   }).join('');
   return `
@@ -2057,7 +2091,7 @@ function openVisitEditModal(visit, content, { onDone } = {}) {
           <span>${esc(t('housekeeping.visitDate'))}</span>
           <yuvomi-datepicker name="date" type="date" value="${esc(visitDay)}"></yuvomi-datepicker>
         </label>
-        <div class="housekeeping-form-grid">
+        <div class="housekeeping-form-grid"${amountsHidden(visit.daily_rate) ? ' hidden' : ''}>
           ${visit.rate_type === 'hourly' ? `
             <label class="housekeeping-field">
               <span>${esc(t('housekeeping.minutesWorked'))}</span>
@@ -2187,6 +2221,7 @@ function openVisitEditModal(visit, content, { onDone } = {}) {
     minutesInput?.addEventListener('input', updateComputed);
     updateComputed();
   }
+  holdDocumentAttachStyle(panel?.querySelector('#housekeeping-receipt-dropzone'));
   const receiptInput = panel?.querySelector('#housekeeping-receipt-file');
   const receiptSelected = panel?.querySelector('#housekeeping-receipt-selected');
   receiptInput?.addEventListener('change', () => {
@@ -2239,11 +2274,11 @@ function openStaffReadModal(worker) {
           ${worker.phone ? row('housekeeping.workerPhone', esc(worker.phone)) : ''}
           ${worker.email ? row('housekeeping.workerEmail', esc(worker.email)) : ''}
           ${worker.birth_date ? row('housekeeping.workerBirthDate', esc(formatDate(worker.birth_date))) : ''}
-          ${row('housekeeping.rateType', esc(t(hourly ? 'housekeeping.rateHourly' : 'housekeeping.rateDaily')))}
+          ${amountsHidden(worker.daily_rate) ? '' : `${row('housekeeping.rateType', esc(t(hourly ? 'housekeeping.rateHourly' : 'housekeeping.rateDaily')))}
           ${hourly
     ? row('housekeeping.hourlyRate', esc(money(worker.hourly_rate)))
     : row('housekeeping.dailyRate', esc(money(worker.daily_rate)))}
-          ${row('housekeeping.paymentSchedule', esc(scheduleLabel(worker.payment_schedule)))}
+          ${row('housekeeping.paymentSchedule', esc(scheduleLabel(worker.payment_schedule)))}`}
           ${worker.calendar_color ? row('housekeeping.calendarColor', swatch(worker.calendar_color)) : ''}
           ${worker.avatar_color ? row('housekeeping.profileColor', swatch(worker.avatar_color)) : ''}
           ${worker.notes ? `
@@ -2569,6 +2604,7 @@ export async function render(container, { signal } = {}) {
 // Nur fuer die Tests (test-housekeeping-ui.js, test-housekeeping-editvisit.js):
 // die Seite laeuft dort ohne DOM.
 export const __test = {
+  amountsHidden, visitTimeText, visitRowHtml, visitWorkDetailsHtml,
   describeDeepLinkError,
   openVisitFromDeepLink,
   loadData,
@@ -2577,8 +2613,7 @@ export const __test = {
   showReportMonth,
   stepReportMonth,
   shiftMonth,
-  visitEditActionHtml,
-  visitDeleteActionHtml,
+  visitMenuHtml,
   visitPaymentMeta,
   // #1265 P6 (test-module-readonly-ui.js): die Nur-lesen-Regel am erzeugten
   // Markup, an den Einstiegen und am Riegel.
@@ -2596,7 +2631,6 @@ export const __test = {
   placeReportPeriod,
   REPORT_PERIOD_HEAD_QUERY,
   renderStaff,
-  staffLogPayHtml,
   receiptFieldHtml,
   openVisitEditModal,
   openVisitReportModal,

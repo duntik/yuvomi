@@ -114,6 +114,11 @@ Betreiber daraus resultieren.
 - **Was wird übertragen:** Geo-Koordinaten oder Ortsname (je nach
   Benutzer-Einstellung) sowie die IP-Adresse deines Yuvomi-Servers (nicht die
   IP des Endgeräts — die Anfrage geht vom Backend aus).
+- **Endpunkte:** `api.open-meteo.com` für die Vorhersage und
+  `geocoding-api.open-meteo.com` für die Ortssuche in den Wetter-Einstellungen
+  (`GET /api/v1/weather/geocode`). Die Ortssuche überträgt nur den eingegebenen
+  Ortsnamen und die Sprache, keine Koordinaten und keine Kontodaten; Treffer
+  bleiben 30 Minuten im Server-Cache.
 - **Rechtsgrundlage:** Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung — Wetter
   ist eine angeforderte Funktion).
 - **Drittland-Bewertung:** Schweiz — **Angemessenheitsbeschluss der

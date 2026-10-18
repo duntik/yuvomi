@@ -410,6 +410,16 @@ test('GET /dashboard: liefert Kennzahlen-Shape', async () => {
   assert.equal(typeof d.pending_payments, 'number');
   assert.equal(typeof d.paid_this_month, 'number');
   assert.ok(Array.isArray(d.monthly_payments));
+  // R19 (Critique 2026-10-16): immer sechs aufeinanderfolgende Monate, auch
+  // ohne Zahlung - zwei Balken allein in 570px hatten keine Zeitachse.
+  assert.equal(d.monthly_payments.length, 6, 'sechs Monate, auch leere');
+  const months = d.monthly_payments.map((row) => row.month);
+  for (let i = 1; i < months.length; i++) {
+    const [y, m] = months[i - 1].split('-').map(Number);
+    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    assert.equal(months[i], next, `lueckenlos: ${months.join(', ')}`);
+  }
+  assert.ok(d.monthly_payments.every((row) => typeof row.total === 'number'), 'ein leerer Monat traegt 0');
 });
 
 // --------------------------------------------------------------------------
@@ -880,11 +890,15 @@ test('ein rein lokaler Besuch merkt nichts beim Provider vor', async () => {
 // Besuchsrouten. Beide Rollen im Test, sonst waere auch ein Total-Gate gruen.
 // ---------------------------------------------------------------------------
 
+// Das Mitglied checkt selbst ein: die Zahlungsaufgabe gehoert seit R20 nur der
+// eincheckenden Person und den Admins (`paymentTaskAudience`). Ein Mitglied,
+// das sie nicht sieht, bekaeme 404 statt 403 - und die Grenze unten waere
+// ungeprueft, obwohl genau dieses Mitglied sie anfassen kann.
 async function paidVisitWithTask(name, localDate) {
   setConfig('housekeeping_payment_tasks', '1');
   const workerId = await freshWorker(name);
   const created = await call('POST', '/work-sessions/check-in', {
-    as: ADM,
+    as: MEM,
     body: { worker_id: workerId, daily_rate: 40, local_date: localDate },
   });
   assert.equal(created.status, 201, `Fixture: Check-in ${created.status} ${JSON.stringify(created.body)}`);
@@ -940,7 +954,7 @@ test('unbezahlter Besuch: Mitglied bewegt die Zahlungsaufgabe weiter frei', asyn
   setConfig('housekeeping_payment_tasks', '1');
   const workerId = await freshWorker('Tina');
   const created = await call('POST', '/work-sessions/check-in', {
-    as: ADM,
+    as: MEM,
     body: { worker_id: workerId, daily_rate: 40, local_date: '2025-07-04' },
   });
   const visitId = created.body.data.id;

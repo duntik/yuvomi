@@ -109,11 +109,14 @@ test('extension settings sheet renders each section once inside its scope block'
       const leaf = registry.findSettingsLeaf(path, user);
       await __test.renderLeafContent(content, leaf, domain, user, new URLSearchParams('source=direct'));
       const scopes = [...content.querySelectorAll('.settings-scope')];
-      assert.deepEqual(scopes.map((group) => group.className), expected.map((scope) => `settings-scope settings-scope--${scope}`));
-      for (const [index, group] of scopes.entries()) {
-        const hosts = group.querySelectorAll('.settings-sheet-section');
-        assert.equal(hosts.length, 1, 'each declared section renders once');
-        assert.deepEqual(JSON.parse(hosts[0].textContent), { section: expected[index], userId: user.id, source: 'direct' });
+      // R19: scope blocks (and their headings) only when the sheet has two
+      // scopes - a member sees one, and a single scope heading only stacked.
+      const blocks = expected.length > 1 ? expected : [];
+      assert.deepEqual(scopes.map((group) => group.className), blocks.map((scope) => `settings-scope settings-scope--${scope}`));
+      const hosts = content.querySelectorAll('.settings-sheet-section');
+      assert.equal(hosts.length, expected.length, 'each declared section renders once');
+      for (const [index, host] of hosts.entries()) {
+        assert.deepEqual(JSON.parse(host.textContent), { section: expected[index], userId: user.id, source: 'direct' });
       }
       assert.equal(content.querySelector('.settings-leaf-header__description'), null,
         'a module without description gets no empty paragraph');
@@ -484,7 +487,8 @@ test('two-factor card: every line and the button row keep a token gap, in every 
   assert.match(recovery, /class="form-hint settings-2fa__note" id="two-factor-copy-status" role="status"><\/p>/,
     'Statuszeile traegt ihre Klasse und bleibt leer im Markup');
   const ask = source.slice(source.indexOf('function askForCode'));
-  assert.match(ask, /<form id="two-factor-confirm-form" class="settings-form settings-2fa__form">/);
+  // `novalidate` (Re-Critique 2026-10-17): der fehlende Code steht am Feld, nicht in einer Browser-Blase.
+  assert.match(ask, /<form id="two-factor-confirm-form" class="settings-form settings-2fa__form" novalidate>/);
 
   const css = await readFile(new URL('../public/styles/settings.css', import.meta.url), 'utf8');
   const rules = [...eachRule(css)];
@@ -1139,10 +1143,12 @@ test('Einstellungen: jeder Schalter in einem Formular mit Speichern speichert so
       const id = body.match(/id="([^"]+)"/)?.[1] ?? '?';
       const key = `${file.replace(/^pages\//, '')}#${id}`;
       // Der Standort-Baustein bringt seinen Schalter von aussen mit.
-      const calls = [...body.matchAll(/toggleRowHtml\(\{[\s\S]*?\}\)\}/g)].map((c) => c[0])
+      // R19: ein Schalter ist auch die Schalterzeile der Gruppe
+      // (`settingSwitchRowHtml`, immer ein Schalter).
+      const calls = [...body.matchAll(/(?:toggleRowHtml|settingSwitchRowHtml|switchRowHtml)\(\{[\s\S]*?\}\)/g)].map((c) => c[0])
         .concat(/weatherLocationFieldsHtml\(/.test(body) ? [sources['weather-location.js']] : []);
       for (const call of calls) {
-        if (!/control: 'switch'/.test(call)) continue;
+        if (!/control: 'switch'|settingSwitchRowHtml\(|switchRowHtml\(/.test(call)) continue;
         gefunden.push(key);
         if (/'data-instant-save': true/.test(call)) continue;
         assert.ok(GUARDED_SWITCH_FORMS.has(key),
@@ -1203,10 +1209,12 @@ test('die Suche findet einzelne Optionen, nicht nur Blaetter', async () => {
   assert.ok(optionOn('Einladung', 'admin-family'));
   assert.ok(optionOn('mealie', 'modules-kitchen'), 'Produktnamen stehen als terms im Index');
   assert.ok(optionOn('Zwei-Faktor', 'personal-account'));
-  assert.ok(optionOn('Wand', 'personal-appearance'), 'Wand findet den Wand-Modus, nicht nur die Wandtabletts');
+  // R19: Wand-Modus und Bildschirmschoner stehen geraetelokal im Blatt
+  // "Dieses Geraet" (Abschnitt device-display), nicht mehr unter Darstellung.
+  assert.ok(optionOn('Wand', 'device-display'), 'Wand findet den Wand-Modus, nicht nur die Wandtabletts');
   // #1665-Review: ein Mitglied, das "Bildschirmschoner" sucht, landet bei der
-  // Wartezeit unter Darstellung - nicht im Immich-Blatt, wo sie nicht steht.
-  assert.ok(optionOn('Bildschirmschoner', 'personal-appearance', { role: 'member' }), 'Bildschirmschoner findet die Wartezeit');
+  // Wartezeit - nicht im Immich-Blatt, wo sie nicht steht.
+  assert.ok(optionOn('Bildschirmschoner', 'device-display', { role: 'member' }), 'Bildschirmschoner findet die Wartezeit');
   // Diakritika und Gross-/Kleinschreibung zaehlen nicht.
   assert.ok(optionOn('wahrung', 'personal-appearance'), 'waehrung ohne Umlaut findet Waehrung');
 
@@ -1214,7 +1222,7 @@ test('die Suche findet einzelne Optionen, nicht nur Blaetter', async () => {
   // eines adminOnly-Abschnitts, wohl aber seine eigenen.
   const member = { role: 'member' };
   assert.equal(optionOn('Einladung', 'admin-family', member), false);
-  assert.ok(optionOn('Wand', 'personal-appearance', member));
+  assert.ok(optionOn('Wand', 'device-display', member));
 
   // Blatt-Treffer bleiben, und eine leere Eingabe findet nichts.
   assert.ok(searchSettings('Wetter', { user: admin, translate }).leaves.some((leaf) => leaf.id === 'personal-weather'));
@@ -1249,7 +1257,9 @@ test('der Blattwechsel zeigt einen Ladezustand statt eines leeren Kastens', asyn
   const source = await readFile(new URL('../public/settings/shell.js', import.meta.url), 'utf8');
   // Zwischen dem leeren Blatt und dem fertigen lagen der dynamische Import und
   // der erste Datenabruf (Critique 2026-07-27).
-  assert.match(source, /import\s*\{\s*renderSkeletonList\s*\}\s*from\s*'\/utils\/skeleton\.js'/);
+  // Seit R19 kommt placeSkeletonUntilContent mit: das Skelett raeumt sich
+  // selbst, sobald ein Abschnitt Inhalt hat (test:skeleton-utils).
+  assert.match(source, /import\s*\{\s*renderSkeletonList,\s*placeSkeletonUntilContent\s*\}\s*from\s*'\/utils\/skeleton\.js'/);
   assert.match(source, /setAttribute\('aria-busy',\s*'true'\)/, 'aria-busy muss den Ladezustand ansagen');
   assert.match(source, /renderSkeletonList\(/, 'das Skelett muss aus dem geteilten Helfer kommen');
   // Seit R10 rendert ein Blatt mehrere Abschnitte, und ein Fehler bleibt im
@@ -1416,13 +1426,45 @@ test('navigation sections match the grouped desktop information architecture', (
   assert.equal(moduleSection('housekeeping'), NAV_SECTION.household);
   assert.equal(moduleSection('documents'), NAV_SECTION.household);
   assert.equal(moduleSection('inventory'), NAV_SECTION.household);
-  assert.equal(moduleSection('rewards'), NAV_SECTION.household);
+  // R19 (Ulas 2026-10-16): die Belohnungen sind die Gegenseite der Aufgaben
+  // und stehen unter Planen, nicht mehr unter Haushalt.
+  assert.equal(moduleSection('rewards'), NAV_SECTION.plan);
+  assert.equal(moduleSection('schedule'), NAV_SECTION.plan);
   assert.equal(moduleSection('contacts'), NAV_SECTION.people);
   assert.equal(moduleSection('birthdays'), NAV_SECTION.people);
   assert.equal(moduleSection('health'), NAV_SECTION.people);
   assert.equal(moduleSection('budget'), NAV_SECTION.finance);
   assert.equal(moduleSection('third-party-weather-station'), NAV_SECTION.customModules);
   assert.equal(moduleSection('settings'), NAV_SECTION.household);
+});
+
+// R19 (Ulas 2026-10-16): eine Sektion mit nur EINEM Eintrag bekommt keinen
+// Kopf - "Finanzen" stand ueber Budget allein. Die Kueche zaehlt als ein
+// Eintrag, die Uebersicht hat nie einen Kopf. Seitenleiste und Mehr-Blatt
+// lesen dieselbe Regel.
+test('R19: eine Sektion mit nur einem Eintrag hat keinen Namen in der Navigation', async () => {
+  const { navSectionLabelKey, navSectionEntryCounts } = await import('../public/settings/module-order.js');
+  assert.equal(navSectionLabelKey(NAV_SECTION.finance, 1), null, 'Budget allein: kein "Finanzen"');
+  assert.equal(navSectionLabelKey(NAV_SECTION.finance, 2), 'nav.sectionFinance');
+  assert.equal(navSectionLabelKey(NAV_SECTION.plan, 5), 'nav.sectionPlan');
+  assert.equal(navSectionLabelKey(NAV_SECTION.overview, 3), null, 'die Uebersicht ist die Wurzel');
+  assert.equal(navSectionLabelKey(NAV_SECTION.people, undefined), null);
+  const counts = navSectionEntryCounts([
+    { section: NAV_SECTION.plan }, { section: NAV_SECTION.plan },
+    { section: NAV_SECTION.household, kitchenGroup: true }, { section: NAV_SECTION.household, kitchenGroup: true },
+    { section: NAV_SECTION.household, kitchenGroup: true }, { section: NAV_SECTION.finance },
+  ]);
+  assert.equal(counts.get(NAV_SECTION.plan), 2);
+  assert.equal(counts.get(NAV_SECTION.household), 1, 'die vier Kuechen-Kinder sind EIN Eintrag');
+  assert.equal(counts.get(NAV_SECTION.finance), 1);
+  const router = await readFile(new URL('../public/router.js', import.meta.url), 'utf8');
+  const sidebar = router.slice(router.indexOf('function sidebarNavItems()'), router.indexOf('function isModuleDisabled('));
+  assert.match(sidebar, /navSectionLabelKey\(section, entryCounts\.get\(section\)\)/, 'die Seitenleiste fragt die Regel');
+  assert.doesNotMatch(router, /const NAV_SECTION_LABEL_KEYS = /, 'keine Abschrift der Namen-Tabelle im Router');
+  const sheet = router.slice(router.indexOf('function moreSheetSections('), router.indexOf('function buildMoreSheetBody()'));
+  assert.match(sheet, /navSectionLabelKey\(section, labelCounts\.get\(section\)\)/, 'das Mehr-Blatt fragt dieselbe Regel');
+  const body = router.slice(router.indexOf('function buildMoreSheetBody()'), router.indexOf('function renderPage('));
+  assert.match(body, /navSectionEntryCounts\(navItems\(\)/, 'gezaehlt wird in der Seitenleiste, nicht im Blatt ohne Favoriten');
 });
 
 test('desktop navigation order is applied only inside each section', () => {
@@ -2706,6 +2748,9 @@ function sectionsOfOldLeaf(oldId) {
   if (oldId === 'modules-options') return SETTINGS_SECTIONS.filter((s) => String(s.loader).includes('modules-options.js'));
   // Feed-Abos: seit R14 ein Feed je Modulblatt, dieselbe Datei (A7 P2-3).
   if (oldId === 'personal-feeds') return SETTINGS_SECTIONS.filter((s) => String(s.loader).includes('personal-feeds.js'));
+  // Darstellung: seit R19 stehen Wand-Modus und Bildschirmschoner im Blatt
+  // "Dieses Geraet" (Abschnitt device-display), dieselbe Datei.
+  if (oldId === 'personal-appearance') return SETTINGS_SECTIONS.filter((s) => String(s.loader).includes('personal-appearance.js'));
   return SETTINGS_SECTIONS.filter((s) => s.id === oldId);
 }
 
@@ -2973,8 +3018,9 @@ test('S1: ein Modul geht nur in Aktive Module an und aus - die Modulblaetter zei
   assert.match(status, /if \(user\?\.role === 'admin'\) \{\s*const link = createLink\(ACTIVE_MODULES_PATH/);
   assert.match(shell, /const ACTIVE_MODULES_PATH = '\/settings\/modules\/active';/);
   assert.equal(findSettingsLeaf('/settings/modules/active', admin)?.id, 'modules-active');
-  // Reichweiten-Ueberschriften stehen auf Modulblaettern.
-  assert.match(shell, /const scoped = Boolean\(leaf\.module\);/);
+  // Reichweiten-Ueberschriften stehen auf Modulblaettern - seit R19 nur, wo
+  // es zwei Reichweiten gibt (eine einzige gliedert nichts, sie stapelt nur).
+  assert.match(shell, /const scoped = Boolean\(leaf\.module\) && new Set\(sections\.map\(\(section\) => section\.scope\)\)\.size > 1;/);
   assert.match(shell, /t\(scope === 'mine' \? 'settings\.scopeMine' : 'settings\.scopeHousehold'\)/);
 });
 
@@ -3003,6 +3049,15 @@ test('S3: Liste + Detail ab der Split-Schwelle aus tokens.css, erstes Blatt per 
   // bis an den Fensterrand gerechnet laegen ihre letzten Zeilen darunter und
   // waeren auch mit dem eigenen Bildlauf nicht zu erreichen.
   assert.match(nav, /max-height:\s*calc\([^;]*var\(--shell-tail/, 'die Liste zieht --shell-tail ab');
+  // Seit der Kopf am Desktop den Modulnamen traegt (D8), klebt er 69px hoch
+  // ueber dem Scrollport: die Leiste klebt darunter und zieht ihn von ihrer
+  // Hoehe ab. Gemessen ohne beides: gescrollt lagen ihre ersten 53px unter dem
+  // Kopf, in Ruhe stand der aktive Link eines Modul-Blatts bei y=929 von 900.
+  const baseNav = ruleBody(rules, '.settings-shell__navigation', /min-width:\s*1024px/);
+  for (const [label, body] of [['Grundform', baseNav], ['Seitenleiste', nav]]) {
+    assert.match(body, /top:\s*calc\([^;]*var\(--settings-head-block/, `${label}: die Leiste klebt unter dem Kopf`);
+  }
+  assert.match(nav, /max-height:\s*calc\([^;]*var\(--settings-head-block/, 'die Liste zieht den klebenden Kopf ab');
   assert.match(ruleBody(rules, '.settings-shell', containerQuery), /grid-template-columns:\s*var\(--settings-list-width\)\s+minmax\(0,\s*1fr\)/);
   // Das Blatt liest im Lesemass.
   assert.match(ruleBody(rules, '.settings-shell__content'), /max-inline-size:\s*var\(--layout-reading\)/);
@@ -3010,6 +3065,7 @@ test('S3: Liste + Detail ab der Split-Schwelle aus tokens.css, erstes Blatt per 
   const shell = await settingsShellSource();
   // Ob die Spalte steht, sagt das CSS: keine zweite Schwelle im Skript.
   assert.doesNotMatch(shell, /matchMedia\([^)]*min-width/);
+  assert.match(shell, /setProperty\('--settings-head-block'/, 'shell.js misst den Kopf fuer die klebende Leiste');
   assert.match(shell, /getComputedStyle\(navigation\)\.display !== 'none'/);
   // Vorwahl: replaceState, kein neuer History-Eintrag, kein Fokuswechsel - der
   // Fokus wandert nur, wenn er schon in den Einstellungen lag.
@@ -3144,8 +3200,10 @@ test('R14: Modulblaetter stehen in der Reihenfolge der Seitenleiste', async () =
   assert.equal(plain.at(-1), 'modules-install', 'Hinzufuegen steht am Ende');
   assert.equal(ids(['budget', 'tasks']).at(-1), 'modules-install', 'auch bei eigener Anordnung');
   const mods = plain.slice(2, -1);
-  assert.deepEqual(mods, ['dashboard', 'calendar', 'schedule', 'tasks', 'kitchen', 'housekeeping', 'waste', 'documents',
-    'inventory', 'rewards', 'contacts', 'health', 'budget'], 'ohne eigene Anordnung genau wie die Seitenleiste (gemessen 1440)');
+  // R19 (Ulas 2026-10-16): Planen = Kalender, Aufgaben, Belohnungen, Notizen,
+  // Schichtplan. Notizen haben kein eigenes Modulblatt.
+  assert.deepEqual(mods, ['dashboard', 'calendar', 'tasks', 'rewards', 'schedule', 'kitchen', 'housekeeping', 'waste', 'documents',
+    'inventory', 'contacts', 'health', 'budget'], 'ohne eigene Anordnung genau wie die Seitenleiste (gemessen 1440)');
   const pos = (id) => mods.indexOf(id);
   assert.equal(mods[0], 'dashboard', 'die Uebersicht fuehrt wie in der Seitenleiste');
   assert.ok(pos('tasks') < pos('kitchen') && pos('kitchen') < pos('contacts') && pos('contacts') < pos('budget'),
@@ -3153,7 +3211,7 @@ test('R14: Modulblaetter stehen in der Reihenfolge der Seitenleiste', async () =
   assert.ok(pos('health') < pos('budget'), 'Gesundheit (Menschen) vor Budget (Finanzen)');
   const custom = ids(['tasks', 'schedule', 'calendar', 'rewards', 'kitchen']).slice(2, -1);
   assert.ok(custom.indexOf('tasks') < custom.indexOf('calendar'), 'die eigene Reihenfolge des Haushalts zaehlt');
-  assert.ok(custom.indexOf('rewards') < custom.indexOf('kitchen'));
+  assert.ok(custom.indexOf('rewards') < custom.indexOf('kitchen'), 'Planen vor Haushalt');
   const router = await readFile(new URL('../public/router.js', import.meta.url), 'utf8');
   assert.match(router, /moduleOrder: \(\) => _moduleOrder\.slice\(\)/, 'die Einstellungen lesen dieselbe Reihenfolge wie die Seitenleiste');
 });
@@ -3250,7 +3308,29 @@ test('R14: Familie legt im Blatt-Dialog an, Fuss [Abbrechen][Primaer], Zeilen mi
   assert.match(src, /content: addMemberFormHtml\(\)/);
   assert.match(src, /content: addInviteFormHtml\(\)/);
   assert.match(src, /<ul class="settings-members row-divided" id="members-list">/, 'Haarlinien zwischen den Mitgliedern');
-  assert.doesNotMatch(src, /btn--primary settings-add-btn/, 'kein violetter Balken ueber die volle Breite');
+  // R19 (Critique 2026-10-16, "Einladen prominenter"): Einladen ist der
+  // EINE gefuellte Knopf - ein Knopf in seiner Breite, kein Balken ueber die
+  // volle Breite (R14). R20 (Re-Critique 2026-10-17, A3 P3): er steht in der
+  // Karte "Einladungen", die vorher ohne Handlung war; "Mitglied hinzufuegen"
+  // bleibt ruhig unter der Mitgliederliste. Bewusst angepasst.
+  const membersCard = src.slice(src.indexOf('id="members-card"'), src.indexOf('id="invites-card"'));
+  const invitesCard = src.slice(src.indexOf('id="invites-card"'), src.indexOf('two-factor-household-card'));
+  assert.match(membersCard, /<div class="settings-member-actions">\s*<button class="btn btn--secondary settings-add-btn" id="add-member-btn" hidden><i data-lucide="user-plus"/,
+    'Anlegen ruhig unter der Mitgliederliste, mit Icon');
+  assert.doesNotMatch(membersCard, /add-invite-btn/, 'Einladen steht nicht in der Mitgliederkarte');
+  assert.match(invitesCard, /id="invites-list"><\/ul>\s*<div class="settings-member-actions">\s*<button class="btn btn--primary settings-add-btn" id="add-invite-btn" hidden><i data-lucide="mail-plus" aria-hidden="true"><\/i>\$\{t\('settings\.invites\.add'\)\}<\/button>/,
+    'Einladen gefuellt unter den offenen Einladungen');
+  assert.equal((src.match(/btn--primary settings-add-btn/g) ?? []).length, 1, 'genau ein gefuellter Knopf');
+  const css = await readFile(new URL('../public/styles/settings.css', import.meta.url), 'utf8');
+  assert.match(css, /\.settings-add-btn \{\s*align-self: flex-start;/, 'kein Balken ueber die volle Breite');
+  assert.match(css, /\.settings-member-actions \{\s*display: flex;/);
+  // Die eigene Zeile traegt "Ich", und kein Knopf malt ein "+" als Zeichen.
+  assert.match(src, /u\.id === currentUserId \? ` <span class="settings-member__self">\$\{esc\(t\('settings\.memberYou'\)\)\}<\/span>`/);
+  for (const lang of ['de', 'en']) {
+    const json = JSON.parse(await readFile(new URL(`../public/locales/${lang}.json`, import.meta.url), 'utf8'));
+    assert.doesNotMatch(json.settings.addMember, /^\+/, `${lang}: "+" als Text-Icon`);
+    assert.doesNotMatch(json.settings.invites.add, /^\+/, `${lang}: "+" als Text-Icon`);
+  }
   // Seit #1381 heisst der Knopf "entfernen", nicht "loeschen": ein Konto mit
   // Spuren in geteilten Daten wird deaktiviert. Sein Objekt nennt er weiter.
   assert.match(src, /t\('settings\.removeMemberNamed', \{ name: u\.display_name \}\)/, 'der Entfernen-Knopf nennt sein Objekt');
@@ -3397,13 +3477,20 @@ test('R16: die Sprungmarken sind Links im Blatt, eine scrollende Zeile, und spri
   const row = rules.find((r) => r.selector.trim() === '.settings-sheet-jump__list' && !r.at.length);
   assert.match(row?.body ?? '', /overflow-x:\s*auto/);
   assert.match(row?.body ?? '', /flex-wrap:\s*nowrap/, 'eine Zeile: umgebrochen kosteten fuenf Marken mobil drei Reihen vor dem ersten Schalter');
+  // R20: am Desktop schnitt die Zeile im Kalender-Blatt zwei Marken ab (999px in 660px).
+  const wide = rules.find((r) => r.selector.trim() === '.settings-sheet-jump__list' && r.at.some((a) => /min-width:\s*768px/.test(a)));
+  assert.match(wide?.body ?? '', /flex-wrap:\s*wrap/, 'ab 768px brechen die Marken um, statt an der Kante zu enden');
 });
 
-test('R16: mobil ist die Blattbeschreibung zwei Zeilen lang', async () => {
+test('R16/R20: mobil ist die Blattbeschreibung hoechstens drei Zeilen lang', async () => {
+  // R16 kappte auf zwei Zeilen (vier standen vor dem ersten Schalter). R20
+  // (Re-Critique 2026-10-17 a5 P3): zwei schnitten in "Dieses Geraet",
+  // Benachrichtigungen und Aufgaben die Aussage ab, alle drei ohne Sprungmarken.
   const css = await readFile(new URL('../public/styles/settings.css', import.meta.url), 'utf8');
   const phone = [...eachRule(css)].find((r) => r.at.some((a) => /\(max-width:\s*767px\)/.test(a))
     && r.selector.split(',').some((s) => s.trim() === '.settings-leaf-header__description'));
-  assert.match(phone?.body ?? '', /-webkit-line-clamp:\s*2/, 'vier Zeilen Vorspann standen vor dem ersten Schalter');
+  assert.match(phone?.body ?? '', /-webkit-line-clamp:\s*3/, 'drei Zeilen: genug fuer jede Beschreibung ohne Marken, nie wieder vier');
+  assert.match(phone?.body ?? '', /(^|[^-])line-clamp:\s*3/);
 });
 
 test('R16: im Blatt mit Sprungmarken steht die Beschreibung mobil nur im Baum', async () => {
@@ -3850,8 +3937,10 @@ test('R17: keine Abschnittsueberschrift steht in einem Blatt zweimal ("Termine",
 test('R17: die Sprungmarken heissen wie die Ueberschriften der Abschnitte, nicht wie die Registry', async () => {
   const shell = await readFile(new URL('../public/settings/shell.js', import.meta.url), 'utf8');
   const fn = shell.slice(shell.indexOf('function syncJumpLabels('), shell.indexOf('async function renderSheetSection('));
-  assert.match(fn, /host\?\.querySelector\('\.settings-section__title, \.settings-navigation-panel__title'\)/,
-    'gelesen wird die erste sichtbare Abschnittsueberschrift im Traeger');
+  // R19: auch ein Kartentitel ist eine Ueberschrift - im Gesundheitsblatt hiess
+  // die Marke ueber "Vorsorge-Arten" sonst "Gesundheit".
+  assert.match(fn, /host\?\.querySelector\('\.settings-section__title, \.settings-navigation-panel__title, \.settings-card__title'\)/,
+    'gelesen wird die erste sichtbare Abschnittsueberschrift im Traeger, auch ein Kartentitel');
   assert.match(fn, /link\.textContent = text/);
   assert.match(shell, /link\.dataset\.jumpSection = target\.id/, 'die Marke weiss, zu welchem Traeger sie gehoert');
   const section = shell.slice(shell.indexOf('async function renderSheetSection('), shell.indexOf('async function renderLeafContent('));
@@ -3860,6 +3949,158 @@ test('R17: die Sprungmarken heissen wie die Ueberschriften der Abschnitte, nicht
   const leaf = shell.slice(shell.indexOf('async function renderLeafContent('), shell.indexOf('function levelScopedHeadings('));
   assert.match(leaf, /await awaitSections\([\s\S]*?\);[\s\S]*?jump\?\.classList\.remove\('settings-sheet-jump--pending'\)/,
     'nach der Frist stehen die Marken in jedem Fall');
+});
+
+// R19 (Critique 2026-10-16, Modulblatt Gesundheit): "Zyklus-Tab" ist
+// veraltet - die Gesundheit hat Bereiche, keine Reiter -, und die Suche nach
+// "Zyklus" fand zweimal "Zyklus-Tab anzeigen" (fuer mich, fuer den Haushalt).
+test('R19: das Gesundheitsblatt spricht vom Zyklus, nicht vom Tab, und die beiden Schalter heissen verschieden', async () => {
+  const locales = (await import('node:fs')).readdirSync(new URL('../public/locales/', import.meta.url)).filter((f) => f.endsWith('.json'));
+  const keys = ['healthCycleEnableLabel', 'healthCyclePersonalLabel', 'healthCycleHint', 'healthCyclePersonalHint', 'healthCyclePersonalHouseholdOff', 'sheetHealthDescription'];
+  for (const file of locales) {
+    const json = JSON.parse(await readFile(new URL(`../public/locales/${file}`, import.meta.url), 'utf8'));
+    assert.notEqual(json.settings.healthCycleEnableLabel, json.settings.healthCyclePersonalLabel, `${file}: zwei gleiche Treffer in der Suche`);
+    if (file === 'de.json' || file === 'en.json') {
+      for (const key of keys) assert.doesNotMatch(json.settings[key], /\btab\b|-Tab/i, `${file} ${key}: ${json.settings[key]}`);
+    }
+  }
+});
+
+// R19 (Critique 2026-10-16, "gemischte Icon-Stile in der Einstellungsliste"):
+// Module standen als gefuellte Kachel, alles andere als blasse Mulde. Jetzt
+// ist jede Marke eine gefuellte Kachel; ohne Modul im Grau der Einstellungen.
+test('R19: jede Marke der Einstellungsliste ist eine gefuellte Kachel, ohne Modul im Einstellungsgrau', async () => {
+  const shell = await readFile(new URL('../public/settings/shell.js', import.meta.url), 'utf8');
+  const fn = shell.slice(shell.indexOf('function createLeafMark('), shell.indexOf('function hydrateIcons('));
+  assert.match(fn, /mark\.className = `\$\{className\} vivid-mark`;/, 'immer vivid-mark');
+  assert.match(fn, /else mark\.style\.setProperty\('--seal-accent', 'var\(--module-settings\)'\);/, 'ohne Modul: Einstellungsgrau');
+  const css = await readFile(new URL('../public/styles/settings.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /(?:navigation-link-icon|row-mark):not\(\.vivid-mark\)/, 'keine zweite, blasse Form mehr');
+});
+
+// R19 (Critique 2026-10-16, "Geraete-Einstellungen buendeln"): alles, was nur
+// fuer dieses Geraet gilt, steht im Blatt "Dieses Geraet" - nicht verstreut.
+test('R19: Wand-Modus und Bildschirmschoner stehen im Blatt "Dieses Geraet"', async () => {
+  const section = SETTINGS_SECTIONS.find((s) => s.id === 'device-display');
+  assert.ok(section, 'der Abschnitt device-display fehlt');
+  assert.equal(section.sheetId, 'personal-device');
+  assert.equal(section.props?.part, 'device');
+  for (const key of ['settings.wallModeLabel', 'settings.screensaverIdleLabel', 'settings.screensaverClockLabel', 'settings.screensaverCoverLabel']) {
+    assert.ok(section.options.includes(key), `${key} im Geraete-Abschnitt`);
+    assert.ok(!SETTINGS_SECTIONS.find((s) => s.id === 'personal-appearance').options.includes(key), `${key} nicht mehr unter Darstellung`);
+  }
+  const src = await readFile(new URL('../public/settings/pages/personal-appearance.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(container\.dataset\?\.part === 'device'\) \{[\s\S]{0,400}?renderDeviceDisplay\(container, \{ screensaverOn, isAdmin[^}]*\}\);\s*return;/);
+  const page = src.slice(src.indexOf('function renderPage('), src.indexOf('function deviceDisplayRowsHtml('));
+  assert.doesNotMatch(page, /wall-mode-toggle|screensaver-idle-select/, 'Darstellung zeigt die Geraete-Zeilen nicht mehr');
+});
+
+// R19 (Critique 2026-10-16, Einstellungen B7 "EIN Formular-Dialekt"): ein
+// Blatt fuehrt seine Einstellungen als Zeilen im Traeger (settingRowHtml),
+// nicht als gestapelte Felder unter Etiketten in einer Karte. Umgestellt:
+// Kueche (Schritt 5) und E-Mail (SMTP). Die Liste waechst je umgestelltem Blatt.
+test('R19: umgestellte Blaetter sprechen den Zeilen-Dialekt', async () => {
+  // Die Kueche bleibt hier aussen vor: ihre Anbieter-Dialoge tragen zu Recht Felder unter Etiketten.
+  for (const file of ['admin-email.js']) {
+    const src = await readFile(new URL(`../public/settings/pages/${file}`, import.meta.url), 'utf8');
+    assert.match(src, /settingRowHtml\(/, `${file}: Zeilen im Traeger`);
+    assert.doesNotMatch(src, /class="form-group"/, `${file}: keine gestapelten Felder mehr`);
+    assert.match(src, /class="row-carrier settings-group/, `${file}: der Traeger der Gruppe`);
+  }
+  // Konto: Kontaktdaten und Passwort als Zeilen (das Profil oben bleibt der
+  // Kopf mit Bild); in der Karte legt die Gruppe ihre eigene Flaeche ab.
+  const account = await readFile(new URL('../public/settings/pages/personal-account.js', import.meta.url), 'utf8');
+  // Re-Kritik 2026-10-17: auch Anzeigename und Farbe neben dem Bild (vorher
+  // Felder unter Etiketten, zwei Dialekte in einer Karte).
+  for (const id of ['profile-display-name', 'profile-avatar-color', 'profile-phone', 'profile-email', 'profile-birth-date', 'current-password', 'new-password', 'confirm-password']) {
+    assert.match(account, new RegExp(`settingRowHtml\\(\\{\\s*label: t\\('settings\\.[a-zA-Z]+'\\), labelFor: '${id}'`), `Konto: ${id} als Zeile`);
+  }
+  const profile = account.slice(account.indexOf('<div class="settings-profile-editor">'), account.indexOf('id="profile-error"'));
+  assert.ok(profile.length > 0, 'Vorbedingung: das Profil steht im Konto-Blatt');
+  assert.doesNotMatch(profile, /class="form-group/, 'Konto: das Profil fuehrt keine gestapelten Felder mehr');
+  assert.match(profile, /label: t\('settings\.usernameLabel'\)[\s\S]{0,200}class="settings-setting-row__value" id="profile-username"/,
+    'Konto: der Benutzername steht als Wert in seiner Zeile, nicht als gesperrtes Feld');
+  const css = await readFile(new URL('../public/styles/settings.css', import.meta.url), 'utf8');
+  assert.match(css, /\.settings-card \.row-carrier\.settings-group \{\s*background: none;\s*box-shadow: none;/, 'keine Karte in der Karte');
+  // Ein Textfeld in der Zeile fuellt die Bedienspalte (gemessen: E-Mail am
+  // Desktop 201px in einer 680px-Zeile).
+  const wide = [...eachRule(css)].find((r) => !r.at.length && /\.settings-group \.settings-setting-row__control > input\.form-input:only-child:is\(/.test(r.selector));
+  assert.match(wide?.body ?? '', /inline-size:\s*50cqi/, 'Textfelder nehmen die halbe Zeile');
+  assert.match(wide?.selector ?? '', /\[type="email"\]/, 'auch E-Mail');
+
+  // Schritt 5b (B7 abgeschlossen): die uebrigen Blaetter mit Feldern unter
+  // ihren Etiketten - WebDAV-Backup und Wiederherstellungs-Schluessel, Immich,
+  // DMS, Speicher, API-Zugriff, Modul installieren, App-Name, Schichtplan- und
+  // Aufgaben-Vorgaben, Feiertage, Wetter-Standort.
+  const sheets = [
+    'pages/admin-backup.js', 'backup-key.js', 'pages/admin-immich.js', 'pages/documents-dms.js',
+    'pages/documents-storage.js', 'pages/admin-api.js', 'pages/modules-install.js', 'pages/admin-system.js',
+    'pages/personal-schedule.js', 'pages/personal-tasks.js', 'pages/modules-calendar.js', 'weather-location.js',
+  ];
+  for (const file of sheets) {
+    const src = await readFile(new URL(`../public/settings/${file}`, import.meta.url), 'utf8');
+    assert.match(src, /settingRowHtml\(/, `${file}: Zeilen im Traeger`);
+    assert.doesNotMatch(src, /class="form-group"|className = 'form-group/, `${file}: keine gestapelten Felder mehr`);
+    assert.match(src, /class="row-carrier settings-group/, `${file}: der Traeger der Gruppe`);
+  }
+  // Blaetter, deren Dialoge noch eigene Felder fuehren: der Blattteil ist umgestellt.
+  const subs = await readFile(new URL('../public/settings/pages/personal-calendar-subscriptions.js', import.meta.url), 'utf8');
+  const subsPage = subs.slice(subs.indexOf('function renderPage('), subs.indexOf('\n}\n', subs.indexOf('function renderPage(')));
+  assert.doesNotMatch(subsPage, /class="form-group"/, 'Kalender-Abos und -Import: keine gestapelten Felder');
+  assert.equal((subsPage.match(/class="row-carrier settings-group"/g) ?? []).length, 2, 'Abo und Import je eine Gruppe');
+  const sync = await readFile(new URL('../public/settings/pages/sync-calendar.js', import.meta.url), 'utf8');
+  for (const fn of ['buildAppleConnectForm', 'buildGoogleReadonlyToggle', 'buildOutlookAutoSyncControls', 'buildGoogleCalendarPicker']) {
+    const body = sync.slice(sync.indexOf(`function ${fn}(`), sync.indexOf('\n}\n', sync.indexOf(`function ${fn}(`)));
+    assert.doesNotMatch(body, /className = '[^']*form-group|class="form-group/, `sync-calendar ${fn}: kein Feld-Dialekt`);
+  }
+  // Die WebDAV-Schalterleiste und ihr eigenes CSS sind weg; Zeilen koennen
+  // verborgen werden, und Schalterzeilen fluchten in der Karte.
+  assert.doesNotMatch(css, /\.settings-webdav-toggle-row/, 'die eigene Schalterleiste ist entfallen');
+  assert.match(css, /\.settings-card \.settings-group > \.settings-setting-row--switch > \.toggle-row,/, 'Schalterzeile fluchtet in der Karte');
+  const layout = await readFile(new URL('../public/styles/layout.css', import.meta.url), 'utf8');
+  assert.match(layout, /\.form-row\[hidden\],\s*\.row-carrier\[hidden\],/, 'eine verborgene Zeile bleibt verborgen');
+
+  // Re-Kritik 2026-10-17: in der Gesundheit sprach nur der Messwert-Dialog
+  // Zeilen; Aktivitaet und Naehrwerte stapelten Felder in Rastern, die
+  // Medikamente trugen native Haken fuer zwei Einstellungen.
+  const health = await readFile(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  const fnBody = (src, name) => {
+    const at = src.indexOf(`function ${name}(`);
+    assert.ok(at > 0, `Vorbedingung: ${name} existiert`);
+    return src.slice(at, src.indexOf('\n}\n', at));
+  };
+  for (const name of ['openActivityModal', 'openNutritionModal', 'nutrientFieldsMarkup']) {
+    const body = fnBody(health, name);
+    assert.match(body, /formRowsHtml\(/, `Gesundheit ${name}: Zeilen im Dialog-Traeger`);
+    assert.doesNotMatch(body, /modal-grid/, `Gesundheit ${name}: kein Raster gestapelter Felder`);
+    // Nur die freie Notiz bleibt ein Feld unter ihrem Etikett.
+    assert.ok((body.match(/class="form-field"/g) ?? []).length <= 1, `Gesundheit ${name}: hoechstens die Notiz als Feld`);
+  }
+  const med = fnBody(health, 'openMedModal');
+  assert.doesNotMatch(med, /type="checkbox"/, 'Medikament: keine nativen Haken');
+  for (const id of ['med-active', 'med-prn']) {
+    assert.match(med, new RegExp(`toggleRowHtml\\(\\{[^}]*control: 'switch'[^}]*attrs: \\{ id: '${id}' \\}`), `Medikament: ${id} als Schalter`);
+  }
+
+  // Die Dialoge der Einstellungen sprechen denselben Dialekt (Dialog-Traeger
+  // `.form-rows`): CalDAV, CardDAV, Kalender-Abo, Rezeptdienste, Wandtablett,
+  // Familie. Ausgenommen ist nur der Kopf mit Bild (Mitglied bearbeiten).
+  for (const file of ['sync-calendar.js', 'sync-contacts.js', 'personal-calendar-subscriptions.js', 'modules-kitchen.js', 'admin-displays.js']) {
+    const src = await readFile(new URL(`../public/settings/pages/${file}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /class="form-group/, `${file}: keine gestapelten Felder mehr`);
+  }
+  const family = await readFile(new URL('../public/settings/pages/admin-family.js', import.meta.url), 'utf8');
+  const head = family.slice(family.indexOf('<div class="settings-profile-editor">'), family.indexOf('${caregiverIds === null'));
+  assert.ok(head.length > 0, 'Vorbedingung: der Kopf mit Bild steht im Bearbeiten-Dialog');
+  assert.doesNotMatch(family.replace(head, ''), /class="form-group/, 'Familie: ausser dem Kopf mit Bild keine gestapelten Felder');
+  for (const form of ['add-member-form', 'add-invite-form', 'edit-member-form']) {
+    const at = family.indexOf(`id="${form}"`);
+    assert.ok(at > 0 && /formRowsHtml\(\[/.test(family.slice(at, at + 4000)), `${form}: Zeilen im Dialog-Traeger`);
+  }
+  assert.match(family, /formSwitchRowHtml\(\{/, 'Schalter mit Hinweis ueber den geteilten Baustein');
+  const components = await readFile(new URL('../public/settings/components.js', import.meta.url), 'utf8');
+  assert.match(components, /export function formSwitchRowHtml\(/);
+  assert.match(layout, /\.form-rows > \.form-switch > \.toggle-row \{|\.form-rows > \.form-switch > \.toggle-row,?\s*\{?/, 'die Schalterzeile im Dialog-Traeger');
 });
 
 test('R17: die Standard-Erinnerungen sind Chips des Kanons mit aria-pressed, keine Checkbox in einer Pille', async () => {
@@ -4171,4 +4412,35 @@ test('calendar feed birthday switch persists changes and restores its visual sta
     assert.equal(input.checked, false, 'failed save restores the previous choice');
     assert.equal(input.disabled, false);
   } finally { globalThis.__apiStub = previous; globalThis.window = previousWindow; }
+});
+
+// R19 (Critique 2026-10-16): der Schichtplan trug dieselbe Kalender-Glyphe wie
+// der Kalender (`calendar-clock` neben `calendar`, beide blau, Nachbarn in
+// "Planen"). Er bekommt ein eigenes Zeichen aus dem gebuendelten Lucide.
+test('R19: der Schichtplan hat eine eigene Glyphe, keine Kalenderform', async () => {
+  const { MODULE_ICON } = await import('../public/nav-icons.js');
+  const glyph = MODULE_ICON.schedule;
+  assert.ok(!/^calendar/.test(glyph), `Schichtplan zeichnet "${glyph}" - wieder eine Kalenderform`);
+  const neighbours = ['calendar', 'tasks', 'rewards', 'notes'].map((id) => MODULE_ICON[id]);
+  assert.ok(!neighbours.includes(glyph), 'kein Zeichen eines Nachbarn in Planen');
+  const pascal = glyph.replace(/(^|-)(\w)/g, (_m, _d, c) => c.toUpperCase());
+  const lucide = await readFile(new URL('../public/lucide.min.js', import.meta.url), 'utf8');
+  assert.match(lucide, new RegExp(`\\b${pascal}\\b`), `${pascal} fehlt im gebuendelten Lucide (public/lucide.min.js)`);
+  const reminders = await readFile(new URL('../public/reminders.js', import.meta.url), 'utf8');
+  assert.match(reminders, new RegExp(`schedule_entry:[^\\n]*icon: '${glyph}'`), 'die Erinnerung des Schichtplans traegt sein Zeichen');
+});
+
+// R19 (Critique 2026-10-16, "Einstellungen: zwei Formular-Dialekte"): das
+// Kuechenblatt stand als Karte mit zwei Kartentiteln, Schaltern ohne
+// Haarlinien und Namen-Feldern UNTER ihrem Etikett. Jetzt der Dialekt der
+// uebrigen Blaetter: gruppierte Zeilen im Traeger, Hinweis als Gruppenfuss.
+test('R19: das Kuechenblatt spricht den Zeilen-Dialekt der Einstellungen', async () => {
+  const src = await readFile(new URL('../public/settings/pages/modules-kitchen.js', import.meta.url), 'utf8');
+  const meals = src.slice(src.indexOf("settings.sectionMeals"), src.indexOf("settings.recipeProvidersTitle"));
+  assert.match(meals, /class="row-carrier settings-group meal-type-toggles" id="meal-type-toggles"/);
+  assert.match(meals, /settingSwitchRowHtml\(\{/, 'die Schalter als Zeilen der Gruppe');
+  assert.match(meals, /class="row-carrier settings-group meal-type-names" id="meal-type-names"/);
+  assert.match(meals, /settingRowHtml\(\{\s*label: builtInMealTypeLabel\(mealType\),\s*labelFor: `meal-name-\$\{mealType\}`/, 'Etikett links, Feld rechts');
+  assert.doesNotMatch(meals, /class="settings-card"|class="form-field"|class="form-label"/, 'keine Karte und kein gestapeltes Feld mehr');
+  assert.match(meals, /settings-group__footer">\$\{t\('settings\.mealTypesHint'\)\}/, 'der Hinweis als Gruppenfuss');
 });

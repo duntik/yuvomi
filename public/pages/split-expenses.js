@@ -228,7 +228,10 @@ export async function render(container, { user, embedded = false, onAddableChang
           <div class="split-groups" id="split-groups"></div>
           </div>
         </aside>
-        <main class="split-main" id="split-main" aria-busy="true">${renderSkeletonList({ rows: 5, lines: 2 })}</main>
+        ${/* KEIN ZWEITES <main> (R20, axe landmark-*): der Ausgleich steht als
+             Reiter im Budget, und dessen Seite liegt schon in #main-content der
+             Shell - ein <main> darin war ein zweiter Hauptbereich. */ ''}
+        <div class="split-main" id="split-main" aria-busy="true">${renderSkeletonList({ rows: 5, lines: 2 })}</div>
       </div>${fab}
     </div>
   `);
@@ -568,9 +571,23 @@ function renderSummary() {
   if (count) count.textContent = String(state.groups.length);
   const owedText = totalsText(owed);
   const owingText = totalsText(owing);
+  // DER BEREICH STEHT IM LABEL (Critique R19, P1 Desktop-Komposition). Die
+  // Kacheln gehoeren der gewaehlten Gruppe, die dritte Kachel „Aktive Gruppen"
+  // aber allen - nebeneinander lasen sich „Du schuldest 24,14 €" und „2" als
+  // EINE Aussage, und mobil steht die Gruppenwahl erst unter den Zahlen. Jetzt
+  // nennen beide Betraege ihre Gruppe, und die Gruppenzahl steht nur noch am
+  // Kopf der Liste, die sie zaehlt (`#split-group-count`).
+  const group = state.groups.find((g) => g.id === state.activeGroupId)?.name;
+  const owedLabel = group ? t('splitExpenses.youAreOwedInGroup', { group }) : t('splitExpenses.youAreOwed');
+  const owingLabel = group ? t('splitExpenses.youOweInGroup', { group }) : t('splitExpenses.youOwe');
   const glance = _container.querySelector('#split-glance');
   if (glance) {
     const expanded = summary?.classList?.contains('is-expanded') ?? false;
+    // DIE KURZZEILE NENNT DIE GRUPPE NICHT (R19, Critique 2026-10-16). Sie steht
+    // nur schmal, und dort direkt ueber der Gruppenwahl, die den Namen schon
+    // traegt; mit ihm brach "Du bekommst in Haushalt" bei 390px in zwei Zeilen
+    // und "Du schuldest in Haushalt 24,14 €" stand daneben gedraengt. Die
+    // Karten (breit, und aufgeklappt) behalten das Label mit Gruppe.
     setHtml(glance, metricGlanceHtml({
       id: 'split-glance-more',
       controls: 'split-summary',
@@ -588,16 +605,12 @@ function renderSummary() {
   // (`tone` nur mit Betrag), die Karten jetzt auch.
   setHtml(summary, `
     <div class="metric-card${owed.length ? ' metric-card--positive' : ''}">
-      <div class="metric-card__label">${t('splitExpenses.youAreOwed')}</div>
+      <div class="metric-card__label">${esc(owedLabel)}</div>
       <div class="metric-card__value">${owedText}</div>
     </div>
     <div class="metric-card${owing.length ? ' metric-card--negative' : ''}">
-      <div class="metric-card__label">${t('splitExpenses.youOwe')}</div>
+      <div class="metric-card__label">${esc(owingLabel)}</div>
       <div class="metric-card__value">${owingText}</div>
-    </div>
-    <div class="metric-card split-summary-groups">
-      <div class="metric-card__label">${isArchivedView() ? t('splitExpenses.statusArchived') : t('splitExpenses.activeGroups')}</div>
-      <div class="metric-card__value">${state.groups.length}</div>
     </div>
   `);
 }
@@ -895,12 +908,28 @@ function groupMetaHtml(group) {
   return `<p class="split-group-meta">${esc(parts.join(' · '))}</p>`;
 }
 
+/**
+ * EIN SALDO AUS SICHT DESSEN, DER LIEST (Re-Critique 2026-10-17, A4 P3). Hier
+ * stand fuer jede Zeile "<Name> schuldet <Name>", auch fuer die eigene: Linda
+ * las "Linda Johnson schuldet Alex Johnson". Wer selbst beteiligt ist, liest
+ * "Du schuldest Alex Johnson" bzw. "Alex Johnson schuldet dir"; zwischen zwei
+ * anderen bleibt der Satz mit beiden Namen - als EIN Schluessel mit beiden
+ * Platzhaltern, damit jede Sprache ihre Wortstellung hat (vorher Name + Verb
+ * + Name zusammengesetzt).
+ */
+export function debtSentence(debt, userId = state.user?.id) {
+  const me = userId == null ? null : Number(userId);
+  if (me != null && Number(debt.from_user_id) === me) return t('splitExpenses.debtYouOwe', { name: debt.to_name });
+  if (me != null && Number(debt.to_user_id) === me) return t('splitExpenses.debtOwesYou', { name: debt.from_name });
+  return t('splitExpenses.debtOwes', { from: debt.from_name, to: debt.to_name });
+}
+
 function renderBalances() {
   const debts = state.balances.simplified_debts || [];
   if (!debts.length) return `<div class="split-muted">${t('splitExpenses.noBalances')}</div>`;
   return `<div class="row-carrier">${debts.map((debt) => `
     <div class="split-debt">
-      <span>${esc(debt.from_name)} ${t('splitExpenses.owes')} ${esc(debt.to_name)}</span>
+      <span>${esc(debtSentence(debt))}</span>
       <strong>${money(debt.amount, debt.currency)}</strong>
     </div>
   `).join('')}</div>`;
@@ -937,8 +966,14 @@ function renderExpenses(asList = false) {
     `;
     }
     return `
-      <button type="button" class="split-expense" data-expense-id="${expense.id}" data-row-key="expense-${expense.id}" aria-label="${esc(expense.title)} - ${t('splitExpenses.editExpense')}">
+      ${/* NAME AUS DEM INHALT, DIE HANDLUNG ALS NACHSATZ (R20, WCAG 2.5.3):
+           das `aria-label` „<Titel> - Ausgabe bearbeiten" liess Zahler, Datum
+           und Betrag weg, die die Zeile zeigt - wer per Sprache „38,50"
+           ansagte, traf nichts. Jetzt liest die Zeile, was sie zeigt, und
+           nennt danach, was der Tipp tut. */ ''}
+      <button type="button" class="split-expense" data-expense-id="${expense.id}" data-row-key="expense-${expense.id}">
         ${body}
+        <span class="sr-only"> - ${esc(t('splitExpenses.editExpense'))}</span>
       </button>
     `;
   }).join('')}</div>`;
@@ -1008,7 +1043,7 @@ function renderRecurring(asList = false) {
     return `
       <div class="split-recurring-row${paused ? ' split-recurring-row--paused' : ''}" data-row-key="recurring-${recurring.id}">
         ${acts
-    ? `<button type="button" class="split-expense" data-recurring-id="${recurring.id}" aria-label="${esc(recurring.title)} - ${t('splitExpenses.recurring.edit')}">${body}</button>
+    ? `<button type="button" class="split-expense" data-recurring-id="${recurring.id}">${body}<span class="sr-only"> - ${esc(t('splitExpenses.recurring.edit'))}</span></button>
         ${rowActionHtml({
     icon: paused ? 'play' : 'pause',
     label: `${recurring.title} - ${toggleLabel}`,
@@ -1893,7 +1928,6 @@ function expenseReadSections(expense) {
 function openExpenseReadView(expense) {
   return openDetailView({
     title: expense.title,
-    accentColor: 'var(--module-budget)',
     size: 'sm',
     sections: expenseReadSections(expense),
   });
@@ -2141,7 +2175,6 @@ function recurringReadSections(recurring) {
 function openRecurringReadView(recurring) {
   return openDetailView({
     title: recurring.title,
-    accentColor: 'var(--module-budget)',
     size: 'sm',
     sections: recurringReadSections(recurring),
   });

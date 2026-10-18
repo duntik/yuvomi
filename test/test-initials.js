@@ -332,7 +332,9 @@ test('unter public/ steht keine eigene Initialen-Regel mehr', () => {
 // --------------------------------------------------------
 
 const MINSU = '김민수';
-const SHOWS = (html, text) => new RegExp(`>\\s*${text}\\s*<`).test(html);
+// Als Text oder - seit R20 an Kontozeile und Belohnungen, wo die Scheibe im
+// Etikett eines Knopfs steht (WCAG 2.5.3) - als Zeichnung aus `data-initials`.
+const SHOWS = (html, text) => new RegExp(`>\\s*${text}\\s*<|data-initials="${text}"`).test(html);
 const assertShows = (html, text, where) => {
   assert.equal(typeof html, 'string', `${where}: Markup`);
   assert.ok(SHOWS(html, text), `${where}: zeigt ${text}\n${html.slice(0, 600)}`);
@@ -398,10 +400,11 @@ test('Kontozeile der Seitenleiste (router.js)', () => {
     `${source}\nreturn syncSidebarAccount;`,
   )({ currentUser }, initials, () => false, (key) => key, (label) => label, () => null, { querySelector: () => null })(root);
 
+  // Seit R20 als `data-initials` (Zeichnung per ::before), nicht als Text.
   run({ display_name: MINSU });
-  assert.equal(avatar.textContent, '민수');
+  assert.equal(avatar.dataset.initials, '민수');
   run({ display_name: 'Anna Maria Schmidt' });
-  assert.equal(avatar.textContent, 'AS');
+  assert.equal(avatar.dataset.initials, 'AS');
 });
 
 test('Einstellungen: Familie, Konto und Rechte', async () => {
@@ -420,7 +423,7 @@ test('Einstellungen: Familie, Konto und Rechte', async () => {
 
 test('Kalender: die Scheibe im Filterblatt', async () => {
   const { __test: calendar } = await import('../public/pages/calendar.js');
-  const html = calendar.personFilterRowsHtml([{ id: 1, display_name: MINSU, avatar_color: '#34C759' }]);
+  const html = calendar.personFilterChipsHtml([{ id: 1, display_name: MINSU, avatar_color: '#34C759' }]);
   assertShows(html, '민수', 'Filterblatt');
 });
 
@@ -448,6 +451,17 @@ test('Kontakte: ein verknuepftes Haushaltsmitglied', async () => {
     id: 2, name: 'Anna Maria Schmidt', category: 'family', family_user_id: 6, family_display_name: 'Anna Maria Schmidt',
   });
   assert.ok(SHOWS(latin, 'AS'), 'drei Woerter: das erste und das letzte, wie ueberall');
+});
+
+// R19 (Critique 2026-10-16): "Die Kontakte-Avatare zeigen die Kategorie statt
+// der Person." Ein Kontakt ohne Konto traegt jetzt seine Initialen.
+test('R19: Kontakte ohne Konto - die Scheibe zeigt die Person, nicht die Kategorie', async () => {
+  const { __test: contacts } = await import('../public/pages/contacts.js');
+  const html = contacts.renderContactItem({ id: 3, name: 'Anna Maria Schmidt', category: 'doctor' });
+  assert.ok(SHOWS(html, 'AS'), 'die Initialen der Person');
+  assert.match(html, /class="contact-item__icon contact-item__icon--initials" aria-hidden="true">AS</);
+  assert.doesNotMatch(html.slice(0, html.indexOf('contact-item__body')), /data-lucide|contact-cat-icon|<svg/, 'kein Kategoriezeichen in der Scheibe');
+  assertShows(contacts.renderContactItem({ id: 4, name: MINSU, category: 'family' }), '민수', 'Kontaktzeile ohne Konto');
 });
 
 test('Geburtstage: Zeile und Vorschau', async () => {
@@ -642,7 +656,7 @@ test('mit Haushalt: JEDER Aufrufer zeigt fuer Linda LI und fuer Leo LE', async (
     'Einstellungen Familie': (name) => family.__test.avatarHtml(person(name)),
     'Einstellungen Konto': (name) => account.__test.avatarHtml(person(name)),
     'Einstellungen Rechte': (name) => permissions.memberChipHtml(person(name)),
-    'Kalender Filterblatt': (name) => calendar.personFilterRowsHtml([person(name)]),
+    'Kalender Filterblatt': (name) => calendar.personFilterChipsHtml([person(name)]),
     'Dienstplan Spur': (name) => withState(schedule.scheduleState(), { users: [{ id: 5, display_name: name }] },
       () => schedule.overviewLaneHeader(5)),
     Kontaktzeile: (name) => contacts.renderContactItem({
@@ -689,7 +703,7 @@ test('mit Haushalt: JEDER Aufrufer zeigt fuer Linda LI und fuer Leo LE', async (
     )({ currentUser: { display_name: name } }, initials, () => false, (key) => key, (label) => label, () => null, { querySelector: () => null })(
       { querySelector: (sel) => parts[sel], querySelectorAll: () => [] },
     );
-    return `<span>${avatar.textContent}</span>`;
+    return `<span>${avatar.dataset.initials ?? avatar.textContent}</span>`;
   };
 
   // Positivkontrolle: OHNE Haushalt zeigt jeder Aufrufer LJ - sonst traefe
@@ -804,4 +818,18 @@ test('die kleine Scheibe: jede aufloesbare Kollisionsgruppe ist auch dort aufgel
   assert.ok(groups > 50, `der Lauf sieht aufloesbare Gruppen (${groups})`);
   assert.ok(changed > 10, `und darunter solche, in denen das letzte Zeichen nicht reicht (${changed})`);
   assert.ok(neitherSide > 0, `und solche, in denen keine Seite fuer sich alle unterscheidet (${neitherSide})`);
+});
+
+// R19 (Critique 2026-10-16): Avatar-Stapel mit 2px Luft statt Ueberlappung -
+// die 6px Ueberlappung bei 22px schnitt die Initialen des Nachbarn an.
+test('R19: der Avatar-Stapel ueberlappt nicht, die Scheiben stehen mit 2px Luft', () => {
+  const sheets = ['user-multi-select.css', 'calendar.css', 'dashboard.css', 'tasks.css', 'meals.css'];
+  for (const name of sheets) {
+    const css = read(`styles/${name}`);
+    for (const m of css.matchAll(/([^{}]*\.avatar-stack[^{}]*)\{([^}]*)\}/g)) {
+      assert.doesNotMatch(m[2], /margin-(?:left|right|inline-start|inline-end):\s*(?:-|calc\(\s*-)/, `${name}: ${m[1].trim()} ueberlappt wieder`);
+    }
+  }
+  const stack = read('styles/user-multi-select.css');
+  assert.match(stack, /\.avatar-stack \{[^}]*gap:\s*var\(--space-0h\)/, '2px Luft als logische Luecke');
 });

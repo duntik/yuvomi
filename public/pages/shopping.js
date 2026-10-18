@@ -5,11 +5,11 @@
  */
 
 import { api } from '/api.js';
-import { stagger, vibrate, scheduleUndoableDelete, collapseOut, expandIn, acknowledgeCheck, durationToken } from '/utils/ux.js';
+import { stagger, vibrate, scheduleUndoableDelete, collapseOut, expandIn, acknowledgeCheck, durationToken, isImeComposing } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
 import { flipSnapshot, flipPlay } from '/utils/flip.js';
 import { t } from '/i18n.js';
-import { esc } from '/utils/html.js';
+import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { formRowsHtml, formRowHtml } from '/utils/form-row.js';
 import { readRowHtml, readDetailsLabel } from '/utils/read-row.js';
 import { promptModal, openModal, closeModal, confirmModal, reportFieldError, refocusAfterRender } from '/components/modal.js';
@@ -1770,7 +1770,7 @@ function wireAutocomplete(container) {
       e.preventDefault();
       activeIdx = Math.max(activeIdx - 1, 0);
       items.forEach((el, i) => el.classList.toggle('autocomplete-item--active', i === activeIdx));
-    } else if (e.key === 'Enter' && activeIdx >= 0) {
+    } else if (e.key === 'Enter' && activeIdx >= 0 && !isImeComposing(e)) {
       e.preventDefault();
       applyAutocompleteSuggestion(container, items[activeIdx]);
       dropdown.hidden = true;
@@ -2689,7 +2689,7 @@ function openItemDetails(itemId, container) {
     content: `
       <form id="item-details-form" class="item-details-form" novalidate autocomplete="off">
         <div class="form-group">
-          <label class="form-label" for="item-details-name">${t('common.nameLabel')}</label>
+          <label class="form-label" for="item-details-name">${t('common.nameLabel')}${REQUIRED_MARK}</label>
           <input class="form-input" type="text" id="item-details-name" required
                  value="${esc(item.name)}">
         </div>
@@ -4474,6 +4474,9 @@ async function openCategoryManager(container, { fromDeepLink = false } = {}) {
 export async function render(container, { user, signal: routeSignal = null } = {}) {
   state.currentUserId = user?.id ?? null;
   _routeSignal = routeSignal;
+  // Beim Verlassen gehen die Zieh-Instanzen mit (R20): SortableJS fuehrt sie in
+  // einer eigenen Liste am Dokument und hielte die alte Liste sonst fest.
+  routeSignal?.addEventListener('abort', destroyItemSortables, { once: true });
   // Ein Seitenaufbau ist immer ein neuer Batch fuer die Sammelaktions-Pille -
   // eine Frist der vorherigen Seite darf diese hier nicht treffen (#1039).
   resetPillMachine();

@@ -36,12 +36,14 @@ import { renderAvatarStack } from '/components/user-multi-select.js';
 import { isSoloHousehold } from '/utils/household.js';
 import { toggleRegion, durationToken, easingToken } from '/utils/ux.js';
 import { swapContent } from '/utils/content-swap.js';
+import { brandMarkSvg } from '/utils/brand-mark.js';
 import { findSettingsLeaf } from '/settings/registry.js';
 import {
   WIDGET_SIZE_PRESETS, WIDGET_SIZE_OPTIONS,
   COCKPIT_COVERED_WIDGETS,
   nearestPreset, sameWidgetConfig, suggestGridHoleFill, rowFillSpans,
   dashboardQuery, dashboardQueryFiltersCounts, dashboardRequest, normalizeShoppingListSelection,
+  fetchPendingReminders, childDefaultWidgetConfig,
 } from '/utils/dashboard-widgets.js';
 import { EVENT_LIMIT_STEPS, EVENT_LIMIT_DEFAULT, clampEventLimit } from '/utils/dashboard-event-limit.js';
 import {
@@ -62,12 +64,12 @@ import { emptyHintHTML } from '/utils/empty-state.js';
 import { quickLinkHost } from '/utils/quick-link-url.js';
 import { hasIcon } from '/utils/lucide-icons.js';
 import { prefersInkText } from '/utils/contrast.js';
-import { openQuickLinksManager } from '/components/quick-links-manager.js';
 import { attachOverlay, pushOverlay, dropOverlay, isOverlayOpen } from '/utils/overlay-history.js';
+import { inertOutside } from '/utils/background-inert.js';
 import { mealTypeList, primeMealTypeNames } from '/utils/meal-types.js';
 import { recipeThumbHtml, wireRecipeThumbs } from '/utils/recipe-thumb.js';
 import { wireNoteCategoryOverflow } from '/utils/note-category-overflow.js';
-import { installPopoverMenus } from '/utils/popover-menu.js';
+import { installPopoverMenus, popoverMenuHtml } from '/utils/popover-menu.js';
 import { nextRewardGoal } from '/utils/reward-goal.js';
 
 // Hält den AbortController des aktuellen FAB-Listeners - wird bei jedem render() erneuert.
@@ -90,6 +92,23 @@ let _fabController = null;
  * Sie gilt ohnehin nur auf `/` (isWallRoute). */
 let _wallOverlay = null;
 let _wallLeave = null;
+
+/* WOHIN DER FOKUS NACH DEM MODUSWECHSEL GEHT (R20, Re-Critique 2026-10-17 A1
+ * P2-6). Start und Ausstieg bauen die ganze Seite neu (`rerender`), und danach
+ * stand der Fokus auf <body>: wer per Tastatur „Wand-Modus starten" drueckte,
+ * fand sich nirgends, und nach Esc wieder am Dokumentanfang. Die Absicht
+ * ueberlebt den Neuaufbau hier, weil `render()` eine neue Closure baut:
+ *   'enter' -> die Wandflaeche selbst (`#wall-surface`, tabindex=-1): ein
+ *              ruhiger Einstieg, kein Knopf - ein Enter dort beendete sonst
+ *              gleich wieder, was gerade begonnen hat;
+ *   'leave' -> der Knopf, der die Wand wieder oeffnet (am Finger das Menue).
+ * Einmal gelesen, dann vergessen. */
+let _wallFocusIntent = null;
+function takeWallFocusIntent(kind) {
+  if (_wallFocusIntent !== kind) return false;
+  _wallFocusIntent = null;
+  return true;
+}
 
 function holdWallMarker(leave) {
   _wallLeave = leave;
@@ -122,6 +141,19 @@ const ONBOARDING_KEY = 'yuvomi-onboarded';
 const ONBOARDING_TITLE_ID = 'onboarding-step-title';
 const APP_NAME_STORAGE_KEY = 'yuvomi-app-name';
 const CUSTOMIZE_HINT_KEY = 'yuvomi-dash-customize-hint';
+
+// DIE RUECKKEHR IN DEN TAB LAEDT NUR, WAS ALT IST (Modern-Web-Guidance-Audit,
+// Befund 13). Jeder Wechsel zurueck holte `/dashboard` samt Erinnerungen neu
+// und baute die ganze Uebersicht auf, auch nach Sekunden in einem anderen Tab.
+// Neu geladen wird, wenn der Stand aelter als eine Minute ist oder der
+// Haushaltstag seitdem gewechselt hat ("Heute" waere sonst gestern).
+const RETURN_REFRESH_MIN_MS = 60_000;
+
+function staleOnReturn({ loadedAt, loadedDay }, { now, today }) {
+  if (!loadedAt) return true;
+  if (loadedDay !== today) return true;
+  return now.getTime() - loadedAt.getTime() >= RETURN_REFRESH_MIN_MS;
+}
 
 /* DER TAG EINES TERMINS IST DER TAG DER HAUSHALTSZONE, nicht der des Browsers.
  *
@@ -324,12 +356,30 @@ function getOnboardingSteps() {
   // bekommt weder Bottom-Bar- noch Wischgesten-Text. Gleicher Breakpoint wie
   // der Sidebar-Umbruch (layout.css, min-width: 1024px).
   const desktop = window.matchMedia('(min-width: 1024px)').matches;
+  // DIE MARKE UND DIE ECHTEN KNOEPFE (Re-Critique 2026-10-17, A1): der
+  // Rundgang begann mit einem Lucide-Haus statt der Bildmarke und beschrieb
+  // Leiste und Plus-Knopf nur in Worten. Schritt 1 traegt jetzt das Zeichen
+  // (utils/brand-mark.js), Schritt 2 und 3 zeigen auf das Bedienelement, das
+  // der Text nennt (`target`, siehe placeSpotlight in showOnboarding).
   return [
-    { icon: 'home',         title: t('onboarding.step1Title', { name: appName }), body: t('onboarding.step1Body') },
-    { icon: 'navigation',   title: t('onboarding.step2Title'), body: t(desktop ? 'onboarding.step2BodyDesktop' : 'onboarding.step2Body') },
-    { icon: 'plus-circle',  title: t('onboarding.step3Title'), body: t(desktop ? 'onboarding.step3BodyDesktop' : 'onboarding.step3Body') },
+    { mark: true,           title: t('onboarding.step1Title', { name: appName }), body: t('onboarding.step1Body') },
+    { icon: 'navigation',   title: t('onboarding.step2Title'), body: t(desktop ? 'onboarding.step2BodyDesktop' : 'onboarding.step2Body'),
+      target: () => document.querySelector(desktop ? '.nav-sidebar' : '.nav-bottom__items') },
+    { icon: 'plus-circle',  title: t('onboarding.step3Title'), body: t(desktop ? 'onboarding.step3BodyDesktop' : 'onboarding.step3Body'),
+      target: () => [...document.querySelectorAll('.page-fab')].find(isShownOnScreen) ?? null },
   ];
 }
+
+/** Steht das Element sichtbar im Fenster? (Ziel eines Rundgang-Schritts) */
+function isShownOnScreen(el) {
+  if (!el || !el.getClientRects().length) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0
+    && r.top < window.innerHeight && r.left < window.innerWidth;
+}
+
+/** Abstand des Lichtrings um das gezeigte Bedienelement, in px. */
+const ONBOARDING_SPOT_PAD = 6;
 
 function showOnboarding(appContainer, onDone) {
   const steps = getOnboardingSteps();
@@ -383,7 +433,38 @@ function showOnboarding(appContainer, onDone) {
   const stepEl = document.createElement('div');
   stepEl.className = 'onboarding-step';
   card.appendChild(stepEl);
+
+  /* DER LICHTRING (Re-Critique 2026-10-17, A1 "kein Bezug auf echte
+   * Bedienelemente"). Nennt ein Schritt die Leiste oder den Plus-Knopf, liegt
+   * ueber genau diesem Knopf ein Ausschnitt: der Ring traegt den Abdunkler als
+   * Schatten nach aussen (`box-shadow` mit 100vmax Spreizung), das Overlay
+   * selbst wird dafuer klar. So steht das echte Element scharf im Bild, der
+   * Rest gedimmt - ohne Maske, ohne Kopie des Elements. Klicks faengt weiter
+   * das Overlay; der Ring ist reine Anzeige (aria-hidden), der Text bleibt die
+   * Aussage. Findet sich das Ziel nicht (Modul ohne Plus, ausgeblendete
+   * Leiste), bleibt der Schritt so, wie er vorher war: Tafel auf Unschaerfe. */
+  const spot = document.createElement('div');
+  spot.className = 'onboarding-spotlight';
+  spot.setAttribute('aria-hidden', 'true');
+  overlay.appendChild(spot);
   overlay.appendChild(card);
+
+  function placeSpotlight() {
+    const target = steps[current].target?.();
+    const shown = isShownOnScreen(target);
+    overlay.classList.toggle('onboarding-overlay--spot', shown);
+    if (!shown) return;
+    const r = target.getBoundingClientRect();
+    const radius = parseFloat(getComputedStyle(target).borderTopLeftRadius) || 0;
+    const pad = ONBOARDING_SPOT_PAD;
+    spot.style.setProperty('--spot-x', `${Math.round(r.left - pad)}px`);
+    spot.style.setProperty('--spot-y', `${Math.round(r.top - pad)}px`);
+    spot.style.setProperty('--spot-w', `${Math.round(r.width + pad * 2)}px`);
+    spot.style.setProperty('--spot-h', `${Math.round(r.height + pad * 2)}px`);
+    spot.style.setProperty('--spot-r', `${Math.round(Math.min(radius + pad, (r.height + pad * 2) / 2))}px`);
+  }
+  const onResize = () => placeSpotlight();
+  window.addEventListener('resize', onResize);
 
   function fitSteps() {
     stepEl.style.minBlockSize = '';
@@ -404,10 +485,18 @@ function showOnboarding(appContainer, onDone) {
     const isLast = current === steps.length - 1;
     stepEl.replaceChildren();
 
-    const icon = document.createElement('i');
-    icon.dataset.lucide = step.icon;
-    icon.className = 'onboarding-icon';
-    icon.setAttribute('aria-hidden', 'true');
+    let icon;
+    if (step.mark) {
+      icon = document.createElement('span');
+      icon.className = 'onboarding-mark';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.insertAdjacentHTML('beforeend', brandMarkSvg());
+    } else {
+      icon = document.createElement('i');
+      icon.dataset.lucide = step.icon;
+      icon.className = 'onboarding-icon';
+      icon.setAttribute('aria-hidden', 'true');
+    }
 
     const title = document.createElement('h2');
     title.className = 'onboarding-title';
@@ -466,6 +555,7 @@ function showOnboarding(appContainer, onDone) {
     stepEl.appendChild(actions);
 
     if (window.lucide) window.lucide.createIcons({ el: stepEl });
+    placeSpotlight();
     return nextBtn;
   }
 
@@ -474,6 +564,7 @@ function showOnboarding(appContainer, onDone) {
     if (finished) return;
     finished = true;
     document.removeEventListener('keydown', onKeydown);
+    window.removeEventListener('resize', onResize);
     localStorage.setItem(ONBOARDING_KEY, '1');
     // Am Konto vermerken, nicht nur am Geraet: sonst zeigt ein neues Geraet
     // oder ein privates Fenster den Rundgang erneut, obwohl das Konto ihn
@@ -481,11 +572,14 @@ function showOnboarding(appContainer, onDone) {
     // darf den Dialog nicht am Schliessen hindern; der lokale Merker faengt
     // den aktuellen Browser ohnehin ab.
     auth.markOnboardingSeen().catch(() => {});
-    // Fokus dorthin zurückgeben, wo er vor dem Dialog lag (sonst neutral auf
-    // den Body), damit Tastatur-/SR-Nutzer nicht im entfernten Overlay hängen.
-    const restoreTarget = (previouslyFocused && document.contains(previouslyFocused))
+    // Fokus dorthin zurückgeben, wo er vor dem Dialog lag, sonst auf den
+    // Inhalt (`#main-content`, tabIndex -1 - wie nach einer Navigation).
+    // `document.body.focus()` tat nichts, und der Fokus blieb im entfernten
+    // Overlay haengen (Modern-Web-Guidance-Audit, Befund 10).
+    releaseBackground();
+    const restoreTarget = (previouslyFocused?.isConnected && previouslyFocused !== document.body)
       ? previouslyFocused
-      : document.body;
+      : document.getElementById('main-content');
     overlay.classList.add('onboarding-overlay--out');
     overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
     // Fallback falls animationend nicht feuert (prefers-reduced-motion):
@@ -497,6 +591,9 @@ function showOnboarding(appContainer, onDone) {
   appContainer.appendChild(overlay);
   // Messen kann erst ein Knoten im Baum; danach steht Schritt 1.
   fitSteps();
+  // Die Seite hinter dem Rundgang ist gesperrt, solange er laeuft
+  // (utils/background-inert.js); finish() gibt sie vor dem Fokus frei.
+  const releaseBackground = inertOutside(overlay);
   setTimeout(() => stepEl.querySelector('.btn--primary')?.focus(), 50);
   // Die Zurueck-Geste beendet die Einfuehrung, statt hinter ihr zu navigieren
   // (#871). `finish()` ist der EINE Weg hinaus und merkt sich das auch.
@@ -508,7 +605,10 @@ function showOnboarding(appContainer, onDone) {
 // Erststart sichtbar, wo sie sich wieder einblenden lassen. Danach nie wieder.
 function maybeHintCustomize(container) {
   if (localStorage.getItem(CUSTOMIZE_HINT_KEY)) return;
-  const btn = container.querySelector('#dashboard-customize-btn');
+  // Mobil steht der Einstieg im Menue (R19) - der Hinweis gehoert dem
+  // sichtbaren Knopf.
+  const btn = [...container.querySelectorAll('#dashboard-customize-btn, .dashboard-tools-btn')]
+    .find((el) => el.getClientRects?.().length !== 0);
   if (!btn) return;
   const clear = () => {
     btn.classList.remove('dashboard-icon-btn--hint');
@@ -1167,7 +1267,27 @@ function mealCookPerson(meal, users) {
   };
 }
 
-function buildTodayProgram(data, { includeTasks = true, includeCalendar = true, includeMeals = true, now = new Date() } = {}) {
+/* WER SCHAUT (R20, Kinder-Standards). Die Seite setzt das in `render()`; die
+ * Programmzeilen fragen es, damit ein Kind seine Aufgaben zuerst sieht. */
+let dashboardViewer = null;
+
+/** Ein Kinderkonto, das der Vorgabe folgt, bekommt die Kinder-Vorgabe der Kacheln. */
+function childDefaultFor(config, user, followsDefault) {
+  return followsDefault && user?.family_role === 'child' ? childDefaultWidgetConfig(config) : config;
+}
+
+/* Gehoert eine Aufgabe NUR anderen? Fuer ein Kind ruecken solche Zeilen ans
+ * Ende des Blatts (und fallen zuerst unter „+N weitere"): eigene und
+ * niemandem zugewiesene Aufgaben zuerst. Erwachsene sehen das Blatt wie
+ * bisher - ihre Rolle ist es, den Ueberblick ueber alle zu haben. Nichts
+ * verschwindet, die Aufgabenliste zeigt weiter alles. */
+function taskForOthersOnly(task, viewer) {
+  if (viewer?.family_role !== 'child' || viewer?.id == null) return false;
+  const people = Array.isArray(task?.assigned_users) ? task.assigned_users : [];
+  return people.length > 0 && !people.some((person) => person?.id === viewer.id);
+}
+
+function buildTodayProgram(data, { includeTasks = true, includeCalendar = true, includeMeals = true, now = new Date(), viewer = dashboardViewer } = {}) {
   const highlights = buildTodayHighlights(data);
   const todayKey = zonedDateKey(now);
   const nowStamp = householdNowStamp(now);
@@ -1229,10 +1349,14 @@ function buildTodayProgram(data, { includeTasks = true, includeCalendar = true, 
       // auf einem Geraet in New York stand an „bis 18:00" in Berlin „bis 00:00".
       const dueTime = !overdue && task.due_time ? String(task.due_time).slice(0, 5) : null;
       const dueValid = dueTime && /^\d{2}:\d{2}$/.test(dueTime);
+      const othersOnly = taskForOthersOnly(task, viewer);
+      const baseKey = overdue ? '00:00' : dueValid ? dueTime : '00:02';
       rows.push({
         kind: 'task',
         objectId: task.id,
-        sortKey: overdue ? '00:00' : dueValid ? dueTime : '00:02',
+        // '~' sortiert hinter jede Uhrzeit: fremde Aufgaben eines Kindes am Ende.
+        sortKey: othersOnly ? `~${baseKey}` : baseKey,
+        othersOnly,
         timeLabel: overdue ? t('dashboard.overdue') : dueValid ? t('dashboard.todayUntil', { time: formatTime(`${task.due_date}T${dueTime}`) }) : '',
         overdue,
         title: task.title,
@@ -1245,7 +1369,7 @@ function buildTodayProgram(data, { includeTasks = true, includeCalendar = true, 
         route: '/tasks',
         who: task.assigned_users?.[0] ?? null,
         people: task.assigned_users ?? [],
-        priority: overdue ? 10 : 30,
+        priority: othersOnly ? 90 : overdue ? 10 : 30,
         open: true,
       });
     }
@@ -1284,7 +1408,8 @@ function buildTodayProgram(data, { includeTasks = true, includeCalendar = true, 
   // Ohne sie verspräche die Fläche abends „nichts mehr", während der
   // Schulausflug-Zettel morgen früh abgegeben werden muss.
   const allTasks = Array.isArray(data?.urgentTasks) ? data.urgentTasks : Array.isArray(data?.tasks) ? data.tasks : [];
-  const nextDueTask = allTasks.find((task) => task.due_date && task.due_date > todayKey) ?? null;
+  const laterTasks = allTasks.filter((task) => task.due_date && task.due_date > todayKey);
+  const nextDueTask = laterTasks.find((task) => !taskForOthersOnly(task, viewer)) ?? laterTasks[0] ?? null;
 
   return {
     rows,
@@ -2159,11 +2284,21 @@ function renderFamilyWidget(users, data, { manageHref = null } = {}) {
       status = esc(t('dashboard.todayFree'));
       free = true;
     }
+    // MOBIL EINE AVATAR-REIHE (R19, Entscheidung Ulas 2026-10-16): dort steht
+    // je Person nur das Gesicht mit der Zahl offener Aufgaben und der Vorname
+    // (dashboard.css, `.family-member__face` / `__short`); Name und Satz
+    // bleiben im Baum und sind der Name fuer Screenreader. Zahl und Vorname
+    // sind Malerei (`aria-hidden`), der Satz sagt dasselbe.
+    const firstName = String(u.display_name || '').trim().split(/\s+/)[0] || '';
     return `
       <div class="family-member">
-        <span class="family-widget-avatar" style="background:${esc(u.avatar_color || AVATAR_FALLBACK_COLOR)};color:${getReadableTextColor(u.avatar_color || AVATAR_FALLBACK_COLOR)}">
-          ${u.avatar_data ? `<img src="${esc(u.avatar_data)}" alt="" loading="lazy">` : esc(initials(u.display_name))}
+        <span class="family-member__face">
+          <span class="family-widget-avatar" style="background:${esc(u.avatar_color || AVATAR_FALLBACK_COLOR)};color:${getReadableTextColor(u.avatar_color || AVATAR_FALLBACK_COLOR)}">
+            ${u.avatar_data ? `<img src="${esc(u.avatar_data)}" alt="" loading="lazy">` : esc(initials(u.display_name))}
+          </span>
+          ${open > 0 ? `<span class="family-member__count" aria-hidden="true">${esc(getNumberFormat().format(open))}</span>` : ''}
         </span>
+        <span class="family-member__short" aria-hidden="true">${esc(firstName)}</span>
         <span class="family-member__body">
           <span class="family-member__name">${esc(u.display_name)}</span>
           <span class="family-member__status${free ? ' family-member__status--free' : ''}">${status}</span>
@@ -2194,7 +2329,10 @@ function renderFamilyWidget(users, data, { manageHref = null } = {}) {
     : esc(t('dashboard.familyDayCalm'));
 
   return `<div class="widget widget--family">
-    ${widgetHeader('family', t('dashboard.familyTitle'), null, manageHref, manageHref ? t('dashboard.manage') : null, 'contacts')}
+    ${/* EIN WORT FUER DEN KOPF-LINK (Critique 2026-10-16): jede Kachel fuehrt
+         mit „Alle" zu ihrer Seite, nur die Familie sagte „Verwalten" - fuer
+         denselben Weg, die ganze Liste. */ ''}
+    ${widgetHeader('family', t('dashboard.familyTitle'), null, manageHref, null, 'contacts')}
     <div class="family-widget">
       <div class="family-widget__list">
         ${sharedRow}
@@ -3637,7 +3775,9 @@ const PROGRAM_ROW_CAP_PHONE = 2;
 const OVERDUE_GROUP_MIN = 2;
 
 function groupOverdueRows(rows) {
-  const overdue = rows.filter((row) => row.kind === 'task' && row.overdue);
+  // Fremde Aufgaben eines Kindes (`othersOnly`) gehen nicht in die Gruppe, die
+  // oben steht - sie bleiben einzeln am Ende des Blatts.
+  const overdue = rows.filter((row) => row.kind === 'task' && row.overdue && !row.othersOnly);
   if (overdue.length < OVERDUE_GROUP_MIN) return rows;
   const seen = new Set();
   const people = [];
@@ -3709,6 +3849,7 @@ function buildTodayCockpitModel(data, cfg = [], {
   cap = onPhoneStage() ? PROGRAM_ROW_CAP_PHONE : PROGRAM_ROW_CAP,
   now = new Date(),
   groupOverdue = onPhoneStage(),
+  viewer = dashboardViewer,
 } = {}) {
   // Kein Echo: ist das Modul-Widget einer Domäne sichtbar, entfallen ihre
   // Programm-Zeilen — jede Domäne hat genau eine Repräsentation (Cockpit ODER
@@ -3721,7 +3862,7 @@ function buildTodayCockpitModel(data, cfg = [], {
   const includeMeals = domainInCockpit('meals');
   const includeShopping = domainInCockpit('shopping');
 
-  const program = buildTodayProgram(data, { includeTasks, includeCalendar, includeMeals, now });
+  const program = buildTodayProgram(data, { includeTasks, includeCalendar, includeMeals, now, viewer });
 
   // Die uebrigen Quellen des Blatts (Dosen, Freigaben, Abfuhr, Geburtstag,
   // Schicht, Erinnerungen, Haushaltshilfe) sprechen ueber den Beitrags-Vertrag
@@ -4088,7 +4229,7 @@ function renderDashboardOverview(user, editing = false, weather = null, scope = 
   // setzen darf, ist Admin (#827).
   // `offerNew: false` im Fehlerzustand: wie der Speed-Dial dort (#634-Kommentar
   // bei initFab) kein Anlegen in Module, deren Daten nicht geladen sind.
-  const { followsDefault = true, canPublish = false, offerNew = true } = scope;
+  const { followsDefault = true, canPublish = false, offerNew = true, weatherCard = false } = scope;
   const dateLabel = mastheadDateLabel();
   // EIN WANDTABLETT BEKOMMT ZWEI KNOEPFE NICHT, WEIL BEIDE NUR SCHEITERN
   // KOENNEN (#1808). "Anpassen" endet in `PUT /preferences`, und ein Display
@@ -4109,7 +4250,7 @@ function renderDashboardOverview(user, editing = false, weather = null, scope = 
       <div class="dashboard-overview__header${editing ? ' dashboard-overview__header--editing' : ''}">
         <span class="dashboard-overview__date">${dateLabel}</span>
         <h2 class="dashboard-overview__title dashboard-overview__title--${greetingPeriod()}">${greeting(user.display_name)}</h2>
-        ${mastheadWeatherHtml(weather)}
+        ${mastheadWeatherHtml(weather, { card: weatherCard })}
         <div class="dashboard-overview__tools">
           ${editing ? `
           <!-- Die Beruhigung stand nur im Toast NACH dem Speichern, die
@@ -4162,21 +4303,37 @@ function renderDashboardOverview(user, editing = false, weather = null, scope = 
                ein sechstes Ziel (gemessen: 52px je Slot, "Übersicht" und
                "Aufgaben" brechen), also steht sie hier, wo man ankommt - ein
                Icon-Knopf wie die zwei daneben. -->
-          ${onDisplay ? '' : `<button class="dashboard-icon-btn" id="dashboard-search"
+          ${onDisplay ? '' : `<button class="btn btn--secondary btn--icon dashboard-icon-btn" id="dashboard-search"
                   aria-label="${t('nav.search')}"
                   title="${t('nav.search')}" aria-haspopup="dialog">
             <i data-lucide="search" aria-hidden="true"></i>
           </button>`}
-          <button class="dashboard-icon-btn" id="dashboard-wall-enter"
+          <button class="btn btn--secondary btn--icon dashboard-icon-btn" id="dashboard-wall-enter"
                   aria-label="${t('dashboard.wallEnter')}"
                   title="${t('dashboard.wallEnter')}">
             <i data-lucide="maximize-2" aria-hidden="true"></i>
           </button>
-          ${onDisplay ? '' : `<button class="dashboard-icon-btn" id="dashboard-customize-btn"
+          ${onDisplay ? '' : `<button class="btn btn--secondary btn--icon dashboard-icon-btn" id="dashboard-customize-btn"
                   aria-label="${t('dashboard.customize')}"
                   title="${t('dashboard.customize')}">
             <i data-lucide="settings-2" aria-hidden="true"></i>
           </button>`}
+          ${/* MOBIL IST DAS EIN MENUE (R19, Entscheidung Ulas 2026-10-16): der
+               Wand-Modus wandert ins Anpassen-Menue. Drei Icon-Knoepfe ueber dem
+               Gruss waren zwei zu viel fuer eine Handlung, die man auf dem
+               Telefon fast nie braucht. Unter 768px steht dieses Menue statt
+               der beiden Knoepfe davor (dashboard.css), seine Eintraege klicken
+               sie - ein Handler je Handlung, je Breite ein Weg. */ ''}
+          ${onDisplay ? '' : popoverMenuHtml({
+            id: 'dashboard-tools-menu',
+            label: t('dashboard.customize'),
+            icon: 'settings-2',
+            triggerClass: 'btn btn--secondary btn--icon dashboard-icon-btn dashboard-tools-btn',
+            items: [
+              { action: 'dashboard-customize', icon: 'layout-grid', label: t('dashboard.customizeTitle') },
+              { action: 'dashboard-wall', icon: 'maximize-2', label: t('dashboard.wallEnter') },
+            ],
+          })}
           ${offerNew && onDesktopStage() ? renderNewPill() : ''}`}
         </div>
       </div>
@@ -4305,7 +4462,9 @@ function restoreFocusAfterRebuild(container, candidates) {
     const el = isRow
       ? container.querySelectorAll(candidate.selector)[candidate.index]
       : container.querySelector(candidate);
-    if (el && !el.disabled) {
+    // Ein Knopf, der bei dieser Breite nicht gerendert ist (Anpassen mobil im
+    // Menue, R19), nimmt keinen Fokus - weiter zum naechsten Kandidaten.
+    if (el && !el.disabled && el.getClientRects?.().length !== 0) {
       if (isRow) el.focus({ preventScroll: candidate.preventScroll });
       else el.focus();
       return el;
@@ -4812,7 +4971,7 @@ function renderWidgetCustomizeControls(w, index = 0, total = 1) {
           <i data-lucide="chevron-down" aria-hidden="true"></i>
         </button>
       </div>
-      <div class="widget-edit-controls__size" role="group" aria-label="${t('dashboard.customizeSizeFor', { widget: widgetLabel(w.id) })}">
+      <div class="widget-edit-controls__size" role="group" aria-label="${esc(t('dashboard.customizeSizeFor', { widget: widgetLabel(w.id) }))}">
         ${sizeButtons}
       </div>
       ${renderWidgetSizeMenu(w.id, activeSize)}
@@ -4822,7 +4981,7 @@ function renderWidgetCustomizeControls(w, index = 0, total = 1) {
               title="${esc(t('dashboard.optionsFor', { widget: widgetLabel(w.id) }))}">
         <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
       </button>` : ''}
-      <button type="button" class="widget-edit-controls__hide" data-widget-hide="${esc(w.id)}" aria-label="${t('dashboard.customizeHide', { widget: widgetLabel(w.id) })}">
+      <button type="button" class="widget-edit-controls__hide" data-widget-hide="${esc(w.id)}" aria-label="${esc(t('dashboard.customizeHide', { widget: widgetLabel(w.id) }))}">
         <i data-lucide="eye-off" aria-hidden="true"></i>
       </button>
     </div>
@@ -4893,9 +5052,9 @@ function renderHiddenWidgetsTray(cfg, glanceHidden = false) {
   const chips = glanceChip + hidden.map((w) => `
     <div class="widget-restore-chip-group">
       <button type="button" class="widget-restore-chip" data-widget-show="${esc(w.id)}"
-              aria-label="${t('dashboard.customizeShow', { widget: widgetLabel(w.id) })}">
+              aria-label="${esc(t('dashboard.customizeShow', { widget: widgetLabel(w.id) }))}">
         <i data-lucide="${widgetIcon(w.id)}" class="widget-restore-chip__icon" aria-hidden="true"></i>
-        <span class="widget-restore-chip__label">${widgetLabel(w.id)}</span>
+        <span class="widget-restore-chip__label">${esc(widgetLabel(w.id))}</span>
         <i data-lucide="plus" class="widget-restore-chip__add" aria-hidden="true"></i>
       </button>
       ${widgetHasOptions(w.id) ? `
@@ -5062,7 +5221,7 @@ function renderWidgetError(id) {
     <div class="widget__header">
       <span class="widget__title">
         <i data-lucide="${widgetIcon(id)}" class="widget__title-icon" aria-hidden="true"></i>
-        ${widgetLabel(id)}
+        ${esc(widgetLabel(id))}
       </span>
     </div>
     <div class="widget__empty">
@@ -5317,11 +5476,16 @@ function weatherTempBand(temp, units) {
 // (Apple-Today-Muster) statt einer eigenen Karte - die Karte bleibt als Opt-in
 // für Wandtablets im Anpassen-Tray. Kein Echo: ist die Karte sichtbar, reicht
 // der Aufrufer kein weather herein und die Zeile entfällt.
-function mastheadWeatherHtml(weather) {
+function mastheadWeatherHtml(weather, { card = false } = {}) {
   if (!weather?.current) return '';
   const desc = weatherDescText(weather, weather.current.desc);
+  // MIT KARTE NUR MOBIL (R19, Entscheidung Ulas 2026-10-16): die Wetterkarte
+  // stand auf dem Telefon bei y 1438 - die Kurzzeile unterm Gruss sagt das
+  // Jetzt sofort, die Karte weiter unten behaelt die Vorhersage. Ab 768px,
+  // wo die Karte neben dem Kopf im Bild steht, schliessen sich beide weiter
+  // aus (`--card`, dashboard.css).
   return `
-    <p class="dashboard-overview__weather"${weatherToneAttr(weather.current.icon)}>
+    <p class="dashboard-overview__weather${card ? ' dashboard-overview__weather--card' : ''}"${weatherToneAttr(weather.current.icon)}>
       ${weatherIconHtml(weather, weather.current.icon, 'dashboard-overview__weather-icon', 18, desc)}
       <span>${esc(String(weather.current.temp))}${weatherUnitSymbol(weather.units)} · ${esc(desc)}</span>
     </p>`;
@@ -6017,9 +6181,14 @@ function createWallFit(win, signal) {
  * merkte, wenn sie fehlte.
  */
 function rebuildWall(container, shell, { data, weather, failed, updatedAt, rerender, signal, fit, screensaverEnabled = false }) {
+  // Der stille Neuaufbau (Minutentakt, Timer) nimmt den Fokus mit, statt ihn
+  // auf <body> fallen zu lassen - dasselbe Paar wie in rebuildDashboard.
+  const doc = globalThis.document;
+  const { key: keepFocus } = captureRebuildFocus(shell, doc?.activeElement, doc?.body);
   setHtml(shell, renderWallSurface(data, weather, { failed, updatedAt, screensaverEnabled }));
   if (globalThis.window?.lucide) globalThis.window.lucide.createIcons({ el: shell });
   wireWallSurface(container, rerender, signal);
+  restoreFocusAfterRebuild(container, [keepFocus, takeWallFocusIntent('enter') ? '#wall-surface' : null]);
   // Die Titel unter den Gesichtern folgen dem Platz: nach jedem Aufbau von der
   // obersten Stufe hinab.
   return fit.show(shell, data);
@@ -6128,7 +6297,7 @@ function renderWallSurface(data, weather, { failed = false, loading = false, upd
     : '<p class="wall__updated"></p>';
 
   return `
-    <div class="wall">
+    <div class="wall" id="wall-surface" tabindex="-1" aria-label="${esc(t('settings.wallModeLabel'))}" role="region">
       ${renderClockWidget({ wall: true })}
       <div class="wall__stage${failed || loading ? ' wall__stage--single' : ''}">${main}</div>
       ${timer.display}
@@ -6197,6 +6366,7 @@ function wireWallExit(container, rerender, signal) {
   const leave = () => {
     releaseWallMarker();
     exitWallMode();
+    _wallFocusIntent = 'leave';
     // Der Toast sagt, WO der Weg zurueck liegt - wer versehentlich aussteigt,
     // soll nicht suchen muessen. Der Name kommt aus dem Schluessel des Knopfes
     // statt aus dem Satz: sonst driftet die Wegbeschreibung, sobald der Knopf
@@ -6512,7 +6682,12 @@ function wireLinks(container, rerender, { editing = false, user = null } = {}) {
   // dort zieht man Kacheln, man bearbeitet ihren Inhalt nicht.
   if (!editing) {
     container.querySelectorAll('[data-quick-links-manage]').forEach((el) => {
-      el.addEventListener('click', () => openQuickLinksManager({ onChange: rerender }));
+      // Erst beim Tipp geladen (Critique R19): der Verwalter samt Sortierung
+      // lag sonst in der Startkette jeder Uebersicht, geoeffnet wird er selten.
+      el.addEventListener('click', async () => {
+        const { openQuickLinksManager } = await import('/components/quick-links-manager.js');
+        openQuickLinksManager({ onChange: rerender });
+      });
     });
   }
 
@@ -6710,6 +6885,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
   const controller = createPageController(routeSignal);
   _fabController = controller;
   const { signal } = controller;
+  dashboardViewer = user ?? null;
 
   // Der Wand-Modus ist ein Zustand DIESER Seite, kein zweiter Ort: die Route,
   // die Daten, der stille Refresh und die Echo-Regel bleiben dieselben - nur
@@ -6812,7 +6988,17 @@ export async function render(container, { user, signal: routeSignal = null } = {
   // Bleibt `null`, solange nichts geladen wurde: eine Uhrzeit ohne Daten
   // dahinter waere die falscheste aller Angaben.
   let lastLoadedAt = null;
+  // Zeit und Haushaltstag des letzten VOLLEN Stands - die Rueckkehr in den
+  // Tab vergleicht sie. Gemerkt wird der Tag VOR der Anfrage: der Server legt
+  // ihn beim Eingang fest, und eine Antwort, die erst nach Mitternacht
+  // ankommt, zeigt noch den alten Tag. Ein Teilstand (`partial`, der
+  // Filterwechsel) reicht Erinnerungen und Dienstplan vom alten Stand weiter
+  // und zaehlt deshalb nicht als frisch.
+  let freshAt = null;
+  let freshDay = null;
+  const markLoaded = (day, { partial = false } = {}) => { lastLoadedAt = new Date(); if (!partial) { freshAt = lastLoadedAt; freshDay = day; } };
   try {
+    const requestDay = householdToday();
     const [dashRes, weatherRes, prefsRes, remindersRes] = await Promise.all([
       api.get(overviewRequest(layoutHintQuery('/dashboard'))),
       api.get(`/weather?lang=${encodeURIComponent(getLocale())}`).catch(() => ({ data: null })),
@@ -6847,7 +7033,11 @@ export async function render(container, { user, signal: routeSignal = null } = {
     weatherPrefs = prefsRes.data ?? null;
     setWeatherAvailability(weatherRes, weatherPrefs);
     weatherAutoLocate = Boolean(prefsRes.data?.weather_user?.auto_locate ?? prefsRes.data?.weather_auto_locate);
-    widgetConfig = normalizeDashboardConfigWithExtensions(prefsRes.data?.dashboard_widgets ?? buildDefaultWidgetConfig());
+    widgetConfig = childDefaultFor(
+      normalizeDashboardConfigWithExtensions(prefsRes.data?.dashboard_widgets ?? buildDefaultWidgetConfig()),
+      user,
+      prefsRes.data?.dashboard_follows_default !== false,
+    );
     savedWidgetConfig = widgetConfig.map((w) => ({ ...w }));
     /* WIDGET-OPTIONEN KOMMEN EINEN SCHRITT ZU SPAET (#814): die Uebersicht und
      * die Praeferenzen laufen absichtlich parallel los, aber welche Filter
@@ -6878,7 +7068,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
     screensaverEnabled = Boolean(prefsRes.data?.screensaver_enabled);
     currency     = prefsRes.data?.currency ?? 'EUR';
     visibleMealTypes = normalizeVisibleMealTypes(prefsRes.data?.visible_meal_types);
-    lastLoadedAt = new Date();
+    markLoaded(requestDay);
   } catch (err) {
     console.error('[Dashboard] Ladefehler:', err.message, 'Status:', err.status ?? 'network');
     loadFailed = true;
@@ -6972,6 +7162,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
   async function reloadIfQueryChanged(previousQuery) {
     if (dashboardQuery(widgetConfig) === previousQuery) return;
     try {
+      const requestDay = householdToday();
       const fresh = await api.get(overviewRequest(dashboardQuery(widgetConfig)));
       localizeEventLists(fresh);
       fresh.cycle = data.cycle;
@@ -6980,7 +7171,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
       fresh.pendingReminders = data.pendingReminders;
       data = fresh;
       setCountdownAvailability(data?.countdowns);
-      lastLoadedAt = new Date();
+      markLoaded(requestDay, { partial: true });
     } catch { /* der alte Stand bleibt stehen, statt die Seite zu leeren */ }
   }
 
@@ -7122,7 +7313,11 @@ export async function render(container, { user, signal: routeSignal = null } = {
     const previousQuery = dashboardQuery(savedWidgetConfig);
     try {
       const res = await api.put('/preferences', { dashboard_widgets: null, dashboard_today_glance: null });
-      widgetConfig = normalizeDashboardConfigWithExtensions(res.data?.dashboard_widgets ?? buildDefaultWidgetConfig());
+      widgetConfig = childDefaultFor(
+        normalizeDashboardConfigWithExtensions(res.data?.dashboard_widgets ?? buildDefaultWidgetConfig()),
+        user,
+        true,
+      );
       glanceVisible = res.data?.dashboard_today_glance !== false;
     } catch {
       window.yuvomi?.showToast(t('common.errorGeneric'), 'danger');
@@ -7554,14 +7749,20 @@ export async function render(container, { user, signal: routeSignal = null } = {
     // Aufgabe", "Neuer Termin" ...) fuehrte mitten aus der Anordnung hinaus
     // und stand ueber den Bearbeiten-Leisten der unteren Kacheln (A7 P2-1).
     setCustomizeFabHidden(isCustomizing);
-    setHtml(shell, `
+    // VOM SKELETT ZUM INHALT BLENDET ES (Critique R19): vorher ein harter
+    // Schnitt, die Kacheln standen von einem Frame auf den anderen da. Nur
+    // dieser eine Uebergang - ein Neuaufbau ueber vorhandenem Inhalt bleibt
+    // still, und unter der Seitenblende ist die Blende schon das Einblenden.
+    const fromSkeleton = Boolean(shell.querySelector('.widget-skeleton'))
+      && !document.documentElement.classList.contains('page-swapping');
+    swapContent(shell, () => setHtml(shell, `
       <section class="dashboard-masthead dashboard-masthead--${greetingPeriod()}${mastheadSlim}">
-        ${renderDashboardOverview(user, isCustomizing, weatherCardShown ? null : weather, { followsDefault, canPublish })}
+        ${renderDashboardOverview(user, isCustomizing, weather, { followsDefault, canPublish, weatherCard: weatherCardShown })}
         ${cockpitHtml}
       </section>
       ${renderDashboardLayout(cfg, data, weather, currency, { editing: isCustomizing, visibleMealTypes, glanceHidden: !glanceVisible, familyManage: familyManageHref(user) })}
       ${isCustomizing ? renderCustomizeFootnote({ followsDefault, canPublish }) : ''}
-    `);
+    `), { animate: fromSkeleton });
     wireLinks(container, rerender, { editing: isCustomizing, user });
     disposeFastingClock = wireFastingWidget(container, rerender, refreshDashboardData, data.fasting, signal);
     // Retry einer isolierten Widget-Fehlerkachel: da /dashboard aggregiert lädt,
@@ -7586,6 +7787,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
     }, { signal: signal });
     container.querySelector('#dashboard-wall-enter')?.addEventListener('click', () => {
       enterWallMode();
+      _wallFocusIntent = 'enter';
       // EIN KNOPF OHNE WORT SCHALTET DIE GANZE SHELL AB (#1559, D#1494): wer
       // ihn aus Neugier antippt, steht ohne Seitenleiste und Tab-Leiste da.
       // Eine Zeile sagt, was das ist und wie man herauskommt - der Name des
@@ -7603,8 +7805,27 @@ export async function render(container, { user, signal: routeSignal = null } = {
       focusAfterRebuild = ['#dashboard-customize-cancel'];
       rebuildDashboard(widgetConfig);
     }, { signal: signal });
+    // Die Eintraege des mobilen Anpassen-Menues loesen die Knoepfe aus, die sie
+    // dort ersetzen - derselbe Weg, dieselbe Rueckmeldung.
+    container.querySelector('#dashboard-tools-menu')?.addEventListener('click', (event) => {
+      const action = event.target.closest('[data-action]')?.dataset.action;
+      if (action === 'dashboard-customize') container.querySelector('#dashboard-customize-btn')?.click();
+      if (action === 'dashboard-wall') container.querySelector('#dashboard-wall-enter')?.click();
+    }, { signal: signal });
     container.querySelector('#dashboard-customize-save')?.addEventListener('click', saveDashboardConfig, { signal: signal });
     container.querySelector('#dashboard-customize-cancel')?.addEventListener('click', requestCancelDashboardConfig, { signal: signal });
+    // ESC BEENDET DAS ANPASSEN (R20, Re-Critique 2026-10-17 A1 P3), wie
+    // "Abbrechen": mit Rueckfrage, wenn etwas geaendert ist. Nicht, solange
+    // ein Dialog oder Menue offen ist - deren Esc gehoert ihnen.
+    if (isCustomizing) {
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented || !isCustomizing) return;
+        if (document.querySelector('dialog[open], .modal-overlay, [popover].is-open, .popover-menu.is-open')) return;
+        try { if (document.querySelector(':popover-open')) return; } catch { /* ohne Popover-API gibt es keins */ }
+        event.preventDefault();
+        requestCancelDashboardConfig();
+      }, { signal: signal });
+    }
     // Zwei Orte je Knopf (Leiste breit, Fussnote schmal), ein Handler.
     container.querySelectorAll('[data-customize-reset]').forEach((btn) => btn.addEventListener('click', resetDashboardConfig, { signal: signal }));
     container.querySelectorAll('[data-customize-publish]').forEach((btn) => btn.addEventListener('click', publishHouseholdDefault, { signal: signal }));
@@ -7623,7 +7844,8 @@ export async function render(container, { user, signal: routeSignal = null } = {
     restoreFocusAfterRebuild(container, [
       keepFocus,
       ...(focusAfterRebuild ?? []),
-      ...(hadFocus && modeChanged ? ['#dashboard-customize-btn'] : []),
+      ...(hadFocus && modeChanged ? ['#dashboard-customize-btn', '.dashboard-tools-btn'] : []),
+      ...(takeWallFocusIntent('leave') ? ['#dashboard-wall-enter', '.dashboard-tools-btn'] : []),
     ]);
     focusAfterRebuild = null;
     playTileFlip(shell, tileRectsBefore);
@@ -7674,6 +7896,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
     if (isCustomizing || loadFailed || refreshInFlight) return;
     refreshInFlight = true;
     try {
+      const requestDay = householdToday();
       const fresh = await api.get(overviewRequest(dashboardQuery(widgetConfig)));
       if (signal.aborted) return;
       localizeEventLists(fresh);
@@ -7699,7 +7922,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
       fresh.pendingReminders = await loadPendingReminders(overviewRequest);
       if (signal.aborted) return;
       data = fresh;
-      lastLoadedAt = new Date();
+      markLoaded(requestDay);
       rebuildDashboard(widgetConfig);
     } catch { /* Hintergrund-Refresh: bewusst still */ }
     finally { refreshInFlight = false; }
@@ -7728,8 +7951,9 @@ export async function render(container, { user, signal: routeSignal = null } = {
     // Hintergrund-Tabs bekommen gedrosselte Timer: die Uhr könnte beim
     // Zurückkehren Minuten nachhängen und muss sofort nachziehen (#651).
     updateClockWidget(container);
-    // Inhalte ziehen nach, nicht nur Gruß/Datum/Uhr (Paket 2).
-    refreshDashboardData();
+    // Inhalte ziehen nach, nicht nur Gruß/Datum/Uhr (Paket 2) - aber nur ein
+    // alter Stand (staleOnReturn, oben).
+    if (staleOnReturn({ loadedAt: freshAt, loadedDay: freshDay }, { now: new Date(), today: householdToday() })) refreshDashboardData();
   }, { signal: signal });
 
   // Der Minutentakt der Uhr traegt die Nachtabsenkung mit: um 22:00 und um
@@ -7834,7 +8058,7 @@ function todayFingerprint(data, cfg, now = new Date()) {
  * auch hier die Haushaltsfassung ab, und die ist leer - eine Erinnerung gilt
  * der Person, die um sie gebeten hat, nicht der Kueche (#1817).
  */
-async function loadPendingReminders(request = (path) => path, get = (path) => api.get(path)) {
+async function loadPendingReminders(request = (path) => path, get = (path) => fetchPendingReminders(path, { get: (p) => api.get(p) })) {
   try {
     const res = await get(request('/reminders/pending'));
     return Array.isArray(res?.data) ? res.data : [];
@@ -7864,7 +8088,7 @@ async function loadScheduleSlice(day) {
   };
 }
 
-export const __test = { customizeLeaveAllowed, setCustomizeFabHidden, renderCalendarWidget, renderRewardsWidget, loadScheduleSlice, renderUrgentTasks, renderUpcomingEvents, buildTodayHighlights, buildTodayProgram, buildTodayCockpitModel, renderTodayCockpit, renderPinnedNotes, renderScheduleWidget, renderWasteWidget, renderPantryWidget, renderFamilyWidget, formatDueDate, normalizeVisibleMealTypes, renderTodayMeals, calendarEventRoute, eventOccurrenceDateKey, eventStartDate, renderWallSurface, renderWallWho, planWallWhoLines, fitWallWho, createWallFit, rebuildWall, WALL_WHO_LADDER, renderDashboardOverview, selectMetricTiles, METRIC_TILE_ORDER, PROGRAM_ROW_CAP, WALL_ROW_CAP, weatherToneKey, weatherMotionAttr, weatherTempBand, weatherSpanModel, weatherDayLabel, weatherTodayRange, renderWeatherWidget, renderWeatherUnavailable, weatherAvailableFrom, renderWallWeather, relativeDateLabel, listRowCap, openWidgetOptions, renderFab, widgetHeader, renderDashboardLayout, renderMetricTiles, renderGridHint, captureTileRects, playTileFlip, playGridShift, familyManageHref, customizeHasChanges, focusKeyOf, captureRebuildFocus, restoreFocusAfterRebuild, shoppingSoleListRoute, todayMoreRoute, wireTodayMore, wireTodayOverdue, renderWidgetSizeMenu, renderNewPill, renderCustomizeFootnote, applyRowFill };
+export const __test = { childDefaultFor, taskForOthersOnly, customizeLeaveAllowed, setCustomizeFabHidden, renderCalendarWidget, renderRewardsWidget, loadScheduleSlice, renderUrgentTasks, renderUpcomingEvents, buildTodayHighlights, buildTodayProgram, buildTodayCockpitModel, renderTodayCockpit, renderPinnedNotes, renderScheduleWidget, renderWasteWidget, renderPantryWidget, renderFamilyWidget, formatDueDate, normalizeVisibleMealTypes, renderTodayMeals, calendarEventRoute, eventOccurrenceDateKey, eventStartDate, renderWallSurface, renderWallWho, planWallWhoLines, fitWallWho, createWallFit, rebuildWall, WALL_WHO_LADDER, renderDashboardOverview, selectMetricTiles, METRIC_TILE_ORDER, PROGRAM_ROW_CAP, WALL_ROW_CAP, weatherToneKey, weatherMotionAttr, weatherTempBand, weatherSpanModel, weatherDayLabel, weatherTodayRange, renderWeatherWidget, renderWeatherUnavailable, weatherAvailableFrom, renderWallWeather, relativeDateLabel, listRowCap, openWidgetOptions, renderFab, widgetHeader, renderDashboardLayout, renderMetricTiles, renderGridHint, captureTileRects, playTileFlip, playGridShift, familyManageHref, customizeHasChanges, focusKeyOf, captureRebuildFocus, restoreFocusAfterRebuild, shoppingSoleListRoute, todayMoreRoute, wireTodayMore, wireTodayOverdue, renderWidgetSizeMenu, renderNewPill, renderCustomizeFootnote, applyRowFill };
 
 // `signal` ist der Controller des Aufbaus, der die Wetterkarte gezeichnet hat
 // (#976/#977). Vorher las diese Funktion das Modul-Feld `_fabController` -

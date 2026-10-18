@@ -29,7 +29,7 @@ import { esc } from '/utils/html.js';
 import { pushOverlay, dropOverlay, isOverlayOpen } from '/utils/overlay-history.js';
 import { wireSheetDrag } from '/utils/sheet-drag.js';
 import { iconElement } from '/utils/lucide-icons.js';
-import { expandIn, durationToken } from '/utils/ux.js';
+import { expandIn, durationToken, easingToken, isImeComposing } from '/utils/ux.js';
 
 let activeOverlay = null;
 let previouslyFocused = null;
@@ -221,7 +221,7 @@ function _syncOverlayRegistration() {
 async function _closeFromBackNavigation({ force = false } = {}) {
   await closeModal({ force });
   if (force) {
-    document.querySelectorAll('.modal-overlay').forEach((el) => el.remove());
+    document.querySelectorAll('.modal-overlay').forEach((el) => _removeOverlay(el));
   }
   _syncOverlayRegistration();
   return true;
@@ -285,8 +285,14 @@ function enterSubmitTarget(active, container) {
 
 function trapFocus(container, initialFocus = 'first-field') {
   focusTrapHandler = (e) => {
-    // Tab-Trap: Fokus innerhalb des Modals halten
+    // Tab-Trap: Fokus innerhalb des Modals halten - NUR ohne natives
+    // <dialog> (Safari < 15.4). Ein modaler Dialog haelt den Fokus selbst, und
+    // der Fang am Panel sprang vom letzten Feld zurueck aufs erste: der
+    // Toast-Stapel, der waehrend des Dialogs IN ihm neben dem Panel liegt
+    // (_syncTopLayerGuests), war so per Tastatur nie zu erreichen, sein
+    // "Rueckgaengig" nur mit der Maus (Modern-Web-Guidance-Audit, Befund 9).
     if (e.key === 'Tab') {
+      if (container.closest?.('dialog')?.open) return;
       const focusable = container.querySelectorAll(FOCUSABLE);
       if (!focusable.length) return;
       const first = focusable[0];
@@ -305,7 +311,8 @@ function trapFocus(container, initialFocus = 'first-field') {
     // Enter in einzeiligen Inputs/Selects → Formular absenden (Standard-Web-
     // Konvention, Audit 1.4). Textareas behalten ihr Standardverhalten (Zeilen-
     // umbruch), Submit-/Button-Elemente lösen ohnehin ihren eigenen Klick aus.
-    if (e.key === 'Enter') {
+    // Waehrend einer IME-Umwandlung bestaetigt Enter das Schriftzeichen.
+    if (e.key === 'Enter' && !isImeComposing(e)) {
       const active = document.activeElement;
       const isInput = active.tagName === 'INPUT' && active.type !== 'submit' && active.type !== 'button';
       const isSelect = active.tagName === 'SELECT';
@@ -582,8 +589,239 @@ export function swapFieldsKeepingDirtyBase(panel, swap) {
 // Escape-Handler
 // --------------------------------------------------------
 
+/**
+ * ESC GEHOERT DER OBERSTEN EBENE - UND DIESER HANDLER ENTSCHEIDET, NICHT DER
+ * BROWSER (D7, Critique 2026-10-16).
+ *
+ * Seit das Modal ein natives `<dialog>` ist, hat Esc einen zweiten Weg: den
+ * `cancel`-Request des Browsers. Ihm allein zu folgen geht nicht. Chrome laesst
+ * `cancel` nur EINMAL je Nutzeraktivierung abbrechen - gemessen (Chrome 155):
+ * das zweite Esc ohne Klick dazwischen meldet `cancelable: false` und schliesst
+ * den Dialog hart, an der Rueckfrage "Aenderungen verwerfen?" vorbei. Deshalb
+ * nimmt dieser Handler den Tastendruck selbst (`preventDefault` unterdrueckt
+ * den Request) und fuehrt ihn durch `closeModal()` samt Dirty-Guard.
+ *
+ * WEM DAS ESC GILT, sagt der naechste Besitzer des Ziels:
+ *   - das Modal selbst -> schliessen.
+ *   - ein Popover darin (Menue) oder ein eigenes natives `<dialog>` darueber
+ *     (Symbolauswahl, Zuschnitt) -> der Browser schliesst es per Request, hier
+ *     nichts tun.
+ *   - ein selbstgebautes `.modal-overlay`-Div darin (Kalender-Symbolwahl,
+ *     Hilfe) -> es schliesst mit eigenem Handler; hier nur den Request
+ *     unterdruecken, sonst ginge das Formular darunter mit zu.
+ * Ein Handler weiter unten, der Esc selbst erledigt (`defaultPrevented`, etwa
+ * der Datepicker), hat Vorrang.
+ */
 function onEscape(e) {
-  if (e.key === 'Escape') closeModal();
+  if (e === _escKeptBelow) _escKeptBelow = null;
+  if (e.key !== 'Escape' || e.defaultPrevented || !activeOverlay) return;
+  // Esc waehrend einer IME-Umwandlung bricht die Umwandlung ab, nicht das
+  // Formular. preventDefault haelt den close-Request des <dialog> zurueck
+  // (Codex-Review zu #2055).
+  if (isImeComposing(e)) {
+    e.preventDefault();
+    return;
+  }
+  const owner = e.target?.closest?.('[popover], dialog, .modal-overlay') ?? null;
+  if (owner && owner !== activeOverlay) {
+    if (owner.matches('[popover], dialog')) return;
+    e.preventDefault();
+    return;
+  }
+  e.preventDefault();
+  closeModal();
+}
+
+/**
+ * EIN ESC, DAS EIN HANDLER DARUNTER FUER SICH BEHAELT, SCHLIESST AUCH PER
+ * `cancel` NICHT. Die Fasten-Hilfe, die Anhang-Auswahl und Menues schliessen
+ * ihre eigene Ebene auf Esc mit `stopPropagation()`; beim div-Overlay erreichte
+ * das Esc `onEscape` darum nie, und das Formular blieb stehen. Der native
+ * Dialog bekommt danach aber noch den Close-Request des Browsers - gemessen
+ * ging der ganze Einstellungsdialog mit dem Tooltip zu. Der Capture-Listener
+ * merkt sich jedes Esc; kommt es nicht bis `onEscape`, gehoert der folgende
+ * `cancel` desselben Tastendrucks nicht dem Modal. Der Browser schickt ihn
+ * in derselben Aufgabe, deshalb verfaellt die Marke mit der naechsten: die
+ * Zurueck-Geste (ein `cancel` ohne Esc) schliesst weiter.
+ */
+let _escKeptBelow = null;
+function onEscapeCapture(e) {
+  if (e.key !== 'Escape') return;
+  _escKeptBelow = e;
+  setTimeout(() => { if (_escKeptBelow === e) _escKeptBelow = null; }, 0);
+}
+
+function bindEscape() {
+  document.removeEventListener('keydown', onEscapeCapture, true);
+  document.addEventListener('keydown', onEscapeCapture, true);
+  document.removeEventListener('keydown', onEscape);
+  document.addEventListener('keydown', onEscape);
+}
+
+function unbindEscape() {
+  document.removeEventListener('keydown', onEscapeCapture, true);
+  document.removeEventListener('keydown', onEscape);
+  _escKeptBelow = null;
+}
+
+// --------------------------------------------------------
+// Top-Layer (natives <dialog>, D7)
+// --------------------------------------------------------
+
+/**
+ * Was ueber einem offenen Dialog sichtbar UND bedienbar bleiben muss: der
+ * untere Shell-Stapel (Toasts, Sammelpille). Ein modaler Dialog macht alles
+ * ausserhalb seiner selbst inert - auch ein Popover in der Top-Layer, gemessen
+ * (Chrome 155): weder ein vorher noch ein nachher gezeigtes Popover ausserhalb
+ * nimmt Fokus. Ein Toast mit "Rueckgaengig" waere ueber dem Formular nur noch
+ * ein Bild. Er zieht deshalb fuer die Dauer des Dialogs IN den obersten Dialog
+ * und kehrt danach an seinen Platz zurueck. Er bleibt `position: fixed` am
+ * Viewport; die Lage rechnet weiter utils/toast-placement.js.
+ */
+const TOP_LAYER_GUESTS = '.shell-bottom-stack';
+const _guestHome = new WeakMap();
+
+/** Der oberste bedienbare Shared-Dialog: offen, nicht geparkt, nicht im Ausgang. */
+function _topmostSharedDialog() {
+  const open = [...document.querySelectorAll('dialog.modal-overlay')]
+    .filter((d) => d.open && !d.inert && !d.classList.contains('modal-overlay--closing'));
+  return open[open.length - 1] ?? null;
+}
+
+/**
+ * DIE SAMMELAKTIONS-PILLE ZIEHT MIT, ABER NICHT BEDIENBAR. Sie steht im selben
+ * Stapel wie die Toasts, gehoert aber zur Seite hinter dem Dialog: ihre
+ * Aktionen (auch Loeschen) waren per Tab und Klick erreichbar, sobald der
+ * Dialog den Fokus dem Browser ueberliess (Codex-Review zu #2058). Inert nur,
+ * solange sie im Dialog wohnt, und nur, wenn sie es vorher nicht schon war.
+ */
+function _holdBulkPill(guest, hold) {
+  const pill = guest.querySelector?.('.bulk-pill-layer');
+  if (!pill) return;
+  if (hold && !pill.inert) { pill.inert = true; pill._inertByModal = true; }
+  if (!hold && pill._inertByModal) { pill.inert = false; pill._inertByModal = false; }
+}
+
+/** Gaeste in den obersten Dialog holen oder nach Hause schicken. `leaving` zieht sie sicher heraus. */
+function _syncTopLayerGuests(leaving = null) {
+  if (typeof document.querySelectorAll !== 'function') return;
+  let host = _topmostSharedDialog();
+  if (host === leaving) host = null;
+  for (const guest of document.querySelectorAll(TOP_LAYER_GUESTS)) {
+    if (host) {
+      if (guest.parentElement === host) continue;
+      if (!_guestHome.has(guest)) _guestHome.set(guest, { parent: guest.parentElement, next: guest.nextSibling });
+      host.append(guest);
+      _holdBulkPill(guest, true);
+      continue;
+    }
+    const home = _guestHome.get(guest);
+    if (!home) continue;
+    _guestHome.delete(guest);
+    _holdBulkPill(guest, false);
+    if (!home.parent?.isConnected) { document.body.append(guest); continue; }
+    home.parent.insertBefore(guest, home.next?.parentNode === home.parent ? home.next : null);
+  }
+}
+
+/** Ein Overlay aus dem Dokument nehmen - vorher die Gaeste herausholen, sonst gingen Toasts mit. */
+function _removeOverlay(overlay) {
+  if (overlay?.querySelector?.(TOP_LAYER_GUESTS)) _syncTopLayerGuests(overlay);
+  overlay?.remove?.();
+}
+
+/**
+ * In die Top-Layer: `showModal()` macht den Hintergrund inert, faengt Tab im
+ * Dialog und legt `::backdrop` darunter. Ohne `<dialog>`-Unterstuetzung (Node-
+ * Sonden) bleibt es beim Div-Verhalten.
+ */
+function _enterTopLayer(overlay) {
+  if (typeof overlay?.showModal === 'function' && !overlay.open && overlay.isConnected) {
+    overlay.showModal();
+  }
+  _syncTopLayerGuests();
+}
+
+/**
+ * AUS DER TOP-LAYER AM ANFANG DES AUSGANGS, NICHT AM ENDE.
+ *
+ * Bliebe der Dialog bis nach seiner Animation modal, waere die Seite noch
+ * 150-400 ms inert - und wer nach `await closeModal()` ein Feld fokussiert
+ * (Restore-Dialog, neu gezeichnete Listen), fokussierte ins Leere. `close()`
+ * hebt die Sperre sofort; `.modal-overlay--closing` haelt den Knoten sichtbar
+ * (layout.css), jetzt als gewoehnliche Ebene auf `--z-modal`, mit der Abdunklung
+ * auf ihm selbst statt auf `::backdrop` (das gibt es ausserhalb der Top-Layer
+ * nicht) - dieselbe Blende wie vorher.
+ *
+ * Der Browser gibt beim `close()` den Fokus an das Element zurueck, das ihn vor
+ * `showModal()` hatte. Das ist hier gemerkt (`_nativeRestored`), damit
+ * `_doClose()` es nicht fuer eine Wahl des Aufrufers haelt und sein Nachfassen
+ * (Ausloeser weggerendert) trotzdem scharf stellt.
+ */
+function _leaveTopLayer(overlay) {
+  if (typeof overlay?.close !== 'function' || !overlay.open) {
+    _syncTopLayerGuests(overlay);
+    return;
+  }
+  const vorher = document.activeElement;
+  overlay._closingByModal = true;
+  overlay.close();
+  const nachher = document.activeElement;
+  if (nachher && nachher !== vorher && !overlay.contains(nachher)) overlay._nativeRestored = nachher;
+  _syncTopLayerGuests(overlay);
+}
+
+/**
+ * Der Browser hat einen Dialog geschlossen, den niemand hier geschlossen hat:
+ * ein Close-Request, dessen `cancel` sich nicht abbrechen liess (Zurueck-Geste
+ * auf Android ohne Aktivierung, siehe onEscape). Der Knoten steht noch im
+ * Dokument, nur nicht mehr in der Top-Layer. Er kommt zurueck - in der alten
+ * Reihenfolge, geparkte zuerst - und der Request laeuft danach regulaer durch
+ * `closeModal()`, damit ungespeicherte Eingaben ihre Rueckfrage bekommen.
+ */
+function _onNativeClose(event) {
+  const overlay = event.currentTarget;
+  if (overlay._closingByModal || !overlay.isConnected) return;
+  if ((overlay._restacking ?? 0) > 0) { overlay._restacking -= 1; return; }
+  const fokus = document.activeElement;
+  const stapel = [...document.querySelectorAll('dialog.modal-overlay')]
+    .filter((d) => d.isConnected && !d._closingByModal && typeof d.showModal === 'function');
+  for (const d of stapel) {
+    if (d.open) { d._restacking = (d._restacking ?? 0) + 1; d.close(); }
+  }
+  for (const d of stapel) _enterTopLayer(d);
+  if (fokus?.isConnected && activeOverlay?.contains(fokus)) fokus.focus();
+  _syncTopLayerGuests();
+  if (overlay === activeOverlay && modalState === 'open') closeModal();
+}
+
+/**
+ * UNTER REDUZIERTER BEWEGUNG BLENDET DAS MODAL UEBER statt hart zu schneiden
+ * (Critique 2026-10-16) - nur Opacity, keine Bewegung. Per Web Animations,
+ * nicht per CSS: die globale Sperre (reset.css) setzt jede CSS-Animation auf
+ * 0s, und eine CSS-Transition griffe nicht - die Einfahrt haelt Opacity per
+ * `forwards` fest, und der Wechsel aus der Top-Layer im Ausgang verwirft den
+ * Vorher-Stil (gemessen, Chrome 155: kein Transition-Objekt).
+ * @returns {Animation|null}
+ */
+function _reducedMotion() {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function _fade(el, from, to) {
+  if (typeof el?.animate !== 'function') return null;
+  return el.animate([{ opacity: from }, { opacity: to }], {
+    duration: durationToken('--duration-sm', 150),
+    easing: easingToken('--ease-out'),
+    fill: to === 0 ? 'forwards' : 'none',
+  });
+}
+
+/** Close-Request (Esc ohne unseren Handler, Zurueck-Geste): durch closeModal(). */
+function _onCancel(event) {
+  event.preventDefault();
+  if (_escKeptBelow) { _escKeptBelow = null; return; }
+  if (event.currentTarget === activeOverlay && modalState === 'open') closeModal();
 }
 
 // --------------------------------------------------------
@@ -725,6 +963,11 @@ function _resumeSuspendedModal({ overlay, id, title, titleId, snapshot, dirtyGua
   // Vor dem Setzen des Fokus: ein inertes Element nimmt keinen an.
   overlay.inert = false;
   activeOverlay = overlay;
+  // Geparkt war er weiter offen - es sei denn, der Browser hat ihn mit der
+  // Rueckfrage zusammen geschlossen (ein Close-Request ohne Aktivierung
+  // schliesst die ganze Gruppe). Dann zurueck in die Top-Layer; die Gaeste
+  // (Toasts) ziehen zu ihm zurueck.
+  _enterTopLayer(overlay);
   _initialFormSnapshot = snapshot;
   _dirtyGuardEnabled = dirtyGuard;
   previouslyFocused = restoreFocus;
@@ -732,8 +975,7 @@ function _resumeSuspendedModal({ overlay, id, title, titleId, snapshot, dirtyGua
   modalState = 'open';
   // Der Dialog hat den Escape-Handler beim Schließen abgemeldet; ohne das
   // erneute Anmelden reagiert das wiederhergestellte Modal nicht mehr auf Esc.
-  document.removeEventListener('keydown', onEscape);
-  document.addEventListener('keydown', onEscape);
+  bindEscape();
   // Das Formular ist wieder da - und damit auch sein Anspruch auf die
   // Zurueck-Geste (#871). Hat der Bestaetigungsdialog den Eintrag beim
   // Schliessen mitgenommen, kommt er hier zurueck.
@@ -1229,7 +1471,8 @@ function _doClose(overlayEl) {
   const target = overlayEl ?? activeOverlay;
   if (!target) return;
 
-  target.remove();
+  target._undock?.();
+  _removeOverlay(target);
 
   // Globalen State nur zurücksetzen wenn kein neues Modal zwischenzeitlich geöffnet wurde.
   if (activeOverlay === target) {
@@ -1253,7 +1496,10 @@ function _doClose(overlayEl) {
     // hier nicht mehr stehen - das Overlay ist schon entfernt, der Browser hat
     // ihn auf <body> fallen lassen.
     const aktiv = document.activeElement;
-    if (aktiv && aktiv !== document.body && aktiv !== document.documentElement && !target.contains?.(aktiv)) {
+    // Den Fokus, den der Browser beim `close()` selbst zurueckgab, hat kein
+    // Aufrufer gesetzt - er zaehlt nicht als dessen Wahl (siehe _leaveTopLayer).
+    const vomBrowser = Boolean(aktiv) && aktiv === target._nativeRestored;
+    if (aktiv && !vomBrowser && aktiv !== document.body && aktiv !== document.documentElement && !target.contains?.(aktiv)) {
       if (window.yuvomi?.restoreThemeColor) window.yuvomi.restoreThemeColor();
       _releaseCloseWaiters(target);
       return;
@@ -1600,11 +1846,90 @@ export function armPointerDeadTime(root, { now = () => performance.now(), durati
  *   ungelesen antwortet (siehe POINTER_DEAD_TIME_MS). Ein Formular, das jemand
  *   selbst aufgemacht hat, bekommt das NICHT: dort ist der erste Klick Absicht.
  */
+// --------------------------------------------------------
+// Bearbeiten IN der Detailspalte (Critique R19)
+// --------------------------------------------------------
+
+/**
+ * AB DER SPLIT-SCHWELLE BEARBEITET MAN IN DER DETAILSPALTE, darunter bleibt es
+ * das Modal (Entscheidung Ulas, 2026-10-16). Bei Aufgaben (680px) und Rezepten
+ * (520px) lag das Formular als zweites Fenster ueber Liste und Detail.
+ *
+ * DAS FORMULAR BLEIBT DIESER DIALOG - nur sein Ort wechselt. Das Panel legt
+ * sich deckungsgleich auf die Detailspalte (`.modal-overlay--docked`,
+ * layout.css), der Grund daneben wird nicht abgedunkelt. Alles, was der Dialog
+ * zusagt, bleibt damit unveraendert erhalten, ohne zweite Fassung: Fokus und
+ * Fokusfalle, Escape und Abbrechen, die Frage nach ungespeicherten Aenderungen
+ * (ein Klick auf die Liste ist ein Schliessen und fragt sie), der EINE
+ * History-Marker der Zurueck-Geste und die Serien-Rueckfragen, die sich als
+ * eigene Dialoge darueberlegen. Die Liste ist waehrenddessen inert wie hinter
+ * jedem Dialog - wie in Kontakte am Mac, wo der Bearbeiten-Modus erst endet,
+ * bevor eine andere Karte gewaehlt wird.
+ *
+ * EIN WEG: der Knopf „Bearbeiten" im Kopf der Detailspalte meldet seine Spalte
+ * an (`detailPaneHeaderEl`, Aktion mit `dock: true`, utils/master-detail.js),
+ * bevor er den Dialog des Moduls oeffnet. Das naechste openModal() nimmt die
+ * Anmeldung, wenn sie frisch ist und die Spalte steht; sonst oeffnet es wie
+ * immer. Wird die Spalte waehrend des Bearbeitens schmaler als die Schwelle
+ * (Fenster, Seitenleiste), wird der Dialog wieder ein gewoehnlicher.
+ */
+let _dockIntent = null;
+/** Wie lange eine Anmeldung gilt: lang genug fuer ein Modul, das vor dem Dialog noch laedt. */
+const DOCK_INTENT_MS = 3000;
+
+/**
+ * Meldet die Spalte an, in die der naechste Dialog sich legt.
+ * @param {HTMLElement|null} el  die Detailspalte (`.split-view__detail`)
+ */
+export function dockNextModal(el) {
+  _dockIntent = el ? { el, until: Date.now() + DOCK_INTENT_MS } : null;
+}
+
+function _dockVisible(el) {
+  if (!el?.isConnected || getComputedStyle(el).display === 'none') return null;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+function _takeDockIntent() {
+  const intent = _dockIntent;
+  _dockIntent = null;
+  if (!intent || Date.now() > intent.until) return null;
+  return _dockVisible(intent.el) ? intent.el : null;
+}
+
+/** Legt das Panel auf die Spalte und haelt es dort, solange sie steht. */
+function _dockOverlay(overlay, dock) {
+  if (!overlay || !dock) return;
+  const place = () => {
+    const rect = _dockVisible(dock);
+    if (!rect) { overlay.classList.remove('modal-overlay--docked'); return; }
+    overlay.classList.add('modal-overlay--docked');
+    overlay.style.setProperty('--dock-top', `${rect.top}px`);
+    overlay.style.setProperty('--dock-left', `${rect.left}px`);
+    overlay.style.setProperty('--dock-width', `${rect.width}px`);
+    overlay.style.setProperty('--dock-height', `${rect.height}px`);
+  };
+  place();
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
+  ro?.observe(dock);
+  window.addEventListener?.('resize', place);
+  overlay._undock = () => {
+    ro?.disconnect();
+    window.removeEventListener?.('resize', place);
+    overlay._undock = null;
+  };
+}
+
 export function openModal({
   title, content, onSave, onDelete, onClose, size = 'md',
   initialFocus = 'first-field', headerAction = null, dirtyGuard = true,
   pointerDeadTime = false,
 } = {}) {
+  // Die Anmeldung gilt diesem Aufruf - auch wenn er gleich ein voriges Modal
+  // ablöst, und auch wenn die Spalte nicht (mehr) steht.
+  const dock = _takeDockIntent();
+
   // Vorheriges Modal schließen (kein Stacking).
   if (activeOverlay) {
     activeOverlay.removeAttribute('id');
@@ -1630,9 +1955,8 @@ export function openModal({
     : '';
 
   const html = `
-    <div class="modal-overlay" id="shared-modal-overlay" aria-label="${t('modal.overlayLabel')}">
-      <div class="modal-panel${sizeClass}" role="dialog" aria-modal="true"
-           aria-labelledby="shared-modal-title">
+    <dialog class="modal-overlay" id="shared-modal-overlay" aria-labelledby="shared-modal-title">
+      <div class="modal-panel${sizeClass}">
         <div class="modal-panel__header">
           <h2 class="modal-panel__title" id="shared-modal-title">${esc(title)}</h2>
           <div class="modal-panel__header-actions">
@@ -1646,12 +1970,14 @@ export function openModal({
           ${content}
         </div>
       </div>
-    </div>`;
+    </dialog>`;
 
   _modalGeneration += 1;
   document.body.insertAdjacentHTML('beforeend', html);
   activeOverlay = document.getElementById('shared-modal-overlay');
   activeOverlay._onCloseCallback = onClose;
+  activeOverlay.addEventListener('cancel', _onCancel);
+  activeOverlay.addEventListener('close', _onNativeClose);
 
   // VOR JEDEM ANDEREN LISTENER AUF DIESEM KNOTEN: die Totzeit schluckt einen
   // Zeigerklick, der noch zum Öffnen gehört, und ihre Reihenfolge entscheidet
@@ -1672,6 +1998,18 @@ export function openModal({
   const panel = activeOverlay.querySelector('.modal-panel');
 
   mountFooter(panel);
+
+  // IN DIE TOP-LAYER, BEVOR DER ERSTFOKUS GEPLANT WIRD (D7). `showModal()`
+  // fokussiert synchron das erste Bedienelement (das Schliessen-X); trapFocus
+  // merkt diesen Stand als "beim Planen" und setzt 50 ms spaeter den
+  // eigentlichen Einstieg (erstes Feld). Ab hier ist der Hintergrund inert:
+  // Tab verlaesst den Dialog nicht mehr, Screenreader lesen die Seite
+  // dahinter nicht mit.
+  // In der Spalte, wenn „Bearbeiten" dort aufgerufen hat (siehe dockNextModal).
+  // Vor dem Eintritt in die Top-Layer: die Einfahrt ist dann schon die der Spalte.
+  _dockOverlay(activeOverlay, dock);
+  _enterTopLayer(activeOverlay);
+  if (_reducedMotion()) _fade(activeOverlay, 0, 1);
 
   // Kopf-Aktion verdrahten: der Listener ruft immer den aktuell hinterlegten
   // Callback, damit updateHeaderAction() ihn später tauschen kann, ohne den
@@ -1732,8 +2070,7 @@ export function openModal({
   });
 
   // Escape (nur einmal binden)
-  document.removeEventListener('keydown', onEscape);
-  document.addEventListener('keydown', onEscape);
+  bindEscape();
 
   // Callback für Aufrufer
   if (typeof onSave === 'function') onSave(panel);
@@ -1845,7 +2182,7 @@ export async function closeModal({ force = false, context = null } = {}) {
   // ihn wieder anhaben, wenn es nichts anderes sagt.
   _dirtyGuardEnabled = true;
 
-  document.removeEventListener('keydown', onEscape);
+  unbindEscape();
 
   const capturedOverlay = activeOverlay;
   const panel = capturedOverlay.querySelector('.modal-panel');
@@ -1871,14 +2208,29 @@ export async function closeModal({ force = false, context = null } = {}) {
   // fuer den Fall, dass das Ende doch ausbleibt (verdeckter Tab, abgehaengter
   // Knoten).
   //
-  // Unter reduzierter Bewegung gibt es keinen Ausgang, also auch kein Warten:
-  // die Regeln setzen die Animation dort auf `none`, und ein `animationend`
-  // kaeme nie.
-  const reduceMotion = typeof matchMedia === 'function'
-    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Unter reduzierter Bewegung BLENDET DAS MODAL AUS statt hart zu schneiden
+  // (Critique 2026-10-16, siehe _fade). Ohne Web Animations (Sonden ohne
+  // Layout) geht der Knoten sofort; ein Netz faengt eine Blende, die nie endet.
+  const reduceMotion = _reducedMotion();
+  if (panel) {
+    capturedOverlay.classList.add('modal-overlay--closing');
+    // Ab hier ist die Seite wieder bedienbar, der Knoten blendet nur noch aus.
+    _leaveTopLayer(capturedOverlay);
+  }
+  const blende = panel && reduceMotion ? _fade(capturedOverlay, 1, 0) : null;
+  if (blende) {
+    let fertig = false;
+    const abraeumen = () => {
+      if (fertig) return;
+      fertig = true;
+      _doClose(capturedOverlay);
+    };
+    setTimeout(abraeumen, MODAL_EXIT_FALLBACK_MS);
+    blende.finished.then(abraeumen, abraeumen);
+    return true;
+  }
   if (panel && !reduceMotion) {
     panel.classList.add('modal-panel--closing');
-    capturedOverlay.classList.add('modal-overlay--closing');
     // _doClose setzt modalState auf 'idle', sobald der Overlay final entfernt wird.
     const fallback = setTimeout(() => {
       panel.removeEventListener('animationend', onExitEnd);
@@ -2246,23 +2598,39 @@ let _fieldErrorSeq = 0;
  * bekommen Screenreader die Meldung nie zu hören - ein Sammelbanner am
  * Formularende erfüllt WCAG 3.3.1 nicht.
  */
-function _ensureFieldError(group, input, message) {
+function _ensureFieldError(group, input, message, { live = true } = {}) {
   // Defensiv: die Klassen-Umschaltung funktioniert auch auf schlanken
   // Containern, das Anlegen einer Meldung braucht einen echten DOM-Knoten.
   if (typeof group.querySelector !== 'function' || typeof group.appendChild !== 'function') return;
 
   let el = group.querySelector('.form-field__error');
+  const created = !el;
   if (!el) {
     el = document.createElement('p');
     el.className = 'form-field__error';
-    // Live-Region: Screenreader hören die Meldung auch dann, wenn der Fokus
-    // nicht springt (Critique-Folgebefund zu WCAG 4.1.3).
-    el.setAttribute?.('role', 'alert');
+  }
+  // Live-Region: Screenreader hören die Meldung auch dann, wenn der Fokus
+  // nicht springt (Critique-Folgebefund zu WCAG 4.1.3). SPRINGT er aufs Feld,
+  // liest der Screenreader die Meldung dort ueber aria-describedby vor - eine
+  // Alarm-Rolle daneben sagte sie ein zweites Mal, und beim Speichern mit
+  // mehreren Fehlern liefen mehrere Alarme ineinander (Critique R19 Nachlese,
+  // Guide accessible-error-announcement: "avoid double announcement").
+  // Gesetzt bzw. genommen VOR der Textaenderung, sonst gilt sie fuer diese
+  // schon nicht mehr.
+  if (live) el.setAttribute?.('role', 'alert');
+  else el.removeAttribute?.('role');
+  if (created) {
     el.textContent = t('common.required');
     // Direkt hinter das Feld, nicht ans Gruppenende: liegen Hinweistexte
     // dazwischen, rutscht die Meldung sonst weit weg (gemessen 86px beim
     // Passwortfeld) und liest sich als Fehler des ganzen Formulars.
-    if (typeof input.insertAdjacentElement === 'function') {
+    // AUSNAHME DIE FORMULARZEILE (`.form-row`, utils/form-row.js; R19): dort
+    // steht das Feld in der rechten Spalte, und eine Meldung dahinter drueckte
+    // es auf seine Mindestbreite (gemessen 52px im CardDAV-Dialog bei 390).
+    // Die Meldung gehoert unter die Zeile, ueber beide Spalten (layout.css).
+    if (group.classList?.contains?.('form-row')) {
+      group.appendChild(el);
+    } else if (typeof input.insertAdjacentElement === 'function') {
       input.insertAdjacentElement('afterend', el);
     } else {
       group.appendChild(el);
@@ -2290,6 +2658,16 @@ function _ensureFieldError(group, input, message) {
  * Feld mittig in den scrollbaren Modal-Body scrollen. Ohne das verortete nur
  * ein Toast unten links den Fehler - bei langen Formularen blieb das Feld
  * unsichtbar (Critique P1). */
+/**
+ * Liest der Screenreader die Meldung beim Fokus selbst? Ja, wenn der Fokus
+ * auf genau dem Element landet, das aria-describedby traegt - ein natives
+ * Feld. Ein Custom Element (yuvomi-datepicker) gibt den Fokus an sein inneres
+ * Feld weiter, die Beschreibung haengt aber am Aussenelement.
+ */
+function _describesOnFocus(input) {
+  return typeof input?.matches === 'function' && input.matches('input, select, textarea, button');
+}
+
 function _focusField(input) {
   // Custom Elements (z. B. yuvomi-datepicker) sind selbst nicht fokussierbar:
   // stattdessen ihren inneren Formular-Knoten fokussieren.
@@ -2306,11 +2684,11 @@ function _focusField(input) {
   }
 }
 
-function _validateField(input) {
+function _validateField(input, { live = true } = {}) {
   const group = input.closest('.form-field') ?? input.parentElement;
   const hasValue = input.value.trim().length > 0;
   const wasShown = Boolean(group?.classList.contains?.('form-field--error'));
-  if (group) _ensureFieldError(group, input);
+  if (group) _ensureFieldError(group, input, undefined, { live });
   group?.classList.toggle('form-field--error', !hasValue);
   group?.classList.toggle('form-field--valid', hasValue);
   input.setAttribute('aria-invalid', String(!hasValue));
@@ -2319,7 +2697,7 @@ function _validateField(input) {
   // den der Zeiger gerade zielt (R18). `expandIn` ist der Baustein dafuer.
   if (!hasValue && !wasShown) {
     const el = typeof group?.querySelector === 'function' ? group.querySelector('.form-field__error') : null;
-    if (el) expandIn(el, { duration: durationToken('--duration-md', 200), absorbGap: true });
+    if (el) expandIn(el, { duration: durationToken('--duration-md', 200) });
   }
 
   if (!hasValue && group) {
@@ -2373,8 +2751,12 @@ export function validateAll(formContainer) {
   let firstInvalid = null;
   let allValid = true;
 
+  // Beim Absenden: der Fokus geht aufs erste leere Pflichtfeld und liest dort
+  // seine Meldung - keine Alarm-Rolle je Feld daneben (Critique R19 Nachlese,
+  // dieselbe Regel wie reportFieldErrors). Beim Verlassen eines Feldes (Blur)
+  // bleibt die Meldung eine Live-Region, dort springt kein Fokus.
   formContainer.querySelectorAll('input[required], select[required], textarea[required]').forEach((input) => {
-    const valid = _validateField(input);
+    const valid = _validateField(input, { live: !_describesOnFocus(input) });
     if (!valid && !firstInvalid) firstInvalid = input;
     if (!valid) allValid = false;
   });
@@ -2391,39 +2773,105 @@ export function validateAll(formContainer) {
  * bei der nächsten Eingabe im Feld selbst auf. Gibt immer false zurück, damit
  * Speicherpfade kompakt `return reportFieldError(...)` abbrechen können.
  */
-export function reportFieldError(input, message) {
+export function reportFieldError(input, message, { focus = true, live = !(focus && _describesOnFocus(input)) } = {}) {
   if (!input) return false;
   const group = (typeof input.closest === 'function' ? input.closest('.form-field') : null) ?? input.parentElement;
   if (!group) return false;
 
   const wasShown = Boolean(group.classList?.contains?.('form-field--error'));
-  _ensureFieldError(group, input, message);
+  _ensureFieldError(group, input, message, { live });
   group.classList?.add('form-field--error');
   group.classList?.remove('form-field--valid');
   // Dieselbe Bewegung wie in _validateField: die Meldung zieht auf.
   if (!wasShown && typeof group.querySelector === 'function') {
     const el = group.querySelector('.form-field__error');
-    if (el) expandIn(el, { duration: durationToken('--duration-md', 200), absorbGap: true });
+    if (el) expandIn(el, { duration: durationToken('--duration-md', 200) });
   }
   input.setAttribute?.('aria-invalid', 'true');
-  _focusField(input);
+  if (focus) _focusField(input);
 
   if (typeof input.addEventListener === 'function' && typeof input.removeEventListener === 'function') {
     const clear = () => {
       input.removeEventListener('input', clear);
       input.removeEventListener('change', clear);
-      group.classList?.remove('form-field--error');
-      input.setAttribute?.('aria-invalid', 'false');
-      const el = typeof group.querySelector === 'function' ? group.querySelector('.form-field__error') : null;
-      if (el?.dataset?.defaultText !== undefined) {
-        el.textContent = el.dataset.defaultText;
-        delete el.dataset.defaultText;
-      }
+      _clearFieldErrorIn(group, input);
     };
     input.addEventListener('input', clear);
     input.addEventListener('change', clear);
   }
   return false;
+}
+
+function _clearFieldErrorIn(group, input) {
+  group.classList?.remove('form-field--error');
+  input.setAttribute?.('aria-invalid', 'false');
+  const el = typeof group.querySelector === 'function' ? group.querySelector('.form-field__error') : null;
+  if (el?.dataset?.defaultText !== undefined) {
+    el.textContent = el.dataset.defaultText;
+    delete el.dataset.defaultText;
+  }
+}
+
+/**
+ * Raeumt einen Feldfehler, den `reportFieldError()` gesetzt hat, ohne dass im
+ * Feld getippt wurde - fuer Handler, die denselben Wert erneut pruefen (eine
+ * Suche, die beim zweiten Versuch klappt). Sonst raeumt ihn erst die naechste
+ * Eingabe, und das Feld stuende mit dem alten Fehler neben gueltigen Treffern.
+ */
+export function clearFieldError(input) {
+  if (!input) return;
+  const group = (typeof input.closest === 'function' ? input.closest('.form-field') : null) ?? input.parentElement;
+  if (!group) return;
+  _clearFieldErrorIn(group, input);
+}
+
+/**
+ * ALLE FELDFEHLER EINES FORMULARS AUF EINMAL (Critique R19, 2026-10-16).
+ *
+ * Die Speicherpfade prueften Feld fuer Feld und brachen beim ersten Fehler ab:
+ * wer im Budget Titel UND Kategorie vergass, sah erst den einen Fehler, dann
+ * nach dem naechsten Klick den anderen - und der Titel wurde vor dem Betrag
+ * geprueft, obwohl der Betrag oben steht. Hier stehen alle Meldungen zugleich
+ * an ihren Feldern, und der Fokus geht auf das ERSTE fehlerhafte Feld in der
+ * Reihenfolge des Dokuments, nicht in der Reihenfolge der Pruefung.
+ *
+ * Ein Eintrag ist `[feld, meldung]`; leere Eintraege (`false`, `null`, ein
+ * fehlendes Feld) zaehlen nicht, sodass ein Aufrufer `bedingung && [feld, text]`
+ * schreiben kann. Mehrere Meldungen fuer DASSELBE Feld: die erste gewinnt.
+ *
+ * @param {Array<[Element|null|undefined, string]|false|null|undefined>} errors
+ * @returns {boolean} true, wenn mindestens ein Fehler gemeldet wurde
+ */
+export function reportFieldErrors(errors) {
+  const seen = new Set();
+  const list = [];
+  for (const entry of errors ?? []) {
+    const input = Array.isArray(entry) ? entry[0] : null;
+    if (!input || seen.has(input)) continue;
+    seen.add(input);
+    list.push(entry);
+  }
+  if (!list.length) return false;
+  // Node.DOCUMENT_POSITION_FOLLOWING = 4: b steht hinter a.
+  list.sort(([a], [b]) => {
+    if (typeof a.compareDocumentPosition !== 'function') return 0;
+    return (a.compareDocumentPosition(b) & 4) ? -1 : 1;
+  });
+  // Das erste Feld in DOM-Reihenfolge - destrukturiert, weil der
+  // Initialen-Guard (test:initials) doppelte Null-Indizes als handgebaute
+  // Initialen-Regel liest.
+  const [[firstField]] = list;
+  // EINE Ansage, nicht eine je Feld (Critique R19 Nachlese): der Fokus geht
+  // aufs erste Feld, und dort liest der Screenreader dessen Meldung. Die
+  // uebrigen stehen an ihren Feldern (aria-invalid, aria-describedby) und
+  // werden beim Weitergehen gelesen - drei Alarme auf einmal liefen
+  // ineinander. Nur ein Feld, das seine Beschreibung beim Fokus nicht selbst
+  // liest (Datepicker), behaelt die Alarm-Rolle.
+  for (const [input, message] of list) {
+    reportFieldError(input, message, { focus: false, live: input === firstField && !_describesOnFocus(input) });
+  }
+  _focusField(firstField);
+  return true;
 }
 
 export function btnSuccess(btn, originalLabel) {

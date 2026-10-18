@@ -141,6 +141,33 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+/* DIE ANSICHTSWAHL IM KOPF (D1, Critique 2026-10-16): Aufgaben, Dokumente und
+ * Kalender waehlen ihre Ansicht mit diesem Segment. Am Zeiger steht es in der
+ * Kopfzeile neben 40px-Knoepfen (`.page-toolbar .btn--icon`, layout.css) und
+ * misst AUSSEN dieselben 40px - Naht 1px, Rand 1px, Segmente 36px. Mit der
+ * Basis-Hoehe und 2px Naht stand es als 50px-Well in der Zeile und hob die
+ * Titelzeile um 6px an. Am Finger gilt dieselbe Rechnung gegen --target-base
+ * (aussen 48px wie Lupe und Filter, statt 54px auf dem Tablet). */
+.page-toolbar .segmented {
+  padding: var(--space-px);
+}
+
+.page-toolbar .segmented__item {
+  min-height: calc(var(--target-base) - 4 * var(--space-px));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .page-toolbar .segmented__item {
+    min-height: calc(var(--target-md) - 4 * var(--space-px));
+  }
+}
+
+/* Die Icon-Variante (Aufgaben Liste/Brett, Dokumente Liste/Raster): ein
+ * quadratisches Segment je Ansicht, der Name steht im aria-label und title. */
+.segmented--icons .segmented__item {
+  padding-inline: var(--space-2);
+}
+
 /* --------------------------------------------------------
  * Kennzahl-Zeile und Kennzahlkarte
  * -------------------------------------------------------- */
@@ -513,6 +540,16 @@
   }
 }
 
+/* DAS ZIEL NEBEN DEM WERT (R19, Abos: "113,60 € von 90,00 €"). Leiser und
+ * kleiner als die Kennzahl, auf ihrer Grundlinie; umbricht als Ganzes. */
+.metric-card__of {
+  font-size: var(--type-secondary);
+  font-weight: var(--font-weight-regular);
+  letter-spacing: normal;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
 /* Fußnote unter dem Betrag: „7 aktiv", „121% des Budgets genutzt", „EUR".
  * Löst die frühere <small>-Sonderbehandlung in subscriptions.css ab. */
 .metric-card__note {
@@ -545,7 +582,10 @@
 .metric-card__progress {
   height: 6px;
   border-radius: var(--radius-full);
-  background: var(--color-surface-2);
+  /* Die Bahn ist eine Mulde in der Karte (--color-fill-well), kein Loch
+   * (R19, Critique 2026-10-16): dunkel war --color-surface-2 das Fast-Schwarz
+   * #0F0E0D, die leere Bahn las sich lauter als ihre Fuellung. */
+  background: var(--color-fill-well);
   overflow: hidden;
   margin-top: var(--space-1);
 }
@@ -819,6 +859,14 @@
 .chart__grid {
   stroke: var(--color-border);
   stroke-width: 1;
+}
+
+/* Ein Balken waechst aus SEINER Grundlinie (drawChartOnce in utils/ux.js,
+ * `transform: scaleY()`): ohne `fill-box` laege der Ursprung in der Ecke des
+ * SVG, und der Balken floege von oben links herein. */
+.chart__bar {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
 }
 
 /* DIE FLAECHE IST IHR EIGENER CONTAINER (Critique 2026-09-26).
@@ -1229,6 +1277,40 @@ svg.chart {
   justify-content: flex-start;
   column-gap: var(--space-3);
   margin-inline-start: 0;
+}
+
+/* EINZEILIG BIS AUFGEKLAPPT (Critique 2026-10-16, P2 mobil; budget.js
+ * `balanceGlanceHtml`). Die Budget-Uebersicht stellte Saldo, Ein/Aus und
+ * „Alle Kategorien" in drei Zeilen vor die erste Buchung (y=354). Eingeklappt
+ * stehen jetzt Etikett und Saldo in EINER Zeile, auf der Grundlinie; Ein/Aus
+ * und die Kategorien-Zeile kommen mit dem Aufklappen. Die Zahl fuehrt weiter
+ * (Title 1 statt Display), damit sie neben dem Etikett in die Zeile passt -
+ * die Stufen der Leiter gelten wie oben, nur eine Stufe tiefer. */
+.budget-glance--fold.budget-glance--lead .budget-glance__lead {
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.budget-glance--fold.budget-glance--lead .budget-glance__label {
+  font-size: var(--text-sm);
+}
+
+.budget-glance--fold.budget-glance--lead .budget-glance__value {
+  font-size: var(--text-3xl);
+}
+
+.budget-glance--fold.budget-glance--lead-xlong .budget-glance__value {
+  font-size: var(--text-2xl);
+}
+
+.budget-glance--fold.budget-glance--lead-xxlong .budget-glance__value {
+  font-size: var(--text-xl);
+}
+
+.budget-glance--fold .budget-glance__balance[aria-expanded="false"] .budget-glance__flows,
+.budget-glance--fold:has(.budget-glance__balance[aria-expanded="false"]) .budget-glance__categories {
+  display: none;
 }
 
 .budget-glance__title {

@@ -177,6 +177,27 @@ export function defaultWidgetVisible(id) {
 export const DEFAULT_WIDGET_CONFIG = WIDGET_IDS.map((id, i) => ({ id, visible: defaultWidgetVisible(id), order: i, size: defaultWidgetSize(id) }));
 
 /**
+ * Die Vorgabe fuer ein Kinderkonto (R20, Kinder-Standards): die eigenen Punkte
+ * zuerst, die Budget-Kachel aus. Gilt nur, solange das Konto der Vorgabe
+ * FOLGT (nichts Eigenes gespeichert) - ein eigenes Layout bleibt, wie es ist.
+ * Kein Recht: wer Budget sehen darf, holt die Kachel ueber "Anpassen" zurueck;
+ * ein neues Kinderkonto hat das Modul ohnehin nicht (server/permissions.js).
+ * Die Aufgaben stehen schon im Heute-Blatt ganz oben, eigene zuerst
+ * (pages/dashboard.js `buildTodayProgram`).
+ *
+ * Rein und ohne Seiteneffekt, auf einer schon normalisierten Liste.
+ */
+export function childDefaultWidgetConfig(config) {
+  const list = (Array.isArray(config) ? config : []).map((w) => ({ ...w }));
+  const rewards = list.find((w) => w.id === 'rewards');
+  const rest = list
+    .filter((w) => w.id !== 'rewards')
+    .map((w) => (w.id === 'budget' ? { ...w, visible: false } : w));
+  const ordered = rewards ? [{ ...rewards, visible: true }, ...rest] : rest;
+  return ordered.map((w, i) => ({ ...w, order: i }));
+}
+
+/**
  * Wo eine fehlende Id in ein gespeichertes Layout gehört: direkt hinter den
  * nächsten in WIDGET_IDS VORANGEHENDEN Eintrag, der dort schon vorkommt.
  *
@@ -492,6 +513,49 @@ export function dashboardRequest(query, { wall = false } = {}) {
   const text = String(query ?? '/dashboard');
   if (!wall) return text;
   return `${text}${text.includes('?') ? '&' : '?'}audience=household`;
+}
+
+/* EIN ABRUF DER FAELLIGEN ERINNERUNGEN FUER GLOCKE UND UEBERSICHT (Critique
+ * R19, Nachlese 1b). `/reminders/pending` ging beim Start zweimal hinaus: die
+ * Glocke (reminders.js) fragte gleich nach der Anmeldung, das Heute-Blatt der
+ * Uebersicht (pages/dashboard.js) 0,7 s spaeter dieselbe Adresse - am
+ * gedrosselten Telefon eine Rundreise mehr auf einer der sechs Verbindungen,
+ * genau waehrend die Uebersicht ihre Module laedt.
+ *
+ * Wer dieselbe Adresse innerhalb von PENDING_SHARE_MS nach dem letzten Abruf
+ * fragt, bekommt dessen Versprechen - laufend oder schon erfuellt. Die Adresse
+ * traegt die Reichweite (dashboardRequest oben), also teilen nur Fragen mit
+ * derselben Antwort. Ein Fehler wird nicht geteilt. `fresh` (die Glocke nach
+ * einer eigenen Aenderung) fragt immer neu, `forgetPendingReminders()`
+ * verwirft das Gemerkte - beim Wegklicken und beim Abmelden, damit nie die
+ * Antwort einer frueheren Sitzung weitergereicht wird.
+ *
+ * Es steht HIER, weil beide Aufrufer diese Datei schon laden: ein eigenes
+ * Modul war eine Datei mehr in der Startkette und kostete gemessen mehr, als
+ * der gesparte Abruf brachte. Den Abruf selbst (`get`, api.get) reicht der
+ * Aufrufer herein - diese Datei importiert nichts aus dem Browser. */
+export const PENDING_SHARE_MS = 2000;
+let sharedPending = null;
+
+/**
+ * @param {string} path - '/reminders/pending' samt Reichweite
+ * @param {{ get: (path: string) => Promise<any>, fresh?: boolean, now?: number }} options
+ * @returns {Promise<any>}
+ */
+export function fetchPendingReminders(path, { get, fresh = false, now = Date.now() }) {
+  if (!fresh && sharedPending && sharedPending.path === path && now - sharedPending.at < PENDING_SHARE_MS) {
+    return sharedPending.promise;
+  }
+  const promise = Promise.resolve().then(() => get(path));
+  const entry = { path, at: now, promise };
+  sharedPending = entry;
+  promise.catch(() => { if (sharedPending === entry) sharedPending = null; });
+  return promise;
+}
+
+/** Das Gemerkte verwerfen (Erinnerung weggeklickt, Abmeldung). */
+export function forgetPendingReminders() {
+  sharedPending = null;
 }
 
 /* WELCHE PARAMETER DIE ZAHLEN DER ANTWORT UNBERUEHRT LASSEN (#1680).

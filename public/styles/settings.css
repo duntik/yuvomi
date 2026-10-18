@@ -124,7 +124,10 @@
   border-radius: var(--radius-xs);
 }
 
-/* Die neutrale Grundform gilt nur, WO keine Marke sie traegt: `.vivid-mark`
+/* SEIT R19 TRAEGT JEDE MARKE `.vivid-mark` (shell.js createLeafMark): die
+ * neutrale Grundform unten ist entfallen, Konfiguration ohne Modul steht im
+ * Grau der Einstellungen. Was folgt, ist die Geschichte der Mulde:
+ * Die neutrale Grundform galt nur, WO keine Marke sie traegt: `.vivid-mark`
  * steht in layout.css, diese Datei laedt danach, und bei gleicher Spezifitaet
  * gewinnt die spaetere - die Marke waere eine Klasse ohne Wirkung.
  *
@@ -136,18 +139,9 @@
  * Kacheln neben 25 nackten Glyphen und dunkel als 29 gleichwertige Zeilen.
  * Ein Licht/Dunkel-Paritaetsbruch, und die Vollton-Regel benennt fuer ihre
  * neutrale Gegenrichtung ausdruecklich `--color-fill-well`. */
-.settings-shell__navigation-link-icon:not(.vivid-mark) {
-  color: var(--color-text-secondary);
-  background: var(--color-fill-well);
-}
-
 .settings-shell__navigation-link-icon-glyph {
   width: var(--space-4);
   height: var(--space-4);
-}
-
-.settings-shell__navigation-link--active .settings-shell__navigation-link-icon:not(.vivid-mark) {
-  color: var(--color-accent);
 }
 
 /* EINE Spalte, die schrumpfen darf. Ohne `minmax(0, 1fr)` war die Spalte
@@ -311,11 +305,6 @@
   border-radius: var(--radius-sm);
 }
 
-.settings-overview__row-mark:not(.vivid-mark) {
-  color: var(--module-settings);
-  background: var(--color-surface-2);
-}
-
 .settings-overview__row-mark-glyph {
   width: var(--space-5);
   height: var(--space-5);
@@ -436,8 +425,27 @@
    der Blatt-Titel die einzige sichtbare Hauptueberschrift (test:typography).
    -------------------------------------------------------- */
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (max-width: 1023px) {
   .settings-page--leaf .settings-shell-header {
+    display: none;
+  }
+}
+
+/* AB 1024px TRAEGT DER KOPF EINES BLATTS DEN MODULNAMEN (D8, Critique
+ * 2026-10-16): Siegel und Titel wie in jedem Modul, der Rueckweg ist dort
+ * die Seitenleiste. Darunter ist der Kopf der Rueckweg allein. */
+.settings-toolbar__module-title {
+  margin: 0;
+}
+
+@media (max-width: 1023px) {
+  .settings-toolbar__module-title {
+    display: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .settings-shell-header .settings-toolbar__back {
     display: none;
   }
 }
@@ -555,17 +563,21 @@
   .settings-leaf-header { margin-top: 0; }
 }
 
-/* MOBIL ZWEI ZEILEN VORSPANN (Critique 2026-10-05, R16). Die Blattbeschreibung
- * lief im Kalender-Blatt ueber vier Zeilen (77px) vor dem ersten Schalter; sie
- * zaehlt auf, was im Blatt steht, und genau das tun darunter die
- * Sprungmarken und die Abschnittstitel. Gekuerzt wird nur das Bild - der Text
- * steht ganz im Baum. */
+/* MOBIL HOECHSTENS DREI ZEILEN VORSPANN (Critique 2026-10-05, R16; R20). Die
+ * Blattbeschreibung lief im Kalender-Blatt ueber vier Zeilen (77px) vor dem
+ * ersten Schalter; sie zaehlt auf, was im Blatt steht, und genau das tun
+ * darunter die Sprungmarken und die Abschnittstitel. Blaetter mit Marken
+ * blenden sie ganz aus (unten). Zwei Zeilen schnitten in drei Blaettern ohne
+ * Marken die Aussage ab (Re-Critique 2026-10-17 a5 P3): "Dieses Geraet" verlor
+ * "alles, was nur fuer dieses Geraet gilt", Benachrichtigungen und Aufgaben je
+ * den Satzschluss. Drei Zeilen tragen alle Beschreibungen ohne Marken
+ * ungekuerzt (gemessen 390px, de); die Grenze bleibt fuer laengere Locales. */
 @media (max-width: 767px) {
   .settings-leaf-header__description {
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
     overflow: hidden;
   }
 }
@@ -609,6 +621,19 @@
   text-decoration: none;
 }
 
+/* AB 768px BRECHEN DIE MARKEN UM (R20, Re-Critique 2026-10-17 a5 P3). Die
+ * eine scrollende Zeile ist eine Telefonregel (dort kosteten fuenf Marken drei
+ * Reihen); am Desktop schnitt sie im Kalender-Blatt zwei von sechs Marken an
+ * der Kante ab - ohne sichtbare Leiste, die zeigt, dass es weitergeht
+ * (gemessen 999px Inhalt in 660px bei 1280). Dort ist Platz fuer eine zweite
+ * Reihe. */
+@media (min-width: 768px) {
+  .settings-sheet-jump__list {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+}
+
 /* Bis die Abschnitte stehen, haelt die Zeile nur ihren Platz (shell.js,
  * syncJumpLabels): die Marken heissen wie die Ueberschriften darunter. */
 .settings-sheet-jump--pending {
@@ -620,7 +645,7 @@
  * Kalender-Blatts von y=517 auf 580 - der eine Messwert der Critique, der
  * schlechter wurde. Im Blatt mit Marken ist die Beschreibung mobil nur noch
  * im Baum (geclippt wie `.sr-only`, reset.css), und der Kopf haelt den
- * kleineren Abstand. Ein Blatt ohne Marken behaelt seine zwei Zeilen. */
+ * kleineren Abstand. Ein Blatt ohne Marken behaelt seine (hoechstens drei) Zeilen. */
 @media (max-width: 767px) {
   .settings-leaf-header--jump { margin-bottom: var(--space-4); }
 
@@ -791,6 +816,30 @@
   margin-bottom: var(--space-3);
 }
 
+/* KEINE KARTE IN DER KARTE (R19): steht eine Zeilengruppe IN einer Karte
+ * (Konto: Kontaktdaten, Passwort), traegt die Karte die Flaeche - die Gruppe
+ * legt ihren eigenen Grund, Schatten und Radius ab und fluchtet mit dem
+ * Kartentext; die Haarlinien zwischen den Zeilen bleiben. */
+.settings-card .row-carrier.settings-group {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.settings-card .settings-group > .settings-setting-row {
+  padding-inline: 0;
+}
+
+/* Dasselbe fuer die Schalterzeile (R19): ihr Polster sitzt am `label.toggle-row`
+ * und an der Sekundaerzeile, nicht an der Zeile - in der Karte fluchten beide
+ * mit dem Kartentext wie jede andere Zeile. */
+.settings-card .settings-group > .settings-setting-row--switch > .toggle-row,
+.settings-card .settings-group > .settings-setting-row--switch > .settings-setting-row__description,
+.settings-card .settings-group > .settings-setting-row--switch > .form-hint,
+.settings-card .settings-group > .settings-setting-row--switch > .form-error {
+  padding-inline: 0;
+}
+
 .settings-group > .settings-setting-row {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-1) var(--space-4);
@@ -863,6 +912,16 @@
   inline-size: 6rem;
   max-inline-size: 100%;
   text-align: end;
+}
+
+/* EIN TEXTFELD NIMMT DIE HALBE ZEILE (Re-Kritik 2026-10-17). Ohne Breite blieb
+ * es bei seiner Vorgabe von 20 Zeichen: am Desktop 201px in einer 680px-Zeile,
+ * eine E-Mail-Adresse oder WebDAV-Adresse lief darin ab dem 25. Zeichen weg.
+ * Es fuellt jetzt die Deckelung der Bedienspalte (50cqi). Nur als einziges
+ * Kind - steht ein Knopf daneben, teilen sich beide die Spalte wie bisher. */
+.settings-group .settings-setting-row__control > input.form-input:only-child:is([type="text"], [type="email"], [type="tel"], [type="url"], [type="password"], [type="search"], :not([type])) {
+  inline-size: 50cqi;
+  max-inline-size: 100%;
 }
 
 /* Fehlerzeile und verborgene Zusatzhinweise einer Zeile stehen im Textblock. */
@@ -1001,6 +1060,80 @@
 
 .settings-disclosure__panel {
   padding: 0 var(--space-4) var(--space-4);
+}
+
+/* ORTSSUCHE IM STANDORTFORMULAR (R20, settings/weather-location.js). Feld und
+ * Knopf teilen eine Zeile, die Treffer stehen als Liste darunter: Name in
+ * Primaerfarbe, Region und Land als Sekundaerzeile - wie die Ortsauswahl in
+ * Apple Wetter. Jeder Treffer ist ein Knopf ueber die volle Breite. */
+.weather-place__search {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.weather-place__search > .form-input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.weather-place__search > .btn {
+  flex: 0 0 auto;
+}
+
+.weather-place__current {
+  margin: var(--space-2) 0 0;
+}
+
+.weather-place__results {
+  /* Der Text der Treffer fluchtet mit dem Etikett "Ort"; die Trefferflaeche
+   * (Hover) ragt um das Polster der Knoepfe in den Kartenrand. */
+  margin: var(--space-2) calc(-1 * var(--space-3)) 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.weather-place__results > li + li {
+  border-top: var(--space-px) solid var(--color-border);
+  margin-inline: var(--space-3);
+}
+
+.weather-place__results > li + li > .weather-place__option {
+  margin-inline: calc(-1 * var(--space-3));
+  inline-size: calc(100% + 2 * var(--space-3));
+}
+
+.weather-place__option {
+  display: grid;
+  gap: var(--space-0h);
+  inline-size: 100%;
+  min-block-size: var(--target-lg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  text-align: start;
+  color: var(--color-text-primary);
+}
+
+@media (hover: hover) {
+  .weather-place__option:hover {
+    background: var(--color-surface-hover);
+  }
+}
+
+.weather-place__name {
+  font-size: var(--text-base);
+  font-weight: var(--font-weight-medium);
+}
+
+.weather-place__meta {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* "Koordinaten von Hand" steht unter der Gruppe, mit Abstand zur Ortungszeile. */
+.weather-manual {
+  margin-block: var(--space-3);
 }
 
 .settings-status-summary {
@@ -1155,7 +1288,7 @@
   /* Die Grundform der Seitenleiste; sichtbar wird sie erst an der Schwelle. */
   .settings-shell__navigation {
     position: sticky;
-    top: calc(var(--space-4) + var(--safe-area-inset-top));
+    top: calc(var(--settings-head-block, 0px) + var(--space-4) + var(--safe-area-inset-top));
     align-self: start;
   }
 }
@@ -1172,10 +1305,11 @@
   .settings-shell__navigation {
     display: block;
     position: sticky;
-    top: calc(var(--space-4) + var(--safe-area-inset-top));
+    top: calc(var(--settings-head-block, 0px) + var(--space-4) + var(--safe-area-inset-top));
     /* Minus `--shell-tail`: die klebende Liste endet ueber dem, was unten
-     * fest steht (Installationsbanner), wie jede klebende Spalte. */
-    max-height: calc(var(--viewport-height) - var(--space-8) - var(--shell-tail, 0px));
+     * fest steht (Installationsbanner), wie jede klebende Spalte. Minus
+     * `--settings-head-block`: oben klebt der Kopf (shell.js, watchHeadBlock). */
+    max-height: calc(var(--viewport-height) - var(--settings-head-block, 0px) - var(--space-8) - var(--shell-tail, 0px));
     overflow-y: auto;
     overscroll-behavior: contain;
   }
@@ -1843,6 +1977,21 @@
   align-self: flex-start;
 }
 
+/* Einladen und Anlegen nebeneinander unter der Mitgliederliste (R19). */
+.settings-member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* DIE EIGENE ZEILE (R19): "Ich" hinter dem eigenen Namen, leise wie die
+ * Meta-Zeile - wie "(Ich)" in der Familienfreigabe. */
+.settings-member__self {
+  font-size: var(--type-caption);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-secondary);
+}
+
 .settings-token-output {
   padding: var(--space-3);
   /* Inset-Well statt Kasten in der Karte (tokens.css). */
@@ -2170,27 +2319,9 @@
    Meal-Type-Toggles
    -------------------------------------------------------- */
 
-.meal-type-toggles {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-/* Die Haushaltsnamen der vier Slots (#1058) - zweiter Block derselben Karte,
-   weil "welche Slots" und "wie sie heissen" eine Einstellung sind.
-   Der Titel darueber braucht einen eigenen Abstand: `.settings-card__title`
-   traegt `margin: 0 0 space-3` und ist auf den ERSTEN Titel einer Karte
-   gerechnet. Als zweiter sass er sonst buendig auf der letzten Schalterzeile
-   (gemessen: 0px Luecke). */
-.meal-type-names {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.meal-type-toggles + .settings-card__title {
-  margin-top: var(--space-5);
-}
+/* Schalter und Namen der vier Slots (#1058) stehen seit R19 als gruppierte
+   Zeilen (`.settings-group`, oben) - die eigenen Abstaende der frueheren
+   Karte sind entfallen. */
 
 /* Die Schalterzeile `.toggle-row` stand hier und ist 2026-08-28 nach
    layout.css gezogen. GRUND, gemessen: `settings.css` wird nur auf der
@@ -2349,28 +2480,15 @@
   margin-top: var(--space-2);
 }
 
-/* Enable-toggle row: label links, toggle rechts */
-.settings-webdav-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) 0 var(--space-3);
-  border-bottom: var(--space-px) solid var(--color-border);
-  margin-bottom: var(--space-1);
-}
+/* Die eigene Schalterleiste der WebDAV-Formulare ist entfallen (R19): der
+ * Schalter ist eine Zeile der Gruppe (settingSwitchRowHtml) wie jede andere. */
 
-.settings-webdav-toggle-row .form-label {
-  margin: 0;
-}
-
-/* Die Schalterzeile fuellt ihren Traeger: Label links, Schalter an der
- * rechten Kante wie jede andere Einstellung (toggleRowHtml, control:
- * 'switch'). Als einzelnes Flex-Kind war sie nur so breit wie ihr Text, und
- * der Schalter klebte am Label. */
-.settings-webdav-toggle-row > .toggle-row {
-  flex: 1;
-  min-width: 0;
+/* Die Betreuer-Auswahl im Mitglied-Dialog: eine Chip-Gruppe mit eigenem
+ * Etikett, keine Zeile - sie steht ueber den Zeilen des Dialogs (R19). */
+.settings-member-caregivers {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
 }
 
 /* Password-Eingabe mit Reveal-Button nebeneinander */
@@ -2516,6 +2634,7 @@
 .settings-google-calendars {
   display: grid;
   gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
 /* Serverseitige Einschränkung, keine Fehlermeldung: der Hinweis steht als Text
@@ -4041,4 +4160,12 @@
 .backfill-moved__change {
   color: var(--color-text-secondary);
   font-size: var(--text-xs);
+}
+
+/* Die Sprungmarke zum Blatt (R20, settings/shell.js createSheetSkipLink)
+ * gilt nur, wo ein Blatt NEBEN der Leiste steht. Auf der Uebersicht gibt es
+ * keins - dort waere sie ein Stopp, der nirgends hinfuehrt. Schmal steht die
+ * Leiste beim Blatt ohnehin nicht da. */
+.settings-page:not(.settings-page--leaf) .settings-shell__skip {
+  display: none;
 }

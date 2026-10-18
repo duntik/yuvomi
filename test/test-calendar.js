@@ -810,7 +810,10 @@ test('eventWhenRelative: der eintägige Termin nennt den Tag in Worten, die Span
   assert(!/common\./.test(dayHeadingLabel(far)) && dayHeadingLabel(far) === dayHeading(far).full, `sonst Wochentag mit Datum: ${dayHeadingLabel(far)}`);
   assert(dayHeading(today).full && dayHeading(today).full !== 'common.today', 'auch heute kennt seinen Wochentag mit Datum');
 
-  const timed = eventWhenRelative({ start_datetime: `${today}T20:00`, end_datetime: `${today}T22:00`, all_day: 0 });
+  // Die Spanne steht seit R19 mit geschuetzten Leerzeichen und Wortverbinder
+  // (unbreakable, Test unten) - verglichen wird der Text dahinter.
+  const timed = eventWhenRelative({ start_datetime: `${today}T20:00`, end_datetime: `${today}T22:00`, all_day: 0 })
+    .replace(/\u2060/g, '').replace(/\u00a0/g, ' ');
   assert(timed.startsWith('common.today, calendar.dayRangeLabel'), `"Heute, 20:00 - 22:00": ${timed}`);
   assert(whenRange(timed).from === `${today}T20:00` && whenRange(timed).to === `${today}T22:00`, timed);
   assert(!timed.startsWith(today), 'kein Tagesschluessel vorn - der Tag steht in Worten');
@@ -821,7 +824,7 @@ test('eventWhenRelative: der eintägige Termin nennt den Tag in Worten, die Span
 
   // Der Kopf: Farbpunkt, Zeit, Personen - und "Wann" fuer Screenreader.
   const head = eventDetailHead({ start_datetime: `${today}T20:00`, end_datetime: `${today}T22:00`, all_day: 0, color: '#00668F', assigned_users: [{ display_name: 'Emma' }] });
-  assert(head.subtitle === timed && head.subtitleLabel === 'calendar.detailWhen', JSON.stringify(head));
+  assert(head.subtitle.replace(/\u2060/g, '').replace(/\u00a0/g, ' ') === timed && head.subtitleLabel === 'calendar.detailWhen', JSON.stringify(head));
   assert(typeof head.dot === 'string' && head.dot.length > 0, 'der Punkt traegt die Kalenderfarbe');
   assert(head.people.length === 1 && head.peopleLabel === 'calendar.assignedLabel', 'Personen als Avatare');
 
@@ -1103,6 +1106,25 @@ test('Wochenansicht: der Wochenstart des angezeigten Zeitraums, im gewählten Wo
     'Wochenstart Sonntag: dieselbe Woche beginnt am 13.09.');
   assert(newEventDate('week', '2026-08-12', TODAY, 1) === TODAY,
     'liegt heute in der angezeigten Woche, gewinnt heute');
+});
+
+// Codex-Review PR #2053, zweite Runde (P2): am Telefon zeigt die Woche nur
+// die drei Tage ab dem Cursor. Stand der Cursor auf morgen, lag heute in
+// derselben 7-Tage-Woche, aber nicht mehr auf dem Schirm - der Vorschlag war
+// trotzdem heute.
+test('Wochenansicht am Telefon: der Vorschlag bleibt im 3-Tage-Fenster', () => {
+  assert(newEventDate('week', '2026-08-15', TODAY, 1) === TODAY,
+    'Reichweite: am Desktop liegt heute in derselben Woche und gewinnt');
+  assert(newEventDate('week', '2026-08-15', TODAY, 1, { mobile: true }) === '2026-08-15',
+    'am Telefon steht heute nicht im Fenster 15.-17.08., also der erste sichtbare Tag');
+  assert(newEventDate('week', TODAY, TODAY, 1, { mobile: true }) === TODAY,
+    'steht heute im Fenster, gewinnt heute');
+  assert(newEventDate('week', '2026-08-13', TODAY, 1, { mobile: true }) === TODAY,
+    'auch als zweiter Tag des Fensters');
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('function newEventDate()'), src.indexOf('function isMonthSplit()'));
+  assert(/newEventDefaultDate\([^)]*\{ mobile: isMonthSplit\(\) \}\)/.test(body),
+    'der Aufrufer reicht die Telefonbreite durch');
 });
 
 test('Agenda: der Listenanfang, sobald heute außerhalb der 30 Tage liegt', () => {
@@ -1814,7 +1836,7 @@ test('getWeekRange: Desktop bleibt beim reinen 7-Tage-Raster (#1006)', () => {
 });
 
 test('getWeekRange: Mobile mitten in der Woche erweitert das Ladefenster nicht unnötig (#1006)', () => {
-  // Mittwoch: das 3-Tage-Fenster (Di-Do) liegt vollständig innerhalb der
+  // Mittwoch: das 3-Tage-Fenster (Mi-Fr, seit R20 ab dem Cursor) liegt vollständig innerhalb der
   // Montag-Woche - die Vereinigung darf hier gleich dem Desktop-Raster bleiben.
   const { from, to } = calendarHelpers.getWeekRange('2026-03-11', { weekStart: 1, mobile: true });
   assert(from === '2026-03-09' && to === '2026-03-15',
@@ -1822,28 +1844,30 @@ test('getWeekRange: Mobile mitten in der Woche erweitert das Ladefenster nicht u
 });
 
 test('getWeekRange: Montag-Woche + Sonntags-Cursor schliesst den folgenden Montag ein (#1006)', () => {
-  // Sonntag ist der letzte Tag der Montag-Woche; das Mobile-Fenster (Sa-Mo)
-  // ragt einen Tag darüber hinaus - genau der Tag, den buildDayIndex() vorher
-  // stillschweigend wegklammerte.
+  // Sonntag ist der letzte Tag der Montag-Woche; das Mobile-Fenster (So-Di,
+  // seit R20 ab dem Cursor) ragt zwei Tage darüber hinaus - genau die Tage,
+  // die buildDayIndex() vorher stillschweigend wegklammerte.
   const { from, to } = calendarHelpers.getWeekRange('2026-03-15', { weekStart: 1, mobile: true });
-  assert(from === '2026-03-09' && to === '2026-03-16',
-    `Der folgende Montag muss mitgeladen werden: ${from}..${to}`);
+  assert(from === '2026-03-09' && to === '2026-03-17',
+    `Montag und Dienstag danach muessen mitgeladen werden: ${from}..${to}`);
 });
 
 test('getWeekRange: Sonntag-Woche + Samstags-Cursor schliesst den folgenden Sonntag ein (#1006)', () => {
   // Dieselbe Randsituation am anderen Wochenstart: Samstag ist hier der
   // letzte Tag, das Mobile-Fenster ragt in den folgenden Sonntag hinein.
   const { from, to } = calendarHelpers.getWeekRange('2026-03-14', { weekStart: 0, mobile: true });
-  assert(from === '2026-03-08' && to === '2026-03-15',
-    `Der folgende Sonntag muss mitgeladen werden: ${from}..${to}`);
+  assert(from === '2026-03-08' && to === '2026-03-16',
+    `Sonntag und Montag danach muessen mitgeladen werden: ${from}..${to}`);
 });
 
-test('getWeekRange: Montag-Woche + Montags-Cursor schliesst den vorherigen Sonntag ein (#1006)', () => {
-  // Symmetrischer Fall am linken Rand: Montag ist der erste Tag der Woche,
-  // das Mobile-Fenster ragt einen Tag in die vorherige Woche hinein.
+test('getWeekRange: das Mobile-Fenster beginnt am Cursor, nie am Vortag (R20)', () => {
+  // Bis R20 stand das Fenster um den Cursor (gestern, heute, morgen), und
+  // ein Montags-Cursor zog den Sonntag davor mit. Seit R20 beginnt es AM
+  // Cursor - "Heute" steht links wie in Apple Kalender, links vom Wochenstart
+  // gibt es nichts mehr zu laden.
   const { from, to } = calendarHelpers.getWeekRange('2026-03-09', { weekStart: 1, mobile: true });
-  assert(from === '2026-03-08' && to === '2026-03-15',
-    `Der vorherige Sonntag muss mitgeladen werden: ${from}..${to}`);
+  assert(from === '2026-03-09' && to === '2026-03-15',
+    `Ein Montags-Cursor laedt keinen Sonntag davor: ${from}..${to}`);
 });
 
 test('getRangeForView: Der echte Week-Aufrufer liest matchMedia und reicht mobile weiter (#1030)', () => {
@@ -1856,7 +1880,7 @@ test('getRangeForView: Der echte Week-Aufrufer liest matchMedia und reicht mobil
   try {
     globalThis.window = { matchMedia: () => ({ matches: true }) };
     const mobile = calendarHelpers.getRangeForView('week', '2026-03-15');
-    assert(mobile.from === '2026-03-09' && mobile.to === '2026-03-16',
+    assert(mobile.from === '2026-03-09' && mobile.to === '2026-03-17',
       `Mobile-Aufrufer muss das erweiterte Fenster laden: ${mobile.from}..${mobile.to}`);
 
     globalThis.window = { matchMedia: () => ({ matches: false }) };
@@ -2089,7 +2113,7 @@ test('Agenda und Tagesliste: Aufgaben und Feiertage ruecken nicht ein', () => {
 });
 
 // DAS AUFHEBEN LIEGT OHNE SCROLLEN IM BLICK (Critique 2026-09-24, Rest 4).
-test('Filterblatt: „Alle Filter aufheben" steht in der Fusszeile des Blatts', () => {
+test('Filterblatt: „Filter zuruecksetzen" steht in der Fusszeile des Blatts', () => {
   let opened = null;
   const prevOpen = globalThis.__openModal;
   const prevDoc = globalThis.document;
@@ -2107,9 +2131,109 @@ test('Filterblatt: „Alle Filter aufheben" steht in der Fusszeile des Blatts', 
   }
   assert(opened, 'das Filterblatt oeffnet kein Modal');
   const footer = /<div class="modal-panel__footer">([\s\S]*?)<\/div>/.exec(opened.content);
-  assert(footer && /id="cal-filters-reset"/.test(footer[1]),
-    'der Aufheben-Knopf steht nicht in .modal-panel__footer - mountFooter() hebt ihn nicht an den Rand, er liegt unter der Falz');
-  assert((opened.content.match(/id="cal-filters-reset"/g) ?? []).length === 1, 'der Knopf steht doppelt');
+  assert(footer && /data-filter-sheet-reset/.test(footer[1]),
+    'der Zuruecksetzen-Knopf steht nicht in .modal-panel__footer - mountFooter() hebt ihn nicht an den Rand, er liegt unter der Falz');
+  assert((opened.content.match(/data-filter-sheet-reset/g) ?? []).length === 1, 'der Knopf steht doppelt');
+});
+
+// DER EINE FILTERBLATT-BAUSTEIN (Critique 2026-10-16, D2): Aufgaben und
+// Kalender hatten zwei Blaetter - Chips hier, Haken dort, „Mir zugewiesen" an
+// verschiedener Stelle, zwei Reset-Texte, ein eigenes Kalender-Popover.
+test('Filterblatt (D2): Kalender und Aufgaben fahren EINEN Baustein - Personen als Chips, Ebenen als Schalter, ein Reset-Text', () => {
+  const calSrc = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const taskSrc = readFileSync(new URL('../public/pages/tasks.js', import.meta.url), 'utf8');
+  const fn = calSrc.slice(calSrc.indexOf('function openCalendarFilters()'), calSrc.indexOf('\n}\n', calSrc.indexOf('function openCalendarFilters()')));
+  assert(/openFilterSheet\(\{/.test(fn), 'der Kalender oeffnet das geteilte Blatt');
+  assert(/anchor: \(\) =>/.test(fn), 'am Desktop das geteilte Popover am Knopf');
+  assert(!/function openFiltersPopover|showPopover\(\)/.test(calSrc), 'kein eigenes Kalender-Popover mehr neben dem Baustein');
+  assert(!/resetLabel:/.test(calSrc + taskSrc), 'kein Modul ueberschreibt den einen Reset-Text');
+  for (const [name, src] of [['Kalender', calSrc], ['Aufgaben', taskSrc]]) {
+    assert(/filterChipsHtml\(/.test(src), `${name}: Personen als Chips aus dem Baustein`);
+  }
+  // Ebenen, Quellen und Ansichtsoptionen sind Schalter, keine Haken.
+  for (const attr of ['data-filter-layer', 'data-filter-source', 'data-filter-mine', 'data-filter-schedule-display', 'data-filter-waste-type']) {
+    // Die Stelle, an der der Schalter GEBAUT wird (`attrs: { '<attr>': ... }`) -
+    // seit R19 nennt die Seitenleiste dieselben Namen auch fuer ihren Fokus.
+    const at = calSrc.indexOf(`attrs: { '${attr}'`);
+    assert(at > 0, `${attr} fehlt`);
+    assert(/control: 'switch'/.test(calSrc.slice(at - 260, at)), `${attr}: Schalter statt Haken`);
+  }
+  for (const attr of ['data-filter-mine', 'data-filter-due-today', 'data-filter-future']) {
+    const at = taskSrc.indexOf(`'${attr}'`);
+    assert(at > 0, `${attr} fehlt`);
+    assert(/control: 'switch'/.test(taskSrc.slice(at - 200, at)), `Aufgaben ${attr}: Schalter statt Haken`);
+  }
+  const de = JSON.parse(readFileSync(new URL('../public/locales/de.json', import.meta.url), 'utf8'));
+  assert(de.common.filtersReset === undefined, 'common.filtersReset ist durch common.filtersResetDefault ersetzt');
+  assert(de.calendar.filtersReset === undefined, 'calendar.filtersReset ist durch common.filtersResetDefault ersetzt');
+  const sheet = readFileSync(new URL('../public/utils/filter-sheet.js', import.meta.url), 'utf8');
+  assert(/resetLabel = t\('common\.filtersResetDefault'\)/.test(sheet), 'der Baustein traegt den einen Text als Vorgabe');
+});
+
+// „Kalender verwalten" war unter 1024px unerreichbar (Re-Critique 2026-10-16,
+// A2): der Knopf wohnt im Aktions-Slot des Kopfs, und calendar.css blendet den
+// Slot schmaler aus, solange keine Ueberlappungswarnung darin steht. Tablet und
+// Telefon konnten keinen Kalender anlegen, umfaerben oder sortieren. Der Weg
+// steht deshalb im Filterblatt unter „Kalender", wo die Liste schon steht - auf
+// jeder Breite, und auch ohne einen einzigen Kalender (dann legt man dort den
+// ersten an).
+test('Kalender verwalten: unter 1024px erreichbar - das Filterblatt traegt den Eintrag, wenn der Kopf-Slot verschwindet', () => {
+  const calSrc = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const hidesSlot = [...eachRule(calendarCss)].some((r) =>
+    r.at.some((a) => /max-width:\s*1023px/.test(a))
+    && /\.cal-toolbar\s*>\s*\.page-toolbar__actions/.test(r.selector)
+    && /display:\s*none/.test(r.body));
+  // Seit R19 bauen Filterblatt und Seitenleiste ihre Zeilen aus EINER Quelle
+  // (calendarFilterParts); geprueft wird beides zusammen.
+  const slice = (name) => {
+    const at = calSrc.indexOf(`function ${name}(`);
+    return calSrc.slice(at, calSrc.indexOf('\n}\n', at));
+  };
+  const fn = slice('calendarFilterParts') + slice('openCalendarFilters');
+  if (!hidesSlot) return;
+  assert(/data-filter-manage-calendars/.test(fn),
+    'der Kopf-Slot mit #cal-calendars ist unter 1024px ausgeblendet, aber das Filterblatt traegt keinen Eintrag „Kalender verwalten"');
+  assert(/moduleAccess\('calendar'\) === 'write'/.test(fn), 'der Eintrag steht nur mit Schreibrecht im Blatt, wie der Kopfknopf');
+  assert(/\[data-filter-manage-calendars\][\s\S]{0,400}openLocalCalendarsModal\(\)/.test(fn), 'der Eintrag oeffnet den Verwalten-Dialog');
+  // Die Gruppe darf nicht an den Quellen haengen: ohne Kalender gaebe es sonst
+  // keinen Weg, den ersten anzulegen.
+  assert(!/if \(sourceRows\) groups\.push/.test(fn), 'die Kalender-Gruppe steht auch ohne Quellen, sobald der Eintrag da ist');
+});
+
+// Das Anlegen-Formular im Dialog „Kalender verwalten" teilte sich unter 640px
+// die Spaltenvorlage der Kalenderzeilen - erste Spalte die 16px der
+// Farbscheibe. Das Formular hat aber keine Scheibe: sein Namensfeld fiel in
+// die 16px, das Farbfeld in die freie Breite und lag als blauer Balken da.
+test('Kalender verwalten: unter 640px steht das Namensfeld des Anlegen-Formulars in der freien Spalte, nicht in der Scheibenspalte', () => {
+  const calSrc = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const open = 'id="local-calendar-create"';
+  const at = calSrc.indexOf(open) + open.length;
+  const form = calSrc.slice(at, calSrc.indexOf('</form>', at));
+  const fields = [...form.matchAll(/id="(local-calendar-[a-z]+)"/g)].map((m) => m[1]);
+  assert(JSON.stringify(fields) === JSON.stringify(['local-calendar-name', 'local-calendar-color']), 'das Formular traegt Name, dann Farbe - keine Scheibe davor');
+  const phone = [...eachRule(calendarCss)].filter((r) =>
+    r.at.some((a) => /max-width:\s*639px/.test(a))
+    && r.selector.split(',').some((sel) => sel.trim() === '.cal-calendar-create')
+    && /grid-template-columns/.test(r.body));
+  assert(phone.length > 0, 'unter 640px legt eine Regel die Spalten des Formulars fest');
+  const tracks = phone.at(-1).body.match(/grid-template-columns:\s*([^;]+)/)[1].trim();
+  assert(/^minmax\(0,\s*1fr\)/.test(tracks),
+    `die erste Spalte gehoert dem Namensfeld und waechst (minmax(0, 1fr)), nicht der Scheibe - steht: ${tracks}`);
+});
+
+test('Filterblatt (D2): „Mir zugewiesen" steht in beiden Blaettern als erster Schalter der Personengruppe, die Personen sind Chips', () => {
+  const calSrc = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const taskSrc = readFileSync(new URL('../public/pages/tasks.js', import.meta.url), 'utf8');
+  // R19: die Teile kommen aus calendarFilterParts (eine Quelle fuer Blatt und Seitenleiste).
+  assert(/heading: t\('calendar\.filtersPeople'\), html: meRow \+ peopleChips/.test(calSrc)
+    && /peopleChips: people\.length \? personFilterChipsHtml\(people\)/.test(calSrc),
+    'Kalender: Schalter, dann Personen-Chips in EINER Gruppe');
+  assert(/heading: t\('tasks\.filterGroupPerson'\),\s*html: mine \+ chipsHtml\('assigned_to'/.test(taskSrc),
+    'Aufgaben: Schalter, dann Personen-Chips in EINER Gruppe');
+  assert(!/data-filter-person/.test(calSrc), 'keine Personen-Haken mehr im Kalender');
+  const html = calendarHelpers.personFilterChipsHtml([{ id: 1, display_name: 'Linda Johnson', avatar_color: '#C2185B' }]);
+  assert(/class="filter-chip filter-chip--sm"[^>]*data-filter="person" data-value="1" aria-pressed="false"/.test(html), 'leeres Set heisst alle - kein Chip an');
+  assert(/data-value="none"/.test(html), '„Nicht zugewiesen" ist ein Chip der Personenachse');
 });
 
 test('Einklappen auf die Woche: nur nach unten, nur mit Platz, auf am Listenanfang', () => {
@@ -3610,32 +3734,109 @@ test('scheduleEnabled() verlangt zusaetzlich moduleAccess(\'schedule\') !== \'no
 // Mobile Inhaltsflaeche (Critique 2026-09-24, P1)
 // --------------------------------------------------------
 
-/* FILTER UND SUCHE WOHNEN IN DER BAR-ZEILE, NICHT IM AKTIONS-SLOT.
+/* SUCHE UND FILTER WOHNEN IN DER WERKZEUGGRUPPE DER BAR-ZEILE (D1).
  *
  * Im Aktions-Slot bildeten sie mobil eine eigene Kopfzeile (56px fuer zwei
- * Knoepfe) und standen je nach Kollaps-Zustand links oder rechts. Geprueft
- * wird das GERENDERTE Markup des Kopfs: beide Knoepfe stehen in
- * `.page-toolbar__bar`, HINTER der Tab-Leiste, und der Aktions-Slot enthaelt
- * keinen von beiden. */
-test('Kalenderkopf: Filter und Suche stehen in der Bar-Zeile hinter dem Ansichts-Segment, nicht im Aktions-Slot', () => {
+ * Knoepfe). Seit D1 (Critique 2026-10-16) ist die Suche das EINE Feld
+ * (renderPageSearch) statt eines Knopfs, der eine Leiste unter dem Kopf
+ * aufdeckte, und sie steht an ERSTER Stelle der Werkzeuggruppe - vor dem
+ * Filter, hinter dem Ansichts-Segment. Geprueft wird das GERENDERTE Markup. */
+test('Kalenderkopf (D1): Suchfeld und Filter stehen in der Werkzeuggruppe hinter dem Segment, die Suche zuerst', () => {
   const html = calendarHelpers.toolbarHtml({ filterCount: 0, scheduleWarningHtml: '' });
   const at = (needle) => html.indexOf(needle);
   const actions = at('class="page-toolbar__actions"');
   const bar = at('class="page-toolbar__bar');
   const tablist = at('role="tablist"');
+  const tools = at('class="page-toolbar__tools');
   const filters = at('id="cal-filters"');
-  const search = at('id="cal-search"');
-  assert(actions >= 0 && bar >= 0 && tablist >= 0, 'Kopf ohne Aktions-Slot, Bar-Zeile oder Tab-Leiste gerendert');
-  assert(filters >= 0 && search >= 0, 'Filter- oder Suchknopf fehlt im Kopf');
-  assert(bar > actions, 'die Bar-Zeile muss nach dem Aktions-Slot stehen');
-  assert(filters > bar && search > bar,
-    `Filter (${filters}) und Suche (${search}) muessen IN der Bar-Zeile stehen (ab ${bar}), `
-    + 'nicht im Aktions-Slot - dort bauten sie mobil eine eigene Kopfzeile');
-  assert(filters > tablist && search > tablist,
-    'Filter und Suche gehoeren HINTER das Ansichts-Segment, ans Ende der Bar-Zeile');
+  const search = at('id="cal-search-input"');
+  assert(actions >= 0 && bar >= 0 && tablist >= 0 && tools >= 0, 'Kopf ohne Aktions-Slot, Bar-Zeile, Tab-Leiste oder Werkzeuggruppe gerendert');
+  assert(filters >= 0 && search >= 0, 'Filterknopf oder Suchfeld fehlt im Kopf');
+  assert(!html.includes('id="cal-search"'), 'kein eigener Suchknopf mehr, der eine Leiste aufdeckt');
+  assert(/<label class="page-search cal-toolbar__search"/.test(html), 'die Suche ist das geteilte Feld (renderPageSearch)');
+  assert(bar > actions && tools > tablist, 'Werkzeuggruppe hinter dem Segment, in der Bar-Zeile');
+  assert(search > tools && filters > search, `die Suche steht an erster Stelle der Gruppe (Suche ${search}, Filter ${filters})`);
   const actionsHtml = html.slice(actions, bar);
   assert(!actionsHtml.includes('cal-filters') && !actionsHtml.includes('cal-search'),
     'der Aktions-Slot darf Filter oder Suche nicht (auch nicht zusaetzlich) tragen');
+  // Der Begriff ueberlebt den Neubau des Kopfs (Filterwechsel).
+  assert(/value="Arzt"/.test(calendarHelpers.toolbarHtml({ searchValue: 'Arzt' })), 'der Suchbegriff steht nach dem Neubau wieder im Feld');
+});
+
+/* DIE ANSICHTSWAHL IST DAS KANON-SEGMENT (D1). */
+/* EINE ZEILE NUR, WENN SIE PASST (Sonde 19, #882). Per `order` steht die
+ * Bar-Zeile vor den Aktionen; bricht sie um, naehme sie Verwalten und Pille mit
+ * in Zeile 2, und die Titelzeile baute zwei Zeilen. Deshalb entscheidet eine
+ * Messung: Titelzeile plus Mindestmass der Bar-Zeile gegen die Innenbreite.
+ * Gefahren wird die echte Funktion gegen ein Kopf-Modell mit festen Breiten. */
+test('Kalenderkopf (Sonde 19): die eine Zeile gilt nur, wenn Titelzeile und Mindest-Bar hineinpassen', () => {
+  const box = (width, extra = {}) => ({ getBoundingClientRect: () => ({ width }), classList: { contains: () => false }, ...extra });
+  const make = (inner) => {
+    const classes = new Set();
+    const kids = [box(36), box(120), box(340), box(160)];
+    const barEl = { classList: { contains: (c) => c === 'page-toolbar__bar' }, getBoundingClientRect: () => ({ width: 600 }) };
+    const views = { scrollWidth: 280 };
+    const filter = box(40);
+    return {
+      isConnected: true,
+      clientWidth: inner + 64,
+      children: [...kids, barEl],
+      classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)), remove: (c) => classes.delete(c) },
+      querySelector: (sel) => ({ '.cal-toolbar__views': views, '#cal-filters': filter }[sel] ?? null),
+      classes,
+    };
+  };
+  const prevWindow = globalThis.window;
+  const prevGcs = globalThis.getComputedStyle;
+  try {
+    globalThis.window = { matchMedia: () => ({ matches: true }) };
+    globalThis.getComputedStyle = () => ({ paddingInlineStart: '32', paddingInlineEnd: '32', columnGap: '8', display: 'flex' });
+    // Titelzeile 656 + Mindest-Bar (280 + 8 + 152 + 8 + 40 = 488) + 4 Luecken (32) = 1176.
+    // Das Suchfeld-Minimum ist seit R19 152 statt 160px (SEARCH_MIN_PX).
+    const wide = make(1176);
+    calendarHelpers.syncToolbarFit(wide);
+    assert(wide.classes.has('cal-toolbar--one-row'), 'passt genau: eine Zeile');
+    const narrow = make(1175);
+    calendarHelpers.syncToolbarFit(narrow);
+    assert(!narrow.classes.has('cal-toolbar--one-row'), 'ein Pixel zu wenig: die Bar-Zeile steht als eigene Zeile');
+    globalThis.window = { matchMedia: () => ({ matches: false }) };
+    const phone = make(5000);
+    phone.classes.add('cal-toolbar--one-row');
+    calendarHelpers.syncToolbarFit(phone);
+    assert(!phone.classes.has('cal-toolbar--one-row'), 'unter 1024px gibt es die eine Zeile nicht');
+  } finally {
+    globalThis.window = prevWindow;
+    globalThis.getComputedStyle = prevGcs;
+  }
+  // Die Regeln der einen Zeile haengen an der Klasse, nicht an der Breite allein.
+  const oneRow = [...eachRule(calendarCss)].filter((r) => r.at.some((a) => /min-width:\s*1024px/.test(a))
+    && /\.page-toolbar__(?:bar|actions)$/.test(r.selector.trim()) && /order:/.test(r.body));
+  assert(oneRow.length === 2 && oneRow.every((r) => r.selector.includes('.cal-toolbar--one-row')),
+    `Bar vor Aktionen nur mit cal-toolbar--one-row: ${oneRow.map((r) => r.selector.trim()).join(' | ')}`);
+});
+
+/* SONDE 1 (uk, 375px): der Stepper meldet keine Inhaltsbreite nach aussen,
+ * und das Wort der Ansicht hat eine Obergrenze - sonst schob "Порядок денний"
+ * die Zeitraumzeile ueber die Kante. */
+test('Kalenderkopf (Sonde 1): Stepper und Ansichts-Knopf laufen mobil nie ueber die Kante', () => {
+  const rules = [...eachRule(calendarCss)].filter((r) => r.at.some((a) => /max-width:\s*639px/.test(a)));
+  const stepper = rules.find((r) => r.selector.trim() === '.cal-toolbar__stepper');
+  assert(/contain:\s*inline-size/.test(stepper?.body ?? ''), 'der Stepper ist in der Breite eingeschlossen');
+  const menu = rules.find((r) => r.selector.trim() === '.cal-toolbar__view-menu');
+  assert(/max-inline-size:/.test(menu?.body ?? '') && /min-width:\s*0/.test(menu?.body ?? ''), 'der Ansichts-Knopf hat eine Obergrenze');
+  const word = rules.find((r) => r.selector.trim() === '.cal-toolbar__view-menu-label');
+  assert(/text-overflow:\s*ellipsis/.test(word?.body ?? ''), 'ein langes Wort kuerzt mit Ellipse');
+});
+
+test('Kalenderkopf (D1): die Ansichtswahl ist `.segmented` mit `.segmented__item`, aktiv per `is-active`', () => {
+  const html = calendarHelpers.toolbarHtml();
+  assert(/<div class="segmented cal-toolbar__views" role="tablist"/.test(html), 'das Segment der Shell traegt die Tablist');
+  assert((html.match(/class="segmented__item cal-toolbar__view-btn/g) ?? []).length === 4, 'vier Segmente');
+  assert(/class="segmented__item cal-toolbar__view-btn is-active"[^>]*aria-selected="true"/.test(html.replace(/\s+/g, ' ')), 'der aktive Eintrag traegt is-active');
+  const rules = [...eachRule(calendarCss)];
+  const own = rules.filter((r) => r.selector.split(',').some((x) => /\.cal-toolbar__view-btn(?:--active)?$|\.cal-toolbar__views$/.test(x.trim()))
+    && /(?:^|[;{\s])(?:background(?:-color)?|box-shadow|border-radius|padding)\s*:/.test(r.body));
+  assert(own.length === 0, `keine eigene Well- oder Pillenoptik mehr: ${own.map((r) => r.selector.trim()).join(' | ')}`);
 });
 
 /* EINGEKLAPPT VERLAESST DER TITEL DAS BILD, NICHT DEN BAUM.
@@ -4334,9 +4535,12 @@ const EDIT_BASE = {
 test('Termin-Dialog: die Felder stehen nach Haeufigkeit, Seltenes hinter „Weitere Einstellungen"', () => {
   const { html, advanced } = renderEventDialog();
   assert(advanced, 'der Dialog baut „Weitere Einstellungen" nicht mehr ueber advancedSection()');
-  // Titel, Wann, Wer, Wiederholung, Erinnerung, Ort, Beschreibung - dann der Aufklapper.
+  // Titel, Wann, Wer, Wiederholung, Erinnerung, Ort - dann der Aufklapper.
+  // R19 (Critique 2026-10-16, mobil 1,6 Bildschirme): die Beschreibung steht
+  // seither als erstes Feld HINTER dem Aufklapper, wie die Notizen in Apple
+  // Kalender am Ende.
   const main = ['id="modal-title"', 'id="modal-allday"', 'id="modal-start-date"', 'data-ms-name="cal_assigned"',
-    'id="modal-reminder-toggle"', 'id="modal-location"', 'id="modal-description"',
+    'id="modal-reminder-toggle"', 'id="modal-location"',
     '<details class="form-advanced"'];
   const at = main.map((m) => html.indexOf(m));
   assert(at.every((i) => i >= 0), `nicht gerendert: ${main.filter((_, i) => at[i] < 0).join(', ')}`);
@@ -4353,8 +4557,8 @@ test('Termin-Dialog: die Felder stehen nach Haeufigkeit, Seltenes hinter „Weit
   const ret = body.slice(body.indexOf('return `'));
   const [who, rrule, remind] = ["renderUserMultiSelect(", "renderRRuleFields('event'", 'renderCalendarReminderSection('].map((m) => ret.indexOf(m));
   assert(who > 0 && who < rrule && rrule < remind, `Wiederholung steht nicht zwischen Wer und Erinnerung (${who}/${rrule}/${remind})`);
-  // Sichtbarkeit, Stichtag, Farbe, Icon, Sync-Ziel, Anhang - in dieser Folge.
-  const rare = ['id="modal-visibility"', 'id="modal-countdown"', 'id="event-color-picker"', 'id="modal-icon-trigger"',
+  // Beschreibung, Sichtbarkeit, Stichtag, Farbe, Icon, Sync-Ziel, Anhang - in dieser Folge.
+  const rare = ['id="modal-description"', 'id="modal-visibility"', 'id="modal-countdown"', 'id="event-color-picker"', 'id="modal-icon-trigger"',
     'id="event-sync-target"', 'id="modal-attachment"'];
   const inner = rare.map((m) => advanced.inner.indexOf(m));
   assert(inner.every((i) => i >= 0), `nicht hinter dem Aufklapper: ${rare.filter((_, i) => inner[i] < 0).join(', ')}`);
@@ -4362,7 +4566,7 @@ test('Termin-Dialog: die Felder stehen nach Haeufigkeit, Seltenes hinter „Weit
   // Der Aufklapper nennt, was hinter ihm liegt - aus den Beschriftungen der Felder.
   assert(advanced.opts?.hint === calendarHelpers.eventAdvancedTopics({ visibilityOffered: true, attachment: true }),
     `der Aufklapper nennt seinen Inhalt nicht: ${JSON.stringify(advanced.opts)}`);
-  for (const key of ['common.visibility.label', 'calendar.colorLabel', 'calendar.iconLabel', 'calendar.syncTargetLabel', 'calendar.attachmentLabel']) {
+  for (const key of ['calendar.descriptionLabel', 'common.visibility.label', 'calendar.colorLabel', 'calendar.iconLabel', 'calendar.syncTargetLabel', 'calendar.attachmentLabel']) {
     assert(advanced.inner.includes(key), `${key} steht in der Zeile des Aufklappers, aber kein Feld dahinter traegt es`);
   }
   assert(advanced.opts.open === false, 'ein neuer Termin oeffnet „Weitere Einstellungen"');
@@ -4385,7 +4589,9 @@ test('Termin-Dialog: beim Bearbeiten geht der Aufklapper nur fuer Unsichtbares a
   const open = (event) => renderEventDialog({ mode: 'edit', event: { ...EDIT_BASE, ...event } }).advanced.opts.open;
   assert(open({}) === false, 'ein schlichter Termin oeffnet „Weitere Einstellungen"');
   assert(open({ color: '#3B82F6', icon: 'star' }) === false, 'Farbe und Icon zeigt der Termin selbst - kein Grund aufzuklappen');
-  assert(open({ description: 'Mitbringen: Stifte' }) === false, 'die Beschreibung steht im Hauptteil und oeffnet nichts mehr');
+  // R19: die Beschreibung steht hinter dem Aufklapper - gesetzt haelt sie ihn offen.
+  assert(open({ description: 'Mitbringen: Stifte' }) === true, 'eine Beschreibung bleibt zugeklappt versteckt');
+  assert(open({ description: '   ' }) === false, 'Leerzeichen sind keine Beschreibung');
   assert(open({ countdown: 1 }) === true, 'ein Stichtag bleibt zugeklappt versteckt');
   assert(open({ visibility: 'private' }) === true, 'eine eingeschraenkte Sichtbarkeit bleibt zugeklappt versteckt');
   assert(open({ attachment_document_id: 3, attachment_name: 'a.pdf' }) === true, 'ein Anhang bleibt zugeklappt versteckt');
@@ -4441,12 +4647,19 @@ test('Termin-Dialog: die Sichtbarkeitswarnung klappt ihren Abschnitt auf', () =>
  * und `.form-help` (Anhang) hatte nirgends eine Regel. Geprueft wird das
  * gerenderte Markup gegen die Blaetter, die auf /calendar wirklich geladen
  * sind: index.html, calendar.css und reminders.css (router.js laedt es fuer
- * jede angemeldete Sitzung).
+ * jede angemeldete Sitzung) und document-attach.css, das der Dialog selbst
+ * nachlaedt (utils/component-style.js).
  */
 test('Termin-Dialog: jede Klasse im Markup hat eine Regel in einem Blatt, das /calendar laedt', () => {
   const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  // Die Ablage des Anhangs hat ihre Regeln in document-attach.css, das seit
+  // Critique R19 nicht mehr in index.html steht. Es zaehlt nur, weil der
+  // Dialog es selbst sicherstellt (test:startup-preload prueft das fuer alle
+  // Dateien; hier die Bedingung, unter der das Blatt mitzaehlen darf).
+  assert(/\bholdDocumentAttachStyle\(attachmentDropzone\)/.test(read('../public/pages/calendar.js')),
+    'der Termin-Dialog haelt seine Ablage nicht, bis document-attach.css geladen ist');
   const sheets = [...read('../public/index.html').matchAll(/<link rel="stylesheet" href="\/styles\/([\w-]+\.css)"/g)]
-    .map((m) => m[1]).concat('calendar.css', 'reminders.css');
+    .map((m) => m[1]).concat('calendar.css', 'reminders.css', 'document-attach.css');
   const styled = new Set();
   for (const file of sheets) {
     for (const { selector } of eachRule(read(`../public/styles/${file}`))) {
@@ -4863,11 +5076,6 @@ test('Kalender in RTL: keine Regel in calendar.css haengt an einer physischen Se
     '.week-view__now-line': ['left: 0', 'right: 0'],
     // left: 50% mit translateX(-50%) zentriert, die Richtung spielt keine Rolle
     '.day-view__empty-hint': ['left: 50%'],
-    // Ueberlappung im Avatar-Stapel: gehoert zur Folgearbeit an .avatar-stack
-    // (user-multi-select.css, row-reverse mit margin-left) und kippt mit ihr
-    '.allday-event .avatar-stack__item, .week-event__time .avatar-stack__item': [
-      'margin-left: calc(-1 * var(--space-1))',
-    ],
   };
   const used = new Set();
   for (const r of all) {
@@ -5097,45 +5305,22 @@ test('Wochenblock-Titel trennen mit Strich statt mitten im Wort (A2 P2-1)', () =
 });
 
 // Re-Critique 2026-09-28 (A2 P3, R14 P11): der Wechsel Monat/Woche/Tag/Agenda
-// war ein harter Schnitt nach dem Fetch. Die neue Ansicht blendet jetzt kurz
-// ein (Tokens, ohne Versatz - sie antwortet auf einen Tipp, nicht auf eine
-// Geste); unter reduzierter Bewegung bleibt es beim Schnitt.
-test('Ansichtswechsel blendet die neue Ansicht ein, reduzierte Bewegung schneidet (A2 P3)', () => {
-  const play = calendarHelpers.playViewSwap;
-  assert(typeof play === 'function', 'playViewSwap() ist die EINE Stelle fuer den Ansichtswechsel');
-  const fakeBody = () => {
-    const classes = new Set();
-    const listeners = {};
-    return {
-      classes,
-      listeners,
-      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
-      addEventListener: (type, fn) => { listeners[type] = fn; },
-    };
-  };
-  const savedMatch = globalThis.matchMedia;
-  try {
-    globalThis.matchMedia = () => ({ matches: false });
-    const body = fakeBody();
-    play(body);
-    assert(body.classes.has('cal-view-swap-in'), 'die neue Ansicht traegt die Einblende-Klasse');
-    body.listeners.animationend?.();
-    assert(!body.classes.has('cal-view-swap-in'), 'nach der Animation raeumt sie ab');
-    globalThis.matchMedia = () => ({ matches: true });
-    const still = fakeBody();
-    play(still);
-    assert(!still.classes.has('cal-view-swap-in'), 'reduzierte Bewegung: kein Einblenden');
-  } finally {
-    if (savedMatch === undefined) delete globalThis.matchMedia; else globalThis.matchMedia = savedMatch;
-  }
-  const rules = [...eachRule(calendarCss)];
-  const swap = rules.find((r) => r.selector.trim() === '.cal-view-swap-in' && !r.at.length);
-  assert(swap && /animation:\s*cal-view-swap-in var\(--duration-[a-z]+\) var\(--ease-[a-z-]+\)/.test(swap.body), `Einblenden mit Tokens: ${swap?.body}`);
-  assert(rules.some((r) => r.selector.trim() === '.cal-view-swap-in' && r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)) && /animation:\s*none/.test(r.body)),
-    'das Netz unter reduzierter Bewegung');
+// war ein harter Schnitt, danach eine reine Blende. R19 (Critique 2026-10-16):
+// er ist raeumlich - die Richtung folgt der Leiste, und die Mechanik ist der
+// geteilte Helfer swapRegion (test:motion haelt seine Regeln und die
+// reduzierte Bewegung).
+test('Ansichtswechsel ist raeumlich: Richtung nach der Leiste, Tausch per swapRegion (R19)', () => {
+  const dir = calendarHelpers.viewSwapDirection;
+  assert(typeof dir === 'function', 'viewSwapDirection() ist die EINE Stelle fuer die Richtung');
+  assert(dir('month', 'week') === 1, 'nach rechts in der Leiste kommt die Ansicht von rechts');
+  assert(dir('agenda', 'month') === -1, 'nach links von links');
+  assert(dir('day', 'day') === 0);
   const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
-  const onChange = src.slice(src.indexOf("activeClass: 'cal-toolbar__view-btn--active'"), src.indexOf("attachSegmentIndicator(bar.querySelector('.cal-toolbar__views')"));
-  assert(/renderView\(\);\s*\n\s*playViewSwap\(/.test(onChange), 'der Tab-Wechsel spielt die Einblende nach dem Neuaufbau');
+  const onChange = src.slice(src.indexOf("activeClass: 'is-active'"), src.indexOf("attachSegmentIndicator(bar.querySelector('.cal-toolbar__views')"));
+  assert(/const direction = viewSwapDirection\(state\.view, view\);\s*state\.view = view;/.test(onChange), 'die Richtung kommt aus der Ansicht VOR dem Wechsel');
+  assert(/await swapRegion\(_container\.querySelector\('#cal-body'\), \(\) => \{\s*updateLabel\(\);\s*renderView\(\);\s*\}, \{ direction \}\);/.test(onChange),
+    'der Neuaufbau laeuft im Wechsel, nicht davor');
+  assert(!/cal-view-swap-in/.test(calendarCss), 'die alte Blende ist weg');
 });
 
 // Re-Critique 2026-09-28 (A2 P2-7, R14 P12): am Desktop oeffneten die Filter
@@ -5173,7 +5358,7 @@ test('Filter am Desktop: verankertes Popover ohne Abdunkeln statt Blatt (A2 P2-7
   globalThis.__openModal = (opts) => { opened = opts; };
   globalThis.HTMLElement = class { get popover() { return null; } };
   const wide = (q) => ({ matches: /min-width:\s*1024px/.test(q) });
-  globalThis.window = { matchMedia: wide, innerWidth: 1440, innerHeight: 900 };
+  globalThis.window = { matchMedia: wide, innerWidth: 1440, innerHeight: 900, addEventListener: () => {}, removeEventListener: () => {} };
   globalThis.matchMedia = wide;
   const appended = [];
   globalThis.document = {
@@ -5199,11 +5384,12 @@ test('Filter am Desktop: verankertes Popover ohne Abdunkeln statt Blatt (A2 P2-7
   assert(pop, 'ein natives Popover (Light-Dismiss, Esc, Top-Layer) haengt im Dokument');
   assert(pop.shown, 'und ist offen');
   assert(pop.getAttribute('role') === 'dialog' && pop.getAttribute('aria-labelledby'), 'ein benannter Dialog');
-  assert(/id="cal-filters-reset"/.test(pop.html), 'das Aufheben reist mit');
-  assert(/calendar\.filters/.test(pop.html), 'der Titel steht im Popover');
-  const rules = [...eachRule(calendarCss)].filter((r) => r.selector.includes('.cal-filters-popover'));
-  assert(rules.some((r) => /position:\s*fixed/.test(r.body) && /inset:\s*auto/.test(r.body)), 'am Knopf positioniert, nicht zentriert');
-  assert(!rules.some((r) => /::backdrop/.test(r.selector) && !/transparent|none/.test(r.body)), 'kein abdunkelnder Hintergrund');
+  assert(/data-filter-sheet-reset/.test(pop.html), 'das Zuruecksetzen reist mit');
+  assert(/calendar\.filters|>Filter</.test(pop.html), 'der Titel steht im Popover');
+  // Das GETEILTE Popover (utils/filter-sheet.js, layout.css `.filter-popover`):
+  // seine Form haelt test:mobile-chrome, hier nur, dass der Kalender es nutzt.
+  assert(pop.className === 'filter-popover', 'das geteilte Popover, keine Kalender-Kopie');
+  assert(![...eachRule(calendarCss)].some((r) => r.selector.includes('.cal-filters-popover')), 'keine zweite Popover-Form in calendar.css');
 });
 
 // --------------------------------------------------------
@@ -5219,39 +5405,39 @@ function buttonTag(html, id) {
   return { tag: html.slice(open, html.indexOf('>', at) + 1), whole: html.slice(open, close) };
 }
 
-test('Zeitraum-Kopf (R17 Z1): Filter, Lupe und „..." tragen EINE Icon-Knopfform - die der Kopfregel', () => {
+test('Zeitraum-Kopf (D1): Filter und Verwalten tragen die EINE Kopf-Icon-Haut, die Suche ist das Feld der Shell', () => {
   const html = calendarHelpers.toolbarHtml({ filterCount: 0 });
-  const forms = ['cal-filters', 'cal-search', 'cal-views-menu'].map((id) => {
+  for (const id of ['cal-filters']) {
     const cls = buttonTag(html, id).tag.match(/class="([^"]*)"/)[1].split(/\s+/);
-    // Die Form ist die Kapsel mit Ring des Werkzeugmenues (pageToolsMenuHtml,
-    // Vorbild documents-tools-btn) - nicht der nackte Kreis, den die Lupe und
-    // das Menue hier trugen, waehrend jedes andere Modul den Ring zeigt.
-    return { id, secondary: cls.includes('btn--secondary'), icon: cls.includes('btn--icon') };
-  });
-  for (const f of forms) {
-    assert(f.icon, `#${f.id}: ein Icon-Knopf`);
-    assert(f.secondary, `#${f.id}: dieselbe Kopf-Icon-Form wie „..." der Kopfregel (btn--secondary btn--icon)`);
+    assert(cls.includes('btn--icon') && cls.includes('btn--secondary'), `#${id}: Kopf-Icon-Haut (btn--secondary btn--icon)`);
   }
-  // Dieselbe Form heisst auch dieselbe Tinte: eine Ruheregel, die einem der
-  // drei Knoepfe eine eigene Farbe gibt, macht aus ihm wieder einen zweiten
-  // Stil (die Lupe stand grau neben zwei getoenten Knoepfen).
+  // "Kalender verwalten" ist ein Werkzeug, kein zweiter Heute-Knopf: Haut
+  // der Kopf-Icons und ein eigenes Zeichen statt `calendar-days`.
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const manage = src.match(/<button class="([^"]*)" id="cal-calendars"[\s\S]*?<\/button>/);
+  assert(manage, 'Verwalten-Knopf gefunden');
+  assert(/\bbtn--secondary\b/.test(manage[1]) && /\bbtn--icon\b/.test(manage[1]), 'Verwalten in der Kopf-Icon-Haut');
+  assert(/data-lucide="calendar-cog"/.test(manage[0]) && !/data-lucide="calendar-days"/.test(manage[0]),
+    'Verwalten zeigt den Kalender mit Zahnrad, nicht das Monatsblatt (las sich wie "Heute")');
+  // Dieselbe Form heisst auch dieselbe Tinte.
   const own = [...eachRule(calendarCss)].filter((r) => r.selector.split(',').some((s) =>
-    /^\.cal-toolbar__(?:filter|search|tools)-btn$/.test(s.trim())) && /(?:^|[;{\s])(?:color|background(?:-color)?|border(?:-color)?)\s*:/.test(r.body));
+    /^\.cal-toolbar__(?:filter|search|tools|calendars)-btn$/.test(s.trim())) && /(?:^|[;{\s])(?:color|background(?:-color)?|border(?:-color)?)\s*:/.test(r.body));
   assert(own.length === 0, `keine eigene Ruhe-Tinte fuer einen Kopfknopf: ${own.map((r) => r.selector.trim()).join(' | ')}`);
 });
 
-// R17 E11 (Critique 2026-10-07, A2 P2): mobil stand die Ansichtswahl hinter
-// "...", und der Kopf sagte nirgends, welche Ansicht offen ist.
-test('E11: der Ansichtswahl-Knopf traegt Glyphe und Namen der aktiven Ansicht, das Menue bleibt', () => {
-  const ICONS = { month: 'calendar-days', week: 'calendar-range', day: 'calendar-1', agenda: 'list' };
+// D1 (Critique 2026-10-16, Persona Jordan): der Ausloeser der mobilen
+// Ansichtswahl wechselte seit R17 E11 sein ZEICHEN mit der Ansicht und war
+// danach nicht wiederzuerkennen. Jetzt nennt er die Ansicht in WORTEN, und
+// sein Zeichen steht (Pop-up-Knopf mit Auf/Ab-Zeichen).
+test('D1: der Ansichtswahl-Knopf nennt die aktive Ansicht in Worten, sein Zeichen bleibt stehen', () => {
   const names = new Set();
-  for (const [view, icon] of Object.entries(ICONS)) {
+  const glyphs = new Set();
+  for (const view of ['month', 'week', 'day', 'agenda']) {
     const html = calendarHelpers.viewMenuHtml(view);
     const btn = buttonTag(html, 'cal-views-menu');
-    assert(btn.whole.includes(`data-lucide="${icon}"`), `${view}: der Knopf zeigt die Glyphe der Ansicht (${icon})`);
-    assert(!btn.whole.includes('data-lucide="ellipsis"'), `${view}: kein "..." mehr`);
-    const item = html.match(new RegExp(`data-cal-view="${view}"[\\s\\S]*?</button>`))[0];
-    assert(item.includes(`data-lucide="${icon}"`), `${view}: dieselbe Glyphe wie der Menue-Eintrag`);
+    glyphs.add((btn.whole.match(/data-lucide="([^"]+)"/) ?? [])[1]);
+    const word = btn.whole.match(/<span class="cal-toolbar__view-menu-label"[^>]*>([^<]*)<\/span>/);
+    assert(word && word[1].length > 0, `${view}: der Knopf zeigt das Wort der Ansicht`);
     const name = btn.tag.match(/aria-label="([^"]*)"/)[1];
     assert(name.startsWith('calendar.viewSwitcher: ') && name.length > 'calendar.viewSwitcher: '.length, `${view}: der Name nennt die Ansicht (${name})`);
     assert(btn.tag.includes(`title="${name}"`), 'Tooltip = Name');
@@ -5261,10 +5447,11 @@ test('E11: der Ansichtswahl-Knopf traegt Glyphe und Namen der aktiven Ansicht, d
     assert(new RegExp(`aria-checked="true"[^>]*data-cal-view="${view}"`).test(html.replace(/\s+/g, ' ')), `${view}: der Eintrag ist gewaehlt`);
   }
   assert(names.size === 4, 'vier Ansichten, vier Namen');
-  // Der Wechsel zieht den Knopf nach, nicht nur den Haken.
+  assert(glyphs.size === 1 && glyphs.has('chevrons-up-down'), `EIN festes Zeichen fuer alle Ansichten, gefunden: ${[...glyphs].join(', ')}`);
   const sync = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8').match(/function syncViewMenu\([\s\S]*?\n\}/)[0];
-  assert(/trigger\.setAttribute\('aria-label', label\)/.test(sync) && /trigger\.replaceChildren\(glyph\)/.test(sync),
-    'syncViewMenu() setzt Name und Glyphe des Ausloesers');
+  assert(/trigger\.setAttribute\('aria-label', label\)/.test(sync) && /word\.textContent = /.test(sync),
+    'syncViewMenu() setzt Name und Wort des Ausloesers');
+  assert(!/replaceChildren\(glyph\)/.test(sync), 'das Zeichen wird nicht mehr getauscht');
 });
 
 test('Zeitraum-Kopf (R17 Z1): der Filterknopf traegt den geteilten Zaehler und nennt ihn', () => {
@@ -5754,6 +5941,300 @@ test('am Display bietet das Filterblatt „Mir zugewiesen" nicht an (#1808)', ()
   };
   assert(/data-filter-mine/.test(blatt({ id: 1 })), 'Gegenfall: der Mensch behaelt den Schalter');
   assert(!/data-filter-mine/.test(blatt({ id: 9, access_scope: 'display' })), 'am Display steht der Schalter nicht im Blatt');
+});
+
+// Critique 2026-10-16 (P2 mobil): das Ganztags-Band der Woche stand bei vier
+// Eintraegen an einem Tag 104px hoch, der erste Termin bei y=266. Mobil zeigt
+// jede Zelle eingeklappt EINEN Eintrag plus „+n"; Zahl und Beschriftung
+// klappen die Zeile auf (gemessen: Band 105 -> 56px, Raster ab y=218).
+test('Woche mobil: Ganztaegiges als EINE Zeile plus „+n", aufklappbar (Critique 2026-10-16)', () => {
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const week = src.slice(src.indexOf('function renderWeekView(container)'), src.indexOf('function chronological(items)'));
+  assert(/const alldayFolds = isMobile && \(alldayCounts\.some\(\(n\) => n > 1\) \|\| band\.laneCount > 1\);/.test(week),
+    'nur mobil, und nur wenn eine Zelle mehr als einen Eintrag hat oder Baender mehr als eine Zeile brauchen');
+  assert(/class="allday-more" data-allday-toggle aria-expanded="\$\{alldayOpen\}"\s+aria-label="\$\{esc\(t\('calendar\.moreEvents', \{ count: n - 1 \}\)\)\}">\+\$\{n - 1\}<\/button>/.test(week),
+    '„+n" ist ein Knopf mit Zustand und ausgeschriebenem Namen');
+  assert(/calendar-all-day-label--toggle" data-allday-toggle aria-expanded=/.test(week), 'die Beschriftung klappt auf und zu');
+  assert(/\$\{alldayMore\(alldayCounts\[i\]\)\}/.test(week), 'jede Zelle traegt ihren Zaehler');
+  assert(/state\.alldayExpanded = !alldayRow\.classList\.contains\('is-expanded'\);/.test(week), 'der Zustand gilt fuer die Sitzung');
+  const rules = [...eachRule(calendarCss)];
+  const rule = (sel) => rules.find((r) => r.selector.trim() === sel);
+  assert(/display:\s*none/.test(rule('.allday-row--fold:not(.is-expanded) .allday-cell > :not(:first-child):not(.allday-more)')?.body ?? ''),
+    'eingeklappt nur der erste Eintrag je Zelle');
+  assert(/display:\s*none/.test(rule('.allday-more')?.body ?? ''), 'aufgeklappt (und am Desktop) kein Zaehler');
+  assert(/display:\s*inline-flex/.test(rule('.allday-row--fold:not(.is-expanded) .allday-more')?.body ?? ''));
+});
+
+// --------------------------------------------------------
+// SEITENLEISTE AB CA. 1600px (Critique R19, Entscheidung Ulas 2026-10-16):
+// Mini-Monat, Kalender und Personen aus derselben Quelle wie das Filterblatt,
+// „Als Naechstes". Darunter unveraendert.
+// --------------------------------------------------------
+test('Seitenleiste: Kalender und Personen sind dieselben Bausteine und Zustaende wie im Filterblatt', () => {
+  const st = calendarHelpers.state;
+  const vorher = { users: st.users, people: st.people, hiddenSources: st.hiddenSources, assignedToMe: st.assignedToMe, currentUserId: st.currentUserId, localCalendars: st.localCalendars, events: st.events, user: st.user };
+  try {
+    Object.assign(st, {
+      users: [{ id: 1, display_name: 'Linda' }, { id: 2, display_name: 'Alex' }],
+      people: new Set([2]), hiddenSources: new Map([['local:9', { name: 'Arbeit', color: '#336699' }]]),
+      assignedToMe: true, currentUserId: 1, user: { id: 1 }, events: [],
+      localCalendars: [{ id: 3, name: 'Familie', color: '#C2185B' }, { id: 9, name: 'Arbeit', color: '#336699' }],
+    });
+    const html = calendarHelpers.sidebarFiltersHtml();
+    const parts = calendarHelpers.calendarFilterParts();
+    for (const part of [parts.sourceRows, parts.meRow, parts.peopleChips]) {
+      assert(part && html.includes(part.trim().slice(0, 80)), 'die Leiste zeigt genau die Zeilen des Filterblatts');
+    }
+    assert(/data-filter-source="local:9"(?![^>]*checked)/.test(html), 'eine ausgeblendete Quelle steht aus - wie im Blatt');
+    assert(/data-filter-source="local:3"[^>]*checked/.test(html), 'eine sichtbare Quelle steht an');
+    assert(/data-filter-mine="true"[^>]*checked/.test(html), '„Mir zugewiesen" steht an');
+    assert(/data-value="2" aria-pressed="true"/.test(html), 'die gewaehlte Person ist als Chip an');
+  } finally {
+    Object.assign(st, vorher);
+  }
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const fnOf = (name) => { const at = src.indexOf(`function ${name}(`); return src.slice(at, src.indexOf('\n}\n', at)); };
+  assert(/calendarFilterParts\(\{ people, sources \}\)/.test(fnOf('openCalendarFilters')), 'das Blatt baut aus calendarFilterParts');
+  assert(/calendarFilterParts\(\)/.test(fnOf('sidebarFiltersHtml')), 'die Leiste baut aus calendarFilterParts');
+  const wire = fnOf('wireSidebar');
+  assert(/applyCalendarFilterInput\(e\.target, aside\)/.test(wire) && /toggleCalendarPersonChip\(/.test(wire),
+    'die Leiste legt Schalter und Chips ueber dieselben Funktionen um wie das Blatt');
+});
+
+// Re-Kritik 2026-10-17: ab 1600px stand jeder volle Name auf einer eigenen
+// Chip-Zeile, "Als Naechstes" lag unter der Falz (Scroll 1123/831 bei
+// 1600x900). Und der Mini-Monat zeigte heute in Azur, das Raster in Violett.
+await test('Re-Kritik: Personen-Chips ohne geteilten Nachnamen; heute ist im Mini-Monat und im Raster dieselbe Farbe', async () => {
+  const echt = await import('../public/components/user-multi-select.js');
+  const vorherSurname = globalThis.__sharedSurname;
+  globalThis.__sharedSurname = echt.sharedSurname;
+  const st = calendarHelpers.state;
+  const vorher = { users: st.users, people: st.people, hiddenSources: st.hiddenSources, assignedToMe: st.assignedToMe, currentUserId: st.currentUserId, localCalendars: st.localCalendars, events: st.events, user: st.user };
+  try {
+    Object.assign(st, {
+      users: [{ id: 1, display_name: 'Linda Johnson' }, { id: 2, display_name: 'Alex Johnson' }],
+      people: new Set(), hiddenSources: new Map(), assignedToMe: false, currentUserId: 1, user: { id: 1 }, events: [],
+      localCalendars: [{ id: 3, name: 'Familie', color: '#C2185B' }],
+    });
+    const chips = calendarHelpers.calendarFilterParts().peopleChips;
+    assert(/data-value="1"[^>]*>[\s\S]*?<span>Linda<span class="sr-only"> Johnson<\/span><\/span>/.test(chips),
+      `der Chip zeigt den Vornamen, der Nachname bleibt zugaenglich: ${chips}`);
+    assert(!/>Linda Johnson</.test(chips), 'kein voller Name im sichtbaren Chip');
+    Object.assign(st, { users: [{ id: 1, display_name: 'Linda Johnson' }, { id: 2, display_name: 'Maria Lopez' }] });
+    assert(/<span>Maria Lopez<\/span>/.test(calendarHelpers.calendarFilterParts().peopleChips), 'verschiedene Nachnamen bleiben voll');
+  } finally {
+    Object.assign(st, vorher);
+    globalThis.__sharedSurname = vorherSurname;
+  }
+  const css = readFileSync(new URL('../public/styles/calendar.css', import.meta.url), 'utf8');
+  const rules = [...eachRule(css)].filter((r) => !r.at.length);
+  const today = rules.find((r) => r.selector.trim() === '.cal-mini__day[aria-current="date"]');
+  assert(/background-color:\s*var\(--color-accent\)/.test(today?.body ?? ''), 'heute: gefuellte Akzent-Scheibe wie im Raster');
+  const cursor = rules.find((r) => r.selector.trim() === '.cal-mini__day.is-cursor');
+  assert(/box-shadow:\s*inset 0 0 0 var\(--space-0h\) var\(--color-accent\)/.test(cursor?.body ?? ''), 'der gewaehlte Tag als Ring');
+  assert(!/background-color/.test(cursor?.body ?? ''), 'der gewaehlte Tag ist keine zweite Scheibe');
+  const mini = rules.filter((r) => r.selector.includes('.cal-mini__day'));
+  assert(mini.every((r) => !/--module-accent/.test(r.body)), 'kein Azur im Mini-Monat');
+  const hover = rules.find((r) => r.selector.split(',').some((x) => x.trim() === '.week-view__col:hover'));
+  assert(/var\(--color-accent\)/.test(hover?.body ?? '') && !/--module-accent/.test(hover?.body ?? ''), 'die Spalte unter dem Zeiger im Akzent');
+});
+
+test('Seitenleiste: der Mini-Monat zeigt sechs Wochen ab dem Wochenstart, markiert heute, Auswahl und den gezeigten Zeitraum', () => {
+  const st = calendarHelpers.state;
+  const vorher = { view: st.view, cursor: st.cursor, today: st.today, weekStart: st.weekStart };
+  const prevWindow = globalThis.window;
+  globalThis.window = { ...(prevWindow ?? {}), matchMedia: () => ({ matches: false }) };
+  try {
+    Object.assign(st, { view: 'week', cursor: '2026-10-28', today: '2026-10-16', weekStart: 1 });
+    const html = calendarHelpers.miniMonthHtml();
+    const days = [...html.matchAll(/data-mini-date="([\d-]+)"/g)].map((m) => m[1]);
+    assert(days.length === 42 && days[0] === '2026-09-28', `sechs Wochen ab Montag vor dem 1.: ${days[0]} (${days.length})`);
+    assert(/data-mini-date="2026-10-16" aria-current="date"/.test(html), 'heute traegt aria-current="date"');
+    assert(/class="cal-mini__day is-in-view is-cursor" data-mini-date="2026-10-28"/.test(html), 'der gewaehlte Tag');
+    const band = [...html.matchAll(/is-in-view[^"]*" data-mini-date="([\d-]+)"/g)].map((m) => m[1]);
+    assert(band[0] === '2026-10-26' && band.at(-1) === '2026-11-01', `die gezeigte Woche als Band: ${band[0]} - ${band.at(-1)}`);
+    assert(/data-mini-step="-1"/.test(html) && /data-mini-step="1"/.test(html), 'die Pfeile blaettern die Uebersicht');
+    st.view = 'month';
+    assert(!/is-in-view/.test(calendarHelpers.miniMonthHtml()), 'im Monat kein Band hinter jedem Tag');
+  } finally {
+    Object.assign(st, vorher);
+    globalThis.window = prevWindow;
+  }
+});
+
+test('Seitenleiste: „Als Naechstes" nennt die naechsten Termine ab jetzt, gefiltert wie die Ansicht', () => {
+  const st = calendarHelpers.state;
+  const vorher = { today: st.today, hiddenSources: st.hiddenSources, people: st.people, assignedToMe: st.assignedToMe, layerBirthdays: st.layerBirthdays };
+  try {
+    Object.assign(st, { today: '2026-10-16', hiddenSources: new Map(), people: new Set(), assignedToMe: false, layerBirthdays: false });
+    const now = Date.parse('2026-10-16T12:00:00Z');
+    const ev = (id, start, end, extra = {}) => ({ id, title: `T${id}`, start_datetime: start, end_datetime: end, assigned_users: [], ...extra });
+    const list = [
+      ev(1, '2026-10-16T08:00:00Z', '2026-10-16T09:00:00Z'),            // vorbei
+      ev(2, '2026-10-17T10:00:00Z', '2026-10-17T11:00:00Z'),
+      ev(3, '2026-10-16T11:00:00Z', '2026-10-16T13:00:00Z'),            // laeuft
+      ev(4, '2026-10-16', '2026-10-16', { all_day: 1 }),                // heute ganztaegig
+      ev(5, '2026-10-18', '2026-10-18', { all_day: 1, birthday_name: 'Emma' }), // Ebene aus
+      ev(6, '2026-10-20T10:00:00Z', '2026-10-20T11:00:00Z'),
+      ev(7, '2026-10-21T10:00:00Z', '2026-10-21T11:00:00Z'),
+      ev(8, '2026-10-22T10:00:00Z', '2026-10-22T11:00:00Z'),
+    ];
+    const ids = calendarHelpers.upNextEvents(list, now).map((e) => e.id);
+    assert(JSON.stringify(ids) === JSON.stringify([4, 3, 2, 6, 7]), `Reihenfolge und Auswahl: ${JSON.stringify(ids)}`);
+  } finally {
+    Object.assign(st, vorher);
+  }
+});
+
+// Review #2049: scheiterte der Abruf (offline, Serverfehler), legte der catch
+// ein LEERES Ergebnis fuer den Tag ab - die Leiste sagte „nichts steht an" und
+// lud an diesem Tag nie wieder. Ein Fehler ist ein eigener Zustand: ein Satz
+// zur Ursache, „Erneut versuchen", und der Tag gilt nicht als geladen.
+await test('Seitenleiste: scheitert „Als Naechstes", sagt die Leiste das und laedt auf Wunsch neu', async () => {
+  const st = calendarHelpers.state;
+  const vorher = { today: st.today, hiddenSources: st.hiddenSources, people: st.people, assignedToMe: st.assignedToMe, layerBirthdays: st.layerBirthdays };
+  const savedStub = globalThis.__apiStub;
+  const restoreDom = installMiniDom();
+  const calls = [];
+  let fail = true;
+  globalThis.__apiStub = {
+    get: async (url) => {
+      calls.push(url);
+      if (fail) throw Object.assign(new Error('Service Unavailable'), { status: 503 });
+      return { data: [{ id: 9, title: 'Zahnarzt', start_datetime: '2026-10-20T10:00:00Z', end_datetime: '2026-10-20T11:00:00Z', assigned_users: [] }] };
+    },
+  };
+  try {
+    Object.assign(st, { today: '2026-10-16', hiddenSources: new Map(), people: new Set(), assignedToMe: false, layerBirthdays: false });
+    calendarHelpers.resetUpNext();
+    await calendarHelpers.loadUpNext();
+    assert(calls.length === 1, `ein Abruf: ${calls.length}`);
+    const html = calendarHelpers.upNextHtml();
+    assert(!html.includes('calendar.upNextEmpty'), `ein Fehler behauptet keinen leeren Zeitraum: ${html}`);
+    assert(/data-upnext-retry/.test(html) && html.includes('common.retry'), `der Weg zurueck: ${html}`);
+    assert(!/role="alert"/.test(html), 'ruhig: die Leiste baut sich nach jeder Ansicht neu und darf nicht jedes Mal melden');
+    assert(calendarHelpers.upNextNeedsLoad() === false, 'kein Selbst-Nachladen in einer Schleife');
+    // Ein frischer Stand der Ansicht (loadRange setzt day = null) versucht es wieder.
+    calendarHelpers.upNext.day = null;
+    assert(calendarHelpers.upNextNeedsLoad() === true, 'der naechste geladene Zeitraum versucht es erneut');
+    calendarHelpers.upNext.day = st.today;
+    // „Erneut versuchen": jetzt klappt es.
+    fail = false;
+    await calendarHelpers.loadUpNext({ force: true });
+    assert(calls.length === 2, `der zweite Abruf: ${calls.length}`);
+    const after = calendarHelpers.upNextHtml();
+    assert(after.includes('Zahnarzt') && !/data-upnext-retry/.test(after), `danach die Termine: ${after}`);
+  } finally {
+    calendarHelpers.resetUpNext();
+    Object.assign(st, vorher);
+    globalThis.__apiStub = savedStub;
+    restoreDom();
+  }
+});
+
+test('Seitenleiste: erst ab 86.25rem Kalenderflaeche, nur mit Leiste rueckt die Seite auf den Rand; der Zeitraum ist als Titel gewichtet', () => {
+  const rules = [...eachRule(calendarCss)];
+  const base = rules.find((r) => r.selector.trim() === '.cal-sidebar' && !r.at.length);
+  assert(/display:\s*none/.test(base?.body ?? ''), 'unter der Schwelle steht keine Leiste');
+  const wide = rules.filter((r) => r.at.some((a) => /@container cal-page \(min-width: 86\.25rem\)/.test(a)));
+  assert(wide.length >= 3 && wide.every((r) => r.selector.includes('.calendar-page.has-cal-sidebar')),
+    'jede Regel der Leiste haengt an has-cal-sidebar - die Suche bleibt auf der Inhaltsspalte');
+  assert(rules.some((r) => r.selector.trim() === '.calendar-page' && /container:\s*cal-page\s*\/\s*inline-size/.test(r.body)), 'die Seite ist der Container');
+  const leiste = wide.find((r) => /\.cal-sidebar:not\(\[hidden\]\)/.test(r.selector));
+  assert(/overflow-y:\s*auto/.test(leiste?.body ?? '') && /scrollbar-gutter:\s*stable/.test(leiste?.body ?? ''),
+    'die Leiste haelt den Platz ihrer Bildlaufleiste - sonst rueckt der Mini-Monat, wenn „Als Naechstes" nachkommt (R19-Nachlese)');
+  assert(rules.some((r) => /\.calendar-page\.app-page--list-detail/.test(r.selector) && /container-name:\s*module-surface cal-page/.test(r.body)),
+    'in Agenda und Tag behaelt die Seite ihren Namen module-surface');
+  const label = rules.find((r) => r.selector.trim() === '.cal-toolbar__label' && r.at.some((a) => /min-width:\s*1024px/.test(a)));
+  assert(/font-weight:\s*var\(--font-weight-bold\)/.test(label?.body ?? '') && /font-size:\s*var\(--text-lg\)/.test(label?.body ?? ''),
+    'der Desktop-Zeitraum steht fett in 18px, nicht mehr leiser als Fliesstext-Gewicht');
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  // R20: nur die Suche steht ohne Leiste. Die Agenda behaelt sie - ohne „Als
+  // Naechstes" (das IST die Agenda); vorher sprang der Inhalt beim
+  // Ansichtswechsel von x 536 auf 220 (1920px, Re-Critique 2026-10-17).
+  assert(/function sidebarWanted\(\) \{\s*return !searchActive;/.test(src), 'die Agenda verliert die Leiste - der Inhalt springt beim Ansichtswechsel');
+  assert(/function upNextWanted\(\) \{\s*return state\.view !== 'agenda';/.test(src), 'in der Agenda steht „Als Naechstes" doppelt');
+  assert(/\(upNextWanted\(\) \? upNextHtml\(\) : ''\)/.test(src) && /if \(upNextWanted\(\) && upNextNeedsLoad\(\)\) loadUpNext\(\);/.test(src),
+    'die Leiste zeichnet bzw. laedt „Als Naechstes" auch in der Agenda');
+  assert(/syncHeadToScrollport\(body\);\s*renderSidebar\(\);\s*\}/.test(src), 'jede Ansicht zeichnet die Leiste mit');
+});
+
+// R19 (Critique 2026-10-16, Kalender mobil): zwei Anschnitte.
+test('R19 Agenda: ueber dem angedockten Tageskopf laeuft keine Karte durch', () => {
+  const rules = [...eachRule(calendarCss)];
+  const head = rules.find((r) => r.selector.trim() === '.agenda-day__header' && !r.at.length);
+  assert(/position:\s*sticky/.test(head?.body ?? '') && /background-color:\s*var\(--color-bg\)/.test(head.body), 'der Kopf klebt deckend');
+  const band = rules.find((r) => r.selector.trim() === '.agenda-day__header::before');
+  assert(band, 'die Flaeche reicht nicht ueber den Kopf hinaus - im Polster des Ports (8px) lief die Karte durch');
+  assert(/bottom:\s*100%/.test(band.body) && /block-size:\s*var\(--space-2\)/.test(band.body) && /background-color:\s*inherit/.test(band.body),
+    'das Band ist genau das Polster des Ports hoch, in der Farbe des Kopfs');
+  const port = rules.find((r) => r.selector.trim() === '.agenda-view' && !r.at.length);
+  assert(/padding:\s*var\(--space-2\)/.test(port?.body ?? ''), 'Vorbedingung: der Port polstert oben --space-2 - aendert sich das, zieht das Band mit');
+});
+
+test('R19 Woche: die erste sichtbare Stunde steht ganz da, auch am Scrollende', () => {
+  const h = 56;
+  assert(calendarHelpers.alignedHourScroll({ hour: 9, hourHeight: h, max: 2000 }) === 7 * h, 'eine gute Stunde vor jetzt, auf die volle Stunde abgerundet');
+  assert(calendarHelpers.alignedHourScroll({ hour: 22, hourHeight: h, max: 806 }) === 14 * h,
+    'am Abend deckelt das Scrollende - und auch dort beginnt die Ansicht mit einer vollen Stunde (vorher 806px = 14:23)');
+  assert(calendarHelpers.alignedHourScroll({ hour: 0, hourHeight: h, max: 806 }) === 0);
+  assert(calendarHelpers.alignedHourScroll({ hour: 5, hourHeight: 0, max: 806 }) === 0, 'ohne Hoehe kein Sprung');
+});
+
+// R19 (Critique 2026-10-16): "Die Desktop-Woche startet zur aktuellen Uhrzeit
+// minus 80px, der Morgen bleibt unsichtbar." Mit der Hoehe des Scrollers
+// beginnt das Raster um 7 Uhr, solange jetzt darunter ganz hineinpasst.
+test('R19 Woche: der Morgen steht da, solange jetzt daneben Platz hat', () => {
+  const h = 56;
+  const at = (hour, visible, max = 24 * h - visible) => calendarHelpers.alignedHourScroll({ hour, hourHeight: h, max, visible }) / h;
+  assert(at(15, 665) === 7, `1440 um 15 Uhr: ab 7 Uhr (vorher 12), war ${at(15, 665)}`);
+  assert(at(10, 845) === 7, 'vormittags ebenso');
+  assert(at(20, 618) === 10, `mobil am Abend so spaet wie noetig, damit 20 Uhr ganz unten steht: ${at(20, 618)}`);
+  assert(at(0, 665) === 0 && at(3, 665) === 2, 'tief in der Nacht eine Stunde vor jetzt');
+  // Re-Kritik 2026-10-17: um 05:49 begann die Woche bei 04:00 (bis 15:30) -
+  // drei Stunden leere Nacht. Frueh am Morgen (ab 5 Uhr) zeigt sie den Tag ab 7.
+  assert(at(5, 665) === 7 && at(6, 665) === 7, `frueh am Morgen ab 7 Uhr, war ${at(5, 665)}/${at(6, 665)}`);
+  assert(at(4, 665) === 3, 'vor 5 Uhr bleibt es Nacht');
+  assert(at(23, 845) === 8, `das Scrollende (845px fassen 15,1 Stunden) deckelt auf volle Stunden: ${at(23, 845)}`);
+});
+
+// R19 (Critique 2026-10-16): "Die Popover-Zeitspanne bricht mitten im
+// Bereich um" ("Donnerstag, 22. Oktober, 09:00 - | 10:30 Uhr" in 320px), der
+// Ort brach "Zahnarztpraxi|s Mueller", das Popover erbte keine gleich breiten
+// Ziffern, und die Liste unter dem Monat nannte "17.10.2026 Samstag", wo die
+// Agenda "Heute Samstag, 17. Oktober" sagt.
+test('R19 Popover und Tageskopf: Spanne bricht nicht, Ort nicht im Wort, ein Kopf fuer Liste und Agenda', () => {
+  const keep = calendarHelpers.unbreakable;
+  assert(typeof keep === 'function', 'unbreakable() haelt die Spanne zusammen');
+  const span = keep('09:00 - 10:30 Uhr');
+  assert(!/ /.test(span), `kein normales Leerzeichen mehr: ${JSON.stringify(span)}`);
+  assert(span.includes('-⁠'), 'hinter dem Bindestrich ein Wortverbinder (UAX 14 LB12a erlaubt sonst den Bruch)');
+  assert(span.replace(/⁠/g, '').replace(/ /g, ' ') === '09:00 - 10:30 Uhr', 'der Text bleibt derselbe');
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const rel = src.slice(src.indexOf('function eventWhenRelative('), src.indexOf('function unbreakable('));
+  assert(/\$\{day\}, \$\{unbreakable\(timeSpanText\(/.test(rel), 'der Kopf der Leseansicht schuetzt die Spanne');
+  const monthStart = src.indexOf('function renderMonthList(');
+  const monthList = src.slice(monthStart, src.indexOf('const group = dayGroup(date);', monthStart));
+  assert(/\$\{agendaDayHeadHtml\(date\)\}/.test(monthList), 'die Liste unter dem Monat traegt den Agenda-Kopf');
+  assert(!/formatDate\(date\)\)\}<\/span>/.test(monthList), 'keine Zahl-Schreibweise mehr');
+  assert(!/DAY_NAMES_LONG\(\)\[new Date\(date \+ 'T00:00:00'\)/.test(src), 'auch die Suchtreffer bauen kein Date aus dem Key');
+  const detailCss = readFileSync(new URL('../public/styles/detail-view.css', import.meta.url), 'utf8');
+  const rules = [...eachRule(detailCss)].filter((r) => !r.at.length);
+  const pop = rules.find((r) => r.selector.trim() === '.detail-popover');
+  assert(/font-variant-numeric:\s*tabular-nums/.test(pop?.body ?? ''), 'das Popover am <body> hat gleich breite Ziffern');
+  const wrap = rules.find((r) => r.selector.trim() === '.detail-row:has(> .detail-row__action)');
+  assert(/flex-wrap:\s*wrap/.test(wrap?.body ?? ''), 'die Aktion einer Zeile rueckt bei Platzmangel darunter');
+  const text = rules.find((r) => r.selector.trim() === '.detail-row:has(> .detail-row__action) > .detail-row__text');
+  assert(/flex:\s*1 1 10rem/.test(text?.body ?? ''), 'der Wert beansprucht seine Mindestbreite');
+});
+
+// R20 (E1-Befund, Kalender 1920 CLS 0,136): die Spalte der Seitenleiste steht
+// vom ersten Bild an. Vorher kam `has-cal-sidebar` erst mit renderSidebar()
+// nach der ersten Ansicht, und #cal-body rutschte von x 220 auf 536.
+test('R20: die Seitenleiste reserviert ihre Spalte schon im ersten Markup', () => {
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  assert(/class="calendar-page app-page app-page--full\$\{sidebarWanted\(\) \? ' has-cal-sidebar' : ''\}" id="calendar-page"/.test(src), 'die Seite traegt has-cal-sidebar schon im Markup');
+  assert(/<aside class="cal-sidebar" id="cal-sidebar" aria-label="[^"]*"\$\{sidebarWanted\(\) \? '' : ' hidden'\}><\/aside>/.test(src), 'die leere Leiste ist nicht verborgen');
 });
 
 // --------------------------------------------------------

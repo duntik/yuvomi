@@ -30,6 +30,8 @@ export const REFUSAL_MESSAGES = new Map([
   // Token und wiederholt. Diesen Satz sieht also nur, wem das nicht half.
   ['csrf_invalid', 'common.errorFormExpired'],
   ['contact_email_protected', 'contacts.emailLockedHint'],
+  // Bezahlen ohne das Recht, Betraege der Haushaltshilfe zu sehen (R20).
+  ['amounts_hidden', 'housekeeping.errorAmountsHidden'],
 ]);
 
 /**
@@ -120,6 +122,11 @@ export const CASE_MESSAGES = new Map([
   // lesend. Unterschieden wird das bewusst nicht (dieselbe Antwort wie fuer
   // einen fremden privaten Eintrag).
   ['health_vital_not_found', 'health.errorVitalGone'],
+  // Harte Grenzen der Vitalwerte (Critique R19, server/routes/health/vital-limits.js).
+  // Das Formular prueft dieselben vorher; diese Saetze sieht, wer per Import
+  // oder einem aelteren Tab an ihm vorbei schreibt.
+  ['health_vital_out_of_range', 'health.errorVitalImpossible'],
+  ['health_vital_bp_order', 'health.errorVitalBpOrder'],
   ['health_medication_not_found', 'health.errorMedicationGone'],
   ['health_schedule_not_found', 'health.errorScheduleGone'],
   ['health_dose_not_found', 'health.errorDoseGone'],
@@ -346,6 +353,11 @@ function knownKey(err) {
   // die Absage einen Grund, fuer den es einen Satz gibt, dann dieser. Der Grund
   // einer Absage zaehlt nur an einer Absage, und umgekehrt.
   if (status === 403) return REFUSAL_MESSAGES.get(reason) ?? 'common.errorNoPermission';
+  // Eine Bremse (429) sagt "kurz warten" in der Sprache der Oberflaeche. Bis
+  // dahin kam ihr englischer Servertext durch ("Too many requests. Please wait
+  // a moment." in deutscher UI, Critique 2026-10-16). Ein Fall mit eigenem
+  // Satz behaelt diesen.
+  if (status === 429) return CASE_MESSAGES.get(reason) ?? 'common.errorRateLimited';
   return CASE_MESSAGES.get(reason);
 }
 
@@ -393,7 +405,7 @@ export function errorSentence(err, fallbackKey = 'common.errorGeneric') {
  *
  * @param {unknown} err - ApiError (status, data), ein Netzfehler oder irgendein Wurf
  * @returns {string} uebersetzter Satz, oder an einem Status ohne eigenen Satz
- *   (400, 409, 422, 429 ohne bekannten Grund) der Text des Servers
+ *   (400, 409, 422 ohne bekannten Grund) der Text des Servers
  */
 export function friendlyError(err) {
   // Offline-Mutation (ApiError status 0): spezifische Meldung - auch wenn
@@ -414,9 +426,54 @@ export function friendlyError(err) {
   if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return t('common.errorTimeout');
   if (/Failed to fetch|NetworkError|Load failed/i.test(err?.message || '')) return t('common.errorServer');
   if (err?.name === 'TypeError') return t('common.unexpectedError');
-  // Jede andere Antwort des Servers (400, 409, 422, 429 ohne bekannten Grund):
+  // Jede andere Antwort des Servers (400, 409, 422 ohne bekannten Grund):
   // ihr eigener Text. Er nennt die Ursache (welches Feld, welcher Konflikt),
   // und der allgemeine Satz an seiner Stelle sagte weniger - das gilt, bis der
   // Aufrufer umgestellt ist und der Server den Fall mit einem `reason` benennt.
   return err?.data?.error || err?.message || t('common.errorGeneric');
+}
+
+/**
+ * DER SATZ FUER EINEN FEHLGESCHLAGENEN LADEVORGANG (Critique R19, 2026-10-16) -
+ * oder nichts, wenn die Ursache unbekannt ist.
+ *
+ * Bis hierher sagte jeder Ladefehler fest "Bitte pruefe die Verbindung", auch
+ * bei einer Bremse (429) oder einem Serverfehler: die Familie suchte den Fehler
+ * am eigenen WLAN, waehrend der Server nur kurz warten wollte. Die Zuordnung
+ * ist die von friendlyError, mit EINEM Unterschied: der Text des Servers kommt
+ * hier nie heraus. Bei einer unbekannten Ursache (400, 409 ohne Grund) bleibt
+ * der allgemeine Satz des Aufrufers stehen - `mountLoadError` und der
+ * Fehlerzustand der Shell nehmen ihn als Rueckfall.
+ *
+ * Der Statuscode steht NICHT im Satz: er gehoert in die aufklappbaren Details.
+ *
+ * @param {unknown} err
+ * @returns {string|undefined}
+ */
+/**
+ * Die 503 des Service Workers (`{ error: 'offline' }`, sw.js networkFirstApi):
+ * keine Antwort des Servers, sondern kein Netz. Eine Stelle fuer die Frage,
+ * damit niemand dafuer `err.data.error` selbst liest.
+ */
+export function isServiceWorkerOffline(err) {
+  const status = err?.status ?? err?.response?.status;
+  return status === 503 && err?.data?.error === 'offline';
+}
+
+export function loadErrorSentence(err) {
+  const status = err?.status ?? err?.response?.status;
+  // Ohne Netz: der Browser weiss es (onLine), oder der Service Worker hat fuer
+  // eine nicht gecachte Abfrage sein 503 `{ error: 'offline' }` geantwortet
+  // (sw.js, networkFirstApi) - das ist kein Serverfehler.
+  if (status === 0 || !navigator.onLine) return t('common.errorOffline');
+  if (isServiceWorkerOffline(err)) return t('common.errorOffline');
+  const known = knownSentence(err);
+  if (known) return known;
+  if (status === 404) return t('common.errorNotFound');
+  if (status >= 500) return t('common.errorServer');
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return t('common.errorTimeout');
+  // Keine Antwort, obwohl der Browser sich fuer online haelt: das Netz auf dem
+  // Weg (WLAN, Proxy, Server aus). Genau dafuer ist der Verbindungssatz da.
+  if (/Failed to fetch|NetworkError|Load failed/i.test(err?.message || '')) return t('common.loadErrorDescription');
+  return undefined;
 }

@@ -139,3 +139,82 @@ test('traegt outbound_snapshot nach und laesst jede Zeile bei NULL', () => {
   assert.deepEqual(rows.map((r) => r.outbound_snapshot), [null, null, null, null]);
   assert.deepEqual(rows.map((r) => r.updated_at), Array(4).fill('original'));
 });
+
+// Codex-Review zu #2056: steht Migration 251 als angewendet da, fehlt aber die
+// Spalte (Restore eines inkonsistenten Backups), scheitern Aufgaben, Termine,
+// Notizen, Uebersicht, Housekeeping und Taschengeld-Buchungen an
+// `no such column: avatar_key`. Der Start traegt Spalte, Schluessel der
+// vorhandenen Bilder UND die Trigger nach.
+const keyOf = (db, id) => db.prepare('SELECT avatar_key FROM users WHERE id = ?').get(id).avatar_key;
+const KEY = /^[0-9a-f]{32}$/;
+
+test('traegt users.avatar_key samt Schluesseln und Triggern nach', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE users (
+    id INTEGER PRIMARY KEY, username TEXT, display_name TEXT, avatar_data TEXT
+  )`);
+  db.exec(`INSERT INTO users (id, username, display_name, avatar_data) VALUES (1, 'a', 'A', 'data:image/png;base64,AA==')`);
+  db.exec(`INSERT INTO users (id, username, display_name, avatar_data) VALUES (2, 'b', 'B', NULL)`);
+
+  reconcileCriticalSchema(db);
+
+  assert.equal(hasColumn(db, 'users', 'avatar_key'), true);
+  const first = keyOf(db, 1);
+  assert.match(first, KEY, 'ein vorhandenes Bild bekommt einen Schluessel');
+  assert.equal(keyOf(db, 2), null, 'ohne Bild kein Schluessel');
+  db.exec(`UPDATE users SET avatar_data = 'data:image/png;base64,AB==' WHERE id = 1`);
+  assert.match(keyOf(db, 1), KEY);
+  assert.notEqual(keyOf(db, 1), first, 'ein neues Bild wuerfelt den Schluessel neu - der Trigger kam mit');
+  const second = keyOf(db, 1);
+  db.exec(`UPDATE users SET display_name = 'C' WHERE id = 1`);
+  assert.equal(keyOf(db, 1), second, 'ein anderer Wert laesst ihn stehen');
+  db.exec(`INSERT INTO users (id, username, display_name, avatar_data) VALUES (3, 'c', 'C', 'data:image/png;base64,AC==')`);
+  assert.match(keyOf(db, 3), KEY, 'ein neues Konto mit Bild bekommt sofort einen');
+});
+
+// Codex-Review zu #2056: hat die Datei die Spalte, aber die Trigger verloren
+// (ein Neubau von `users` nimmt Trigger nicht mit), uebersprang die Reparatur
+// den Eintrag, weil die Spalte schon da war - ein neues Bild behielte dann
+// seinen alten Schluessel. Die Trigger werden unabhaengig von der Spalte geprueft.
+test('legt die Schluessel-Trigger neu an, wenn nur sie fehlen', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE users (
+    id INTEGER PRIMARY KEY, username TEXT, display_name TEXT, avatar_data TEXT, avatar_key TEXT
+  )`);
+  db.exec(`INSERT INTO users (id, username, display_name, avatar_data, avatar_key) VALUES (1, 'a', 'A', 'x', '${'a'.repeat(32)}')`);
+
+  reconcileCriticalSchema(db);
+  reconcileCriticalSchema(db); // zweiter Lauf: kein Fehler, keine doppelten Trigger
+
+  db.exec(`UPDATE users SET avatar_data = 'y' WHERE id = 1`);
+  assert.notEqual(keyOf(db, 1), 'a'.repeat(32));
+  const triggers = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger'
+    AND name IN ('trg_users_avatar_key_update', 'trg_users_avatar_key_insert')`).get();
+  assert.equal(triggers.n, 2);
+});
+
+// Codex-Review zu #2056: fehlten die Trigger, kann in der Zeit ein Bild ohne
+// Schluessel angelegt oder ein Bild unter dem alten Schluessel ersetzt worden
+// sein - das erste fiele aus den Antworten, das zweite zeigte unter einer
+// `immutable`-Adresse das alte Bild aus dem Cache. Die Reparatur wuerfelt
+// deshalb jeden Schluessel neu.
+test('wuerfelt die Schluessel neu, wenn die Trigger fehlten', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE users (
+    id INTEGER PRIMARY KEY, username TEXT, display_name TEXT, avatar_data TEXT, avatar_key TEXT
+  )`);
+  const stale = 'a'.repeat(32);
+  db.exec(`INSERT INTO users (id, username, display_name, avatar_data, avatar_key) VALUES (1, 'a', 'A', 'neu', '${stale}')`);
+  db.exec(`INSERT INTO users (id, username, display_name, avatar_data, avatar_key) VALUES (2, 'b', 'B', 'x', NULL)`);
+  db.exec(`INSERT INTO users (id, username, display_name, avatar_data, avatar_key) VALUES (3, 'c', 'C', NULL, '${'b'.repeat(32)}')`);
+
+  reconcileCriticalSchema(db);
+
+  assert.match(keyOf(db, 1), KEY);
+  assert.notEqual(keyOf(db, 1), stale, 'ein ersetztes Bild bekommt eine neue Adresse');
+  assert.match(keyOf(db, 2), KEY, 'ein Bild ohne Schluessel bekommt einen');
+  assert.equal(keyOf(db, 3), null, 'ohne Bild kein Schluessel');
+  const kept = keyOf(db, 1);
+  reconcileCriticalSchema(db);
+  assert.equal(keyOf(db, 1), kept, 'mit vorhandenen Triggern bleibt jeder Schluessel stehen');
+});

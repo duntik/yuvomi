@@ -1,11 +1,13 @@
 import { api } from '/api.js';
 import { t } from '/i18n.js';
+import { REQUIRED_MARK } from '/utils/html.js';
 import { confirmModal, refocusAfterRender } from '/components/modal.js';
 import {
   createDisclosure,
   createInlineError,
   createRetryState,
   createStatusSummary,
+  settingRowHtml,
 } from '/settings/components.js';
 
 function showToast(message, tone = 'default') {
@@ -19,28 +21,33 @@ function buildAddForm(container) {
   form.noValidate = true;
   form.autocomplete = 'off';
   form.insertAdjacentHTML('beforeend', `
-    <div class="form-group">
-      <label class="form-label" for="dms-provider">${t('settings.dmsProvider')}</label>
-      <select class="form-input" id="dms-provider">
-        <option value="paperless">${t('settings.dmsProviderPaperless')}</option>
-        <option value="papra">${t('settings.dmsProviderPapra')}</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label" for="dms-name">${t('settings.dmsName')}</label>
-      <input class="form-input" type="text" id="dms-name" maxlength="100" required />
-    </div>
-    <div class="form-group">
-      <label class="form-label" for="dms-url">${t('settings.dmsBaseUrl')}</label>
-      <input class="form-input" type="url" id="dms-url" required placeholder="https://..." />
-    </div>
-    <div class="form-group" id="dms-org-group" hidden>
-      <label class="form-label" for="dms-org-id">${t('settings.dmsOrgId')}</label>
-      <input class="form-input" type="text" id="dms-org-id" maxlength="200" />
-    </div>
-    <div class="form-group">
-      <label class="form-label" for="dms-token">${t('settings.dmsToken')}</label>
-      <input class="form-input" type="password" id="dms-token" required autocomplete="current-password" />
+    ${/* EIN FORMULAR-DIALEKT (R19, Einstellungen B7): Anbieter, Name,
+         Adresse, Organisation und Token als Zeilen der Gruppe. */ ''}
+    <div class="row-carrier settings-group">
+      ${settingRowHtml({
+        label: t('settings.dmsProvider'), labelFor: 'dms-provider',
+        control: `<select class="form-input" id="dms-provider">
+          <option value="paperless">${t('settings.dmsProviderPaperless')}</option>
+          <option value="papra">${t('settings.dmsProviderPapra')}</option>
+        </select>`,
+      })}
+      ${settingRowHtml({
+        label: t('settings.dmsName'), labelFor: 'dms-name', labelExtra: REQUIRED_MARK,
+        control: `<input class="form-input" type="text" id="dms-name" maxlength="100" required />`,
+      })}
+      ${settingRowHtml({
+        label: t('settings.dmsBaseUrl'), labelFor: 'dms-url', labelExtra: REQUIRED_MARK,
+        control: `<input class="form-input" type="url" id="dms-url" required placeholder="https://..." />`,
+      })}
+      ${settingRowHtml({
+        label: t('settings.dmsOrgId'), labelFor: 'dms-org-id',
+        attrs: { id: 'dms-org-group', hidden: true },
+        control: `<input class="form-input" type="text" id="dms-org-id" maxlength="200" />`,
+      })}
+      ${settingRowHtml({
+        label: t('settings.dmsToken'), labelFor: 'dms-token', labelExtra: REQUIRED_MARK,
+        control: `<input class="form-input" type="password" id="dms-token" required autocomplete="new-password" />`,
+      })}
     </div>
     <div id="dms-form-error-host"></div>
     <div class="settings-form-actions">

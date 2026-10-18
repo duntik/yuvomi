@@ -21,7 +21,7 @@ import {
   refocusAfterRender,
 } from '/components/modal.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
-import { emptyStateEl } from '/utils/empty-state.js';
+import { emptyStateEl, searchEmptyOptions } from '/utils/empty-state.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { pageToolsMenuHtml, pageToolsActionEl, installPopoverMenus } from '/utils/popover-menu.js';
 import { formatMoney } from '/utils/money.js';
@@ -35,6 +35,7 @@ import { mountMasterDetail, splitViewDetailHtml } from '/utils/master-detail.js'
 import { wireScrollFade } from '/utils/ux.js';
 import { redrawList, collapseRow } from '/utils/list-motion.js';
 import { attachOverlay, whenHistorySettled } from '/utils/overlay-history.js';
+import { inertOutside } from '/utils/background-inert.js';
 import { setNavBadge } from '/utils/nav-badges.js';
 import { CHART, chartScales, chartY, chartGridMarkup, niceDomain, chartTimePositions, chartTimeLabelsMarkup } from '/utils/chart.js';
 
@@ -749,13 +750,12 @@ function renderListBody() {
   if (!groups.length) {
     list.appendChild(emptyStateEl(
       state.query
-        ? {
-            variant: 'no-results',
-            title: t('inventory.noResultsTitle'),
-            description: t('inventory.noResultsDescription'),
-            hint: [`"${state.query}"`, state.filterAttention ? t('inventory.metricAttentionLabel') : null].filter(Boolean).join(' · '),
-            action: { label: t('inventory.resetSearch'), onClick: resetFilters },
-          }
+        // Der EINE Leerzustand einer leeren Suche (R19): Begriff und Filter als Chips.
+        ? searchEmptyOptions({
+          query: state.query,
+          filters: state.filterAttention ? [t('inventory.metricAttentionLabel')] : [],
+          onReset: resetFilters,
+        })
         : {
             variant: 'no-results',
             title: t('inventory.attentionEmptyTitle'),
@@ -1268,8 +1268,10 @@ async function openItemDetail(item, { pane = null, signal = null } = {}) {
   openDetailView({
     title: item.name,
     key: `inventory:${item.id}`,
-    accentColor: 'var(--module-inventory)',
     size: 'md',
+    // Schmal Label und Wert in einer Zeile (R19, Critique 2026-10-16): 57px je
+    // Feld fuer "Kaufdatum / 12.03.2024" schoben die Garantie unter den Falz.
+    rowLayout: 'inline',
     pane,
     sections: renderItemDetail(item, history, onDoneTrackedDate, historyLoadFailed),
     // OHNE SCHREIBRECHT WEDER „LOESCHEN" NOCH „BEARBEITEN": `openDetailView`
@@ -1289,10 +1291,9 @@ async function openItemDetail(item, { pane = null, signal = null } = {}) {
     edit: ro ? null : {
       label: t('common.edit'),
       title: t('common.editItem'),
-      // Im Sheet ist Bearbeiten die Hauptaktion und steht unten in der
-      // Daumenzone; Loeschen bleibt zurueckgenommen am Anfang und fragt
+      // Bearbeiten steht als Hauptaktion unten (detail-view.js,
+      // withPrimaryEdit); Loeschen bleibt zurueckgenommen am Anfang und fragt
       // weiter nach (removeItem), wie im Kalender (#1460, #1463).
-      primary: true,
       mount: (panel, editPane) => {
         const form = buildItemForm({ mode: 'edit', item });
         editPane.insertAdjacentHTML('beforeend', form.content);
@@ -1495,6 +1496,9 @@ function openBookingPicker(panel, { initialMonth, includeRole = false } = {}) {
     panel.append(overlay);
     if (window.lucide) window.lucide.createIcons({ el: overlay });
     const opener = document.activeElement;
+    // Das Formular darunter ist gesperrt, solange der Picker offen ist
+    // (utils/background-inert.js); freigegeben VOR der Fokus-Rueckgabe.
+    const releaseBackground = inertOutside(overlay);
     overlay.querySelector('[data-picker-close]').focus();
 
     const listEl = overlay.querySelector('[data-picker-list]');
@@ -1504,6 +1508,7 @@ function openBookingPicker(panel, { initialMonth, includeRole = false } = {}) {
 
     const close = (result) => {
       overlay.remove();
+      releaseBackground();
       if (opener?.isConnected) opener.focus();
       resolve(result);
     };
@@ -1803,24 +1808,6 @@ function buildItemForm({ mode, item = null }) {
           <select id="inv-location" class="form-input">${locationOptions.join('')}</select>
         </div>
       </div>
-      <div class="form-pair form-pair--wide">
-        <div class="form-group">
-          <label class="form-label" for="inv-purchase-date">${esc(t('inventory.purchaseDateLabel'))}</label>
-          <yuvomi-datepicker id="inv-purchase-date" type="date"
-                             value="${esc(isEdit && item.purchase_date ? item.purchase_date : '')}"></yuvomi-datepicker>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="inv-purchase-price">${esc(t('inventory.purchasePriceLabel'))}</label>
-          <input id="inv-purchase-price" class="form-input" type="number" min="0" step="0.01" inputmode="decimal">
-        </div>
-      </div>
-      ${!isEdit && showsBookings ? `
-      <div class="form-group">
-        <button class="btn btn--secondary btn--sm" type="button" data-action="link-booking">
-          <i data-lucide="link" aria-hidden="true"></i> ${esc(t('inventory.linkBooking'))}
-        </button>
-        <div data-picked-booking-chip hidden></div>
-      </div>` : ''}
       <div class="form-group">
         <label class="form-label" for="inv-status">${esc(t('inventory.statusLabel'))}</label>
         <select id="inv-status" class="form-input">${statusOptions}</select>
@@ -1833,7 +1820,30 @@ function buildItemForm({ mode, item = null }) {
           <i data-lucide="plus" aria-hidden="true"></i> ${esc(t('inventory.addBooking'))}
         </button>
       </div>` : ''}
+      ${/* SELTENES HINTER „WEITERE ANGABEN" (Critique 2026-10-16, D4). Der
+           Dialog zeigte bis zu 22 Felder; vorn stehen jetzt Name, Kategorie,
+           Ort und Status (beim Bearbeiten dazu die verknuepften Buchungen).
+           Kauf, Garantie, Foto und Dokumente stehen dahinter, und die zweite
+           Zeile des Aufklappers nennt sie, damit man sie findet. */ ''}
       ${advancedSection(`
+        <div class="form-pair form-pair--wide">
+          <div class="form-group">
+            <label class="form-label" for="inv-purchase-date">${esc(t('inventory.purchaseDateLabel'))}</label>
+            <yuvomi-datepicker id="inv-purchase-date" type="date"
+                               value="${esc(isEdit && item.purchase_date ? item.purchase_date : '')}"></yuvomi-datepicker>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="inv-purchase-price">${esc(t('inventory.purchasePriceLabel'))}</label>
+            <input id="inv-purchase-price" class="form-input" type="number" min="0" step="0.01" inputmode="decimal">
+          </div>
+        </div>
+        ${!isEdit && showsBookings ? `
+        <div class="form-group">
+          <button class="btn btn--secondary btn--sm" type="button" data-action="link-booking">
+            <i data-lucide="link" aria-hidden="true"></i> ${esc(t('inventory.linkBooking'))}
+          </button>
+          <div data-picked-booking-chip hidden></div>
+        </div>` : ''}
         <div class="form-group">
           <span class="form-label">${esc(t('inventory.photoLabel'))}</span>
           <div class="inventory-photo-wrap">
@@ -1933,6 +1943,8 @@ function buildItemForm({ mode, item = null }) {
           hint: t('inventory.attachmentsHint'),
         })}`,
       {
+        label: t('modal.moreDetails'),
+        hint: t('inventory.moreDetailsHint'),
         open: isEdit && (!!item.brand || !!item.model || !!item.serial_number || !!item.notes
           || !!item.photo_data || (item.attachments?.length ?? 0) > 0
           // Kilometerstand auf einen Blick zeigen: entweder schon gesetzt,
