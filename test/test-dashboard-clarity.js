@@ -553,7 +553,11 @@ test('#1821 Fokus: der Neuaufbau der Seite ruft Erfassen und Wiederfokus, um das
   const body = fn.slice(0, fn.indexOf('\n  }\n')).split('\n').filter((line) => !/^\s*(\/\/|\/?\*)/.test(line)).join('\n');
   const capture = body.indexOf('const { key: keepFocus, had: hadFocus } = captureRebuildFocus(shell, document.activeElement, document.body);');
   const paint = body.indexOf('setHtml(shell, `\n      <section class="dashboard-masthead');
-  const restore = body.search(/^ {4}restoreFocusAfterRebuild\(container, \[\n {6}keepFocus,\n {6}\.\.\.\(focusAfterRebuild \?\? \[\]\),\n {6}\.\.\.\(hadFocus && modeChanged \? \['#dashboard-customize-btn'\] : \[\]\),\n {4}\]\);$/m);
+  // R19: mobil steht der Anpassen-Einstieg im Menue (`.dashboard-tools-btn`) -
+  // der Knopf ist dort nicht gerendert, das Menue ist der Rueckweg.
+  // R20 (D, Wand-Modus): nach dem Verlassen der Wand steht danach der
+  // Einstieg in die Wand als letzter Kandidat - nach den drei oben.
+  const restore = body.search(/^ {4}restoreFocusAfterRebuild\(container, \[\n {6}keepFocus,\n {6}\.\.\.\(focusAfterRebuild \?\? \[\]\),\n {6}\.\.\.\(hadFocus && modeChanged \? \['#dashboard-customize-btn', '\.dashboard-tools-btn'\] : \[\]\),\n(?: {6}\.\.\.\(takeWallFocusIntent\('leave'\) \? \[[^\n]*\] : \[\]\),\n)? {4}\]\);$/m);
   assert.ok(capture > 0, 'erfasst wird vor dem Aufbau');
   assert.ok(paint > capture, 'dann wird gebaut');
   assert.ok(restore > paint, 'und danach wieder fokussiert: eigener Schluessel, Nachfolger der Geste, Anpassen-Knopf');
@@ -1306,4 +1310,152 @@ test('R18: die umgestellten Inhaltsklassen der Uebersicht stehen auf der Lese-Le
     const body = rules.filter((r) => r.at.length === 0 && r.selector.split(',').some((s) => s.trim() === selector)).map((r) => r.body).join(';');
     assert.match(body, /font-weight:\s*var\(--font-weight-semibold\)/, selector);
   }
+});
+
+// Critique R19: das Onboarding nannte am Desktop einen "+-Knopf unten rechts".
+// Ab der Breite, ab der die Seitenleiste steht, dockt der Router den FAB als
+// Pille in den Modulkopf oben rechts (dockFabIntoToolbar/isDesktopViewport).
+// Die Desktop-Fassung beschreibt diesen Ort, in jeder Sprache, und beide Seiten
+// schalten an derselben Breite.
+test('Onboarding Schritt 3 nennt am Desktop den Knopf oben rechts, nicht unten (Critique R19)', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const dashboard = readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8');
+  const router = readFileSync(new URL('../public/router.js', import.meta.url), 'utf8');
+  const steps = dashboard.slice(dashboard.indexOf('function getOnboardingSteps'), dashboard.indexOf('function showOnboarding'));
+  const onboardingBreak = /matchMedia\('\(min-width: (\d+)px\)'\)/.exec(steps)?.[1];
+  const dockBreak = /function isDesktopViewport\(\) \{\s*return window\.matchMedia\('\(min-width: (\d+)px\)'\)/.exec(router)?.[1];
+  assert.ok(onboardingBreak && dockBreak, 'Breakpoints nicht gefunden');
+  assert.equal(onboardingBreak, dockBreak, 'Onboarding und angedockter Knopf schalten an verschiedenen Breiten');
+  const bottom = { de: /unten/, en: /bottom/, fr: /\ben bas\b/, es: /inferior/, nl: /onder/, it: /in basso/ };
+  const top = { de: /oben rechts/, en: /top right/, fr: /en haut/, es: /arriba/, nl: /rechtsboven/, it: /in alto/ };
+  const dir = new URL('../public/locales/', import.meta.url);
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+    const loc = file.slice(0, -5);
+    const text = JSON.parse(readFileSync(new URL(file, dir), 'utf8')).onboarding.step3BodyDesktop;
+    if (bottom[loc]) assert.doesNotMatch(text, bottom[loc], `${loc}: ${text}`);
+    if (top[loc]) assert.match(text, top[loc], `${loc}: ${text}`);
+  }
+});
+
+// Re-Critique 2026-10-17 (A1, Shell): der Rundgang war austauschbar - ein
+// Lucide-Haus statt der Bildmarke, und Leiste und Plus-Knopf nur beschrieben.
+// Schritt 1 traegt die Marke aus utils/brand-mark.js, Schritt 2 und 3 zeigen
+// per Lichtring auf das echte Bedienelement, das ihr Text nennt. Der Ring ist
+// Anzeige: das Overlay faengt weiter die Klicks, und die Tafel liegt ueber
+// seinem Abdunkler (positioniert), sonst stuende sie selbst im Grau.
+test('Onboarding: Bildmarke im ersten Schritt, Lichtring auf Leiste und Plus-Knopf (Re-Critique 2026-10-17)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const dashboard = readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const steps = dashboard.slice(dashboard.indexOf('function getOnboardingSteps'), dashboard.indexOf('function showOnboarding'));
+  const show = dashboard.slice(dashboard.indexOf('function showOnboarding'), dashboard.indexOf('function maybeHintCustomize'));
+  assert.doesNotMatch(steps, /icon:\s*'home'/, 'kein generisches Haus als Zeichen des Produkts');
+  assert.match(dashboard, /import \{ brandMarkSvg \} from '\/utils\/brand-mark\.js'/);
+  assert.match(steps, /\{ mark: true,[^\n]*step1Title/, 'Schritt 1 traegt die Bildmarke');
+  assert.match(show, /brandMarkSvg\(\)/);
+  assert.match(steps, /step2Title[^\n]*\n\s*target: \(\) => document\.querySelector\(desktop \? '\.nav-sidebar' : '\.nav-bottom__items'\)/,
+    'Schritt 2 zeigt auf die Seitenleiste bzw. die Kapsel');
+  assert.match(steps, /step3Title[^\n]*\n\s*target: \(\) => \[\.\.\.document\.querySelectorAll\('\.page-fab'\)\]/,
+    'Schritt 3 zeigt auf den sichtbaren Plus-Knopf');
+  assert.match(show, /function placeSpotlight\(\)/);
+  assert.match(show, /classList\.toggle\('onboarding-overlay--spot', shown\)/, 'ohne sichtbares Ziel bleibt die Unschaerfe');
+  assert.match(show, /spot\.setAttribute\('aria-hidden', 'true'\)/);
+  assert.match(show, /removeEventListener\('resize', onResize\)/, 'der Ring haengt nach dem Rundgang an keinem Resize mehr');
+  const rule = (sel) => (css.match(new RegExp(`(?:^|\\n)${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`)) || [])[1] || '';
+  assert.match(rule('.onboarding-overlay--spot'), /backdrop-filter:\s*none/);
+  assert.match(rule('.onboarding-spotlight'), /pointer-events:\s*none/);
+  assert.match(rule('.onboarding-spotlight'), /box-shadow:[^;]*100vmax/);
+  assert.match(rule('.onboarding-card'), /position:\s*relative/, 'die Tafel liegt ueber dem Abdunkler');
+});
+
+// Re-Critique 2026-10-17 (A1): "Widgets anpassen" am Telefon trug je Zeile vier
+// umrandete 48px-Kreise. Hoch/Runter liegen jetzt in EINER Kapsel auf der
+// Mulde, Groesse und Ausblenden ohne Ring daneben; die Ziele bleiben 48px.
+test('Anpassen am Telefon: eine Kapsel fuer Hoch/Runter, keine Ringe je Knopf (Re-Critique 2026-10-17)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const phone = css.slice(css.indexOf('ANPASSEN AUF DEM TELEFON IST EINE LISTE'));
+  const block = phone.slice(0, phone.indexOf('@media (max-width: 767px)'));
+  assert.match(block, /\.widget-edit-controls__hide,\s*\.widget-edit-controls__options,\s*\.widget-edit-controls__size-trigger\s*\) \{\s*border-color: transparent;\s*background: transparent;/,
+    'Groesse, Optionen und Ausblenden ohne Ring');
+  assert.match(block, /\.widget-edit-controls__move \{\s*gap: 0;\s*border-radius: var\(--radius-full\);\s*background: var\(--color-fill-well\);/,
+    'Hoch und Runter in einer Kapsel');
+  assert.match(block, /\.widget-edit-controls__move-btn \{\s*border: none;/);
+  // Die Zielgroesse kommt weiter aus der Fingerregel (48px).
+  assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.widget-edit-controls__move-btn \{\s*min-width: var\(--target-base\);\s*min-height: var\(--target-base\);/);
+});
+
+// --------------------------------------------------------
+// Critique R19 (layout): die Uebersicht steht auf derselben Inhaltsspalte wie
+// jedes Modul. Bis R19 war sie bis 1680px breit mit eigenem Polster; bei 1920
+// begann sie bei x 270, die Module bei x 430. Ein eigenes Hoechstmass oder ein
+// fester Seitenrand am Desktop liesse die Kante wieder springen.
+// --------------------------------------------------------
+test('die Uebersicht polstert am Desktop mit --page-inline-pad und kennt kein eigenes Hoechstmass', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const root = [...eachRule(css)].filter((r) => r.selector.trim() === '.dashboard');
+  const desktop = root.filter((r) => r.at.some((a) => /min-width:\s*(\d+)px/.test(a) && Number(/min-width:\s*(\d+)px/.exec(a)[1]) >= 1024));
+  assert.ok(desktop.length >= 1, 'keine Desktop-Regel fuer .dashboard');
+  for (const rule of desktop) {
+    const pad = /padding(?:-inline)?:\s*([^;]+);/.exec(rule.body)?.[1] ?? '';
+    assert.match(pad, /var\(--page-inline-pad\)/, `${rule.at.join(' ')}: die Uebersicht polstert mit "${pad}" statt mit der Kante der Module`);
+  }
+  // Die zuletzt geltende Breite ohne At-Regel: kein festes Mass.
+  const widths = root.filter((r) => !r.at.length && /max-width:/.test(r.body)).map((r) => /max-width:\s*([^;]+);/.exec(r.body)[1].trim());
+  assert.equal(widths.at(-1), 'none', `die Uebersicht deckelt sich auf ${widths.at(-1)} - ihre Kante wiche von den Modulen ab`);
+});
+
+/* R19 (Entscheidung Ulas 2026-10-16, Critique P2 mobil): DIE UEBERSICHT AUF DEM
+ * TELEFON. Die Familie belegte 427px (51 % des Viewports) fuer fuenf Zeilen
+ * "1 Aufgabe", das Wetter begann bei y 1438, ueber dem Gruss standen drei
+ * Icon-Knoepfe. Jetzt: eine Avatar-Reihe mit Zaehler, die Wetterzeile im
+ * Masthead auch neben der Karte, der Wand-Modus im Anpassen-Menue. */
+test('R19 mobil: die Familie ist eine Avatar-Reihe mit Zaehler, Name und Satz bleiben im Baum', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const html = __test.renderFamilyWidget([ALEX, LEO, LINDA], { memberTodayTasks: [{ user_id: 1, open_count: 2 }] });
+  assert.match(html, /<span class="family-member__face">[\s\S]*?class="family-widget-avatar"[\s\S]*?<span class="family-member__count" aria-hidden="true">2<\/span>/,
+    'die Zahl offener Aufgaben steht als Marke am Gesicht');
+  assert.equal((html.match(/family-member__count/g) || []).length, 1, 'nur wer offene Aufgaben hat, traegt eine Marke');
+  assert.match(html, /<span class="family-member__short" aria-hidden="true">Alex<\/span>/, 'der Vorname unter dem Gesicht');
+  assert.match(html, /<span class="family-member__name">Alex<\/span>/, 'der volle Name bleibt der Name fuer Screenreader');
+  const phone = css.slice(css.indexOf('MOBIL IST DIE FAMILIE EINE AVATAR-REIHE'));
+  const block = phone.slice(phone.indexOf('@media (max-width: 639px) {'), phone.indexOf('\n}\n') + 2);
+  assert.match(block, /\.family-widget__list \{[^}]*flex-flow:\s*row wrap/, 'eine Reihe statt einer Liste');
+  assert.match(block, /\.family-member:not\(\.family-member--shared\) > \.family-member__body \{[^}]*clip-path:\s*inset\(50%\)/,
+    'Name und Satz geclippt, nicht entfernt');
+  assert.doesNotMatch(block, /\.family-member__body \{[^}]*display:\s*none/);
+  assert.match(block, /\.family-member--shared \{[^}]*order:\s*1;[^}]*flex:\s*1 0 100%/, 'der gemeinsame Termin als Zeile unter der Reihe');
+  assert.match(block, /\.family-widget__footer \{\s*display:\s*none/, 'die Tagesbilanz steht in den Marken');
+});
+
+test('R19 mobil: die Wetterzeile steht im Masthead auch neben der Karte, breit schliessen sich beide aus', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  assert.match(src, /renderDashboardOverview\(user, isCustomizing, weather, \{ followsDefault, canPublish, weatherCard: weatherCardShown \}\)/,
+    'das Wetter geht immer in den Kopf, die Karte nur als Merkmal');
+  const weather = { current: { temp: 18, desc: 'Sonnig', icon: '01d' }, units: 'metric' };
+  const head = __test.renderDashboardOverview({ display_name: 'Linda' }, false, weather, { weatherCard: true });
+  assert.match(head, /class="dashboard-overview__weather dashboard-overview__weather--card"/);
+  assert.match(css, /@media \(min-width: 768px\) \{\s*\.dashboard-overview__weather--card \{\s*display: none;/,
+    'ab 768px steht die Karte im Bild - dort nur sie');
+});
+
+test('R19 mobil: der Wand-Modus steht im Anpassen-Menue, je Breite ein Weg', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8');
+  const head = __test.renderDashboardOverview({ display_name: 'Linda' }, false, null, {});
+  assert.match(head, /class="btn btn--secondary btn--icon dashboard-icon-btn dashboard-tools-btn popover-menu__trigger"/);
+  assert.match(head, /data-action="dashboard-customize"[\s\S]*data-action="dashboard-wall"/, 'Anpassen und Wand-Modus als Eintraege');
+  assert.match(head, /id="dashboard-wall-enter"/, 'der Wand-Knopf bleibt im Baum - die Eintraege klicken ihn');
+  const display = __test.renderDashboardOverview({ display_name: 'Wand', access_scope: 'display' }, false, null, {});
+  assert.doesNotMatch(display, /dashboard-tools-btn/, 'ein Display hat kein Anpassen und damit kein Menue');
+  assert.match(css, /\.dashboard-tools-btn \{\s*display: none;\s*\}/, 'breit gibt es das Menue nicht');
+  assert.match(css, /@media \(max-width: 767px\) \{\s*\.dashboard-tools-btn \{\s*display: inline-flex;\s*\}\s*\.dashboard-overview__tools:has\(> \.dashboard-tools-btn\) > #dashboard-wall-enter,\s*\.dashboard-overview__tools:has\(> \.dashboard-tools-btn\) > #dashboard-customize-btn \{\s*display: none;/,
+    'schmal ersetzt das Menue die zwei Knoepfe');
+  assert.match(src, /if \(action === 'dashboard-wall'\) container\.querySelector\('#dashboard-wall-enter'\)\?\.click\(\);/);
 });

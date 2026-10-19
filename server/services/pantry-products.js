@@ -2,7 +2,7 @@
  * Module: Household products above the stock batches (#1448, part 1)
  * Purpose: Which product a pantry batch belongs to, for every path that writes a
  *          batch, and the live grouping that puts batches without a product into
- *          products at the start of the server (migration 250 has a frozen copy).
+ *          products at the start of the server (migration 253 has a frozen copy).
  * Dependencies: public/utils/ingredient-match-key.js (isomorphic)
  *
  * IDENTITY IS THE HOUSEHOLD'S OWN WORDING (docs/DECISIONS.md, 7). A batch joins
@@ -28,7 +28,7 @@ import { ingredientMatchKey } from '../../public/utils/ingredient-match-key.js';
 
 /**
  * The key under which a product is found, or null for a name with nothing left.
- * The runtime rule: the writers and the adoption at start use it. Migration 250
+ * The runtime rule: the writers and the adoption at start use it. Migration 253
  * carries its own frozen copy of key and grouping, see there.
  * @param {unknown} name
  * @returns {string|null}
@@ -50,7 +50,7 @@ export function productKey(name) {
  *   its batches is an action of its own (a later step).
  * - The product's CATEGORY follows the batch written last. The category belongs
  *   to the product, and until the product can be edited on its own the batch
- *   dialog is the only place to change it; the same rule migration 250 applies
+ *   dialog is the only place to change it; the same rule migration 253 applies
  *   to existing stock (the most recently updated batch of a group).
  *
  * @param {import('better-sqlite3-multiple-ciphers').Database} database
@@ -117,7 +117,7 @@ export function assignPantryProduct(database, itemId, { userId = null, syncCateg
  * the oldest batch (the product existed since then). An existing product is
  * joined as it is.
  *
- * MIGRATION 250 DOES NOT CALL THIS FUNCTION. It carries its own frozen copy of
+ * MIGRATION 253 DOES NOT CALL THIS FUNCTION. It carries its own frozen copy of
  * key and grouping (see the entry in server/db.js), so this function may change
  * with later steps (the minimum, say) without changing what the migration does.
  * test:pantry-products asserts that both give the same products today; when a

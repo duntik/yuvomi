@@ -1951,7 +1951,7 @@ cdb.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL, avatar_color TEXT NOT NULL DEFAULT '#007AFF',
-    avatar_data TEXT
+    avatar_data TEXT, avatar_key TEXT
   );
   CREATE TABLE external_calendars (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2403,7 +2403,7 @@ test('getUpcomingEvents: private ICS-Termine fremder User werden ausgeblendet', 
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL,
       password_hash TEXT NOT NULL, avatar_color TEXT NOT NULL DEFAULT '#007AFF',
-      avatar_data TEXT
+      avatar_data TEXT, avatar_key TEXT
     );
     CREATE TABLE calendar_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2889,13 +2889,18 @@ test('Wand-Modus: nach einem Reload in der Nacht ist die Wand dunkel (#1453)', a
   for (const stored of [null, 'light', 'dark']) {
     const root = makeRoot();
     const storage = makeStorage({ 'yuvomi-wall-mode': '1', ...(stored ? { 'yuvomi-theme': stored } : {}) });
-    const prev = { document: globalThis.document, localStorage: globalThis.localStorage, location: globalThis.location, window: globalThis.window };
-    globalThis.document = { documentElement: root, querySelectorAll: () => [] };
-    globalThis.localStorage = storage;
-    globalThis.location = { pathname: '/' };
-    globalThis.window = { yuvomi: { restoreThemeColor: () => {} } };
-    tz.setDisplayTimeZone('Europe/Berlin');
+    // `localStorage` per Deskriptor tauschen, nicht per Zuweisung: Node fuehrt
+    // es als Accessor ohne Setter (ab Node 25 eingebaut), eine Zuweisung wirft
+    // im Modul-Code - und zwar VOR dem try, sodass document/location/window des
+    // Stubs fuer die Nachbarfaelle stehen blieben (der Solo-Fall fiel mit).
+    const prev = { document: globalThis.document, location: globalThis.location, window: globalThis.window };
+    const prevStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
     try {
+      globalThis.document = { documentElement: root, querySelectorAll: () => [] };
+      Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true, writable: true });
+      globalThis.location = { pathname: '/' };
+      globalThis.window = { yuvomi: { restoreThemeColor: () => {} } };
+      tz.setDisplayTimeZone('Europe/Berlin');
       // 1. theme-init.js, das echte Skript
       new Function('localStorage', 'sessionStorage', 'document', 'location', 'Date', themeInit)(
         storage, makeStorage({}), globalThis.document, globalThis.location, deviceNight,
@@ -2922,6 +2927,8 @@ test('Wand-Modus: nach einem Reload in der Nacht ist die Wand dunkel (#1453)', a
     } finally {
       tz.setDisplayTimeZone(null);
       Object.assign(globalThis, prev);
+      if (prevStorage) Object.defineProperty(globalThis, 'localStorage', prevStorage);
+      else delete globalThis.localStorage;
     }
   }
   nodeAssert.deepEqual(results, [

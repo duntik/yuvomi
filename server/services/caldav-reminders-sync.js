@@ -16,6 +16,7 @@ import { parseVTODO } from './ics-parser.js';
 import { createCalDAVClient, supportsComponent } from '../utils/caldav-client.js';
 import { householdTimeZone, utcToWall } from '../utils/timezone.js';
 import { setItemTags, setTags } from '../utils/task-tags.js';
+import { syncTaskCompletion, recordCompletion, revokeCompletion } from './task-completions.js';
 import * as todoOutbound from './caldav-todo-outbound.js';
 import { runSerialized } from '../utils/sync-lock.js';
 
@@ -240,41 +241,151 @@ function updateReminderSelection(accountId, listUrl, { enabled, targetModule } =
 // ein gespiegelter Eintrag für spätere Änderungen und Löschungen unerreichbar
 // (#617). COALESCE, weil ein Abruf ohne URL den gespeicherten Wert nicht
 // entwerten darf.
-function upsertTask(todo, accountId, createdBy, objectUrl = null) {
-  const { date, time } = splitDue(todo.due, householdTimeZone(db.get()));
+function upsertTask(todo, accountId, createdBy, objectUrl = null, { completions = null } = {}) {
+  const d = db.get();
+  const { date, time } = splitDue(todo.due, householdTimeZone(d));
 
-  const existing = db.get().prepare(
-    `SELECT id, priority, status FROM tasks WHERE external_uid = ? AND external_source = 'caldav' AND external_account_id = ?`
-  ).get(todo.uid, accountId);
+  // Zeile und Tags in einer Transaktion. Der STATUS einer schon gespiegelten
+  // Zeile gehört nicht dazu: er wird zusammen mit seinem Erledigungseintrag in
+  // applySyncedCompletions geschrieben (#1836, siehe unten).
+  return d.transaction(() => {
+    const existing = d.prepare(
+      `SELECT id, priority, status FROM tasks WHERE external_uid = ? AND external_source = 'caldav' AND external_account_id = ?`
+    ).get(todo.uid, accountId);
 
-  const priority = mapVtodoPriority(todo.priority, existing?.priority);
-  const status   = mapVtodoStatus(todo, existing?.status);
+    const priority = mapVtodoPriority(todo.priority, existing?.priority);
+    const status   = mapVtodoStatus(todo, existing?.status);
 
-  let taskId;
-  if (existing) {
-    db.get().prepare(`
-      UPDATE tasks
-      SET title = ?, description = ?, priority = ?, status = ?, due_date = ?, due_time = ?,
-          external_object_url = COALESCE(?, external_object_url)
-      WHERE id = ?
-    `).run(todo.summary, todo.description, priority, status, date, time, objectUrl, existing.id);
-    taskId = existing.id;
-  } else {
-    // category bleibt beim Spalten-Default 'misc' (v114) - VTODO kennt keine
-    // Entsprechung, und CATEGORIES ist die Tag-Liste, nicht die Schublade.
-    const row = db.get().prepare(`
-      INSERT INTO tasks
-        (title, description, priority, status, due_date, due_time, created_by, external_uid, external_source, external_account_id, external_object_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'caldav', ?, ?)
-    `).run(todo.summary, todo.description, priority, status, date, time, createdBy, todo.uid, accountId, objectUrl);
-    taskId = row.lastInsertRowid;
-  }
+    let taskId;
+    if (existing) {
+      d.prepare(`
+        UPDATE tasks
+        SET title = ?, description = ?, priority = ?, due_date = ?, due_time = ?,
+            external_object_url = COALESCE(?, external_object_url)
+        WHERE id = ?
+      `).run(todo.summary, todo.description, priority, date, time, objectUrl, existing.id);
+      taskId = existing.id;
+    } else {
+      // category bleibt beim Spalten-Default 'misc' (v114) - VTODO kennt keine
+      // Entsprechung, und CATEGORIES ist die Tag-Liste, nicht die Schublade.
+      const row = d.prepare(`
+        INSERT INTO tasks
+          (title, description, priority, status, due_date, due_time, created_by, external_uid, external_source, external_account_id, external_object_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'caldav', ?, ?)
+      `).run(todo.summary, todo.description, priority, status, date, time, createdBy, todo.uid, accountId, objectUrl);
+      taskId = row.lastInsertRowid;
+    }
 
-  // CATEGORIES → Tags (#586). Der Server führt sie, also gewinnt er auch: eine
-  // lokale Bearbeitung, die noch aussteht, kommt hier gar nicht an - der
-  // Aufrufer überspringt dirty markierte Einträge (#617).
-  setTags(db.get(), taskId, todo.tags);
-  return taskId;
+    // Derselbe Erledigungseintrag wie beim Abhaken in Yuvomi (#1836): ohne ihn
+    // fehlte eine auf dem Telefon abgehakte Aufgabe im Verlauf und an der Wand
+    // ("heute erledigt"), und eine dort wieder geöffnete behielte ihren Eintrag.
+    // Keine Person - der Sync weiss nicht, wer abgehakt hat (Begründung an
+    // syncTaskCompletion).
+    //
+    // NUR FÜR EINE SCHON GESPIEGELTE ZEILE. Eine neu eingelesene, bereits
+    // erledigte Aufgabe ist kein Übergang, den hier jemand erlebt hat: der erste
+    // Abruf einer Liste brächte sonst jede je abgehakte Erinnerung auf einmal in
+    // den Verlauf - genau der Nachtrag, den #1836 ausschliesst.
+    //
+    // IM LAUF ERST NACH DER HIERARCHIE, UND MIT IHM DER STATUS (Review zu
+    // #1836). Ob die Zeile eine Teilaufgabe ist - und damit keinen Eintrag
+    // bekommt -, entscheidet erst applyTaskRelations nach allen Listen. Wer
+    // `completions` mitgibt (sync()), bekommt den Übergang dort hinein und
+    // spielt ihn mit applySyncedCompletions nach; ohne gilt er sofort. Der
+    // Status wartet mit, damit Status und Eintrag nur gemeinsam entstehen:
+    // stürbe der Lauf zwischen beiden, sähe der nächste "unverändert", und der
+    // Eintrag fehlte für immer. Bis zum Abschluss liest im Lauf nichts den
+    // neuen Status (Hierarchie, dann Übergänge, erst danach Prune und Push).
+    //
+    // JE AUFGABE EIN ÜBERGANG, DER LETZTE GEWINNT. Dieselbe UID darf in
+    // mehreren Listen stehen, und wie Titel und Tags bestimmt das zuletzt
+    // gelesene Objekt auch den Status. Jeder Upsert liest dabei den noch
+    // ungeschriebenen Status aus der Zeile: ein späteres Objekt, das ihn
+    // bestätigt, nimmt einen früher vorgemerkten Wechsel deshalb zurück.
+    //
+    // AUCH OHNE WECHSEL STEHT DIE ZEILE IN DER WARTESCHLANGE (#2078). Ändert
+    // der Lauf nur RELATED-TO, entscheidet die Hierarchie trotzdem über den
+    // Eintrag, und eine herausgelöste erledigte Aufgabe braucht dafür das
+    // COMPLETED genau dieses Objekts. Ein Eintrag mit gleichem alten und neuen
+    // Status ist kein Übergang; applySyncedCompletions gleicht ihn nur ab,
+    // wenn sich der Elternteil geändert hat.
+    if (existing) {
+      const id = Number(taskId);
+      const seen = { taskId: id, oldStatus: existing.status, newStatus: status, completedAt: pastOrNull(todo.completedAt) };
+      if (completions) completions.set(id, seen);
+      else if (existing.status !== status) applySyncedCompletions(d, [seen]);
+    }
+
+    // CATEGORIES → Tags (#586). Der Server führt sie, also gewinnt er auch: eine
+    // lokale Bearbeitung, die noch aussteht, kommt hier gar nicht an - der
+    // Aufrufer überspringt dirty markierte Einträge (#617).
+    setTags(d, taskId, todo.tags);
+    return taskId;
+  })();
+}
+
+/**
+ * Die Statuswechsel eines Laufs schreiben: Status UND Erledigungseintrag in
+ * einer Transaktion (#1836), nachdem die Hierarchie steht - recordCompletion
+ * fragt `parent_task_id`.
+ *
+ * Nur, wo die Zeile noch auf dem Status steht, den der Upsert gesehen hat, und
+ * keine lokale Bearbeitung auf ihren Push wartet: zwischen Upsert und hier
+ * liegen die Abrufe der übrigen Listen. Wer die Aufgabe in der Zeit in Yuvomi
+ * umgeschaltet oder bearbeitet hat, gewinnt wie sonst im Inbound (#617), und
+ * ihren Eintrag hat die Route schon richtig gestellt.
+ *
+ * NUR DIE HIERARCHIE GEÄNDERT (#2078). Für die Aufgaben in `reparented`
+ * (applyTaskRelations), deren Status der Lauf NICHT ändert, gilt dieselbe
+ * Regel wie beim Abhaken: Teilaufgaben stehen nie im Verlauf, also verliert
+ * eine untergeordnete ihren Eintrag. Eine herausgelöste erledigte Aufgabe
+ * bekommt ihn mit dem COMPLETED der Erinnerung; fehlt es oder ist es
+ * unbrauchbar, bleibt sie ohne - ein Eintrag mit der Laufzeit wäre ein
+ * Nachtrag, den #1836 schon beim ersten Abruf ausschliesst. Dieselben
+ * Schutzregeln wie für den Status: nur auf dem gesehenen Status, ohne
+ * wartenden Push.
+ *
+ * @param {Map|Array} pending       je Aufgabe der gesehene Stand aus upsertTask
+ * @param {Set<number>} [reparented] Aufgaben, deren parent_task_id der Lauf geändert hat
+ */
+function applySyncedCompletions(d, pending, reparented = null) {
+  // Der Lauf führt eine Map je Aufgabe, der Einzelaufruf eine Liste.
+  const entries = pending instanceof Map ? [...pending.values()] : pending;
+  if (!entries.length) return;
+  const write = d.prepare(`
+    UPDATE tasks SET status = ?
+     WHERE id = ? AND status = ? AND COALESCE(outbound_dirty, 0) = 0
+  `);
+  const untouched = d.prepare(`
+    SELECT parent_task_id FROM tasks
+     WHERE id = ? AND status = ? AND COALESCE(outbound_dirty, 0) = 0
+  `);
+  d.transaction(() => {
+    for (const { taskId, oldStatus, newStatus, completedAt } of entries) {
+      if (oldStatus === newStatus) {
+        if (!reparented?.has(taskId)) continue;
+        const row = untouched.get(taskId, oldStatus);
+        if (!row) continue;
+        if (row.parent_task_id != null) revokeCompletion(d, taskId);
+        else if (newStatus === 'done' && completedAt) {
+          recordCompletion(d, taskId, null, null, { source: 'caldav', completedAt });
+        }
+        continue;
+      }
+      if (write.run(newStatus, taskId, oldStatus).changes === 0) continue;
+      syncTaskCompletion(d, taskId, oldStatus, newStatus, null, null, { source: 'caldav', completedAt });
+    }
+  })();
+}
+
+/**
+ * Ein COMPLETED aus der Zukunft (Uhr des Telefons vorgestellt) wäre ein Haken,
+ * der erst noch passiert; dann gilt der Zeitpunkt des Laufs.
+ */
+function pastOrNull(iso) {
+  if (!iso) return null;
+  const at = Date.parse(iso);
+  return Number.isFinite(at) && at <= Date.now() ? iso : null;
 }
 
 /**
@@ -290,7 +401,14 @@ function upsertTask(todo, accountId, createdBy, objectUrl = null) {
  * gehängt statt fallen gelassen - flach unter dem falschen Kopf ist immer noch
  * eine Hierarchie, gar keine wäre der gemeldete Zustand.
  *
+ * Liefert die Aufgaben, deren `parent_task_id` sich dabei geändert hat: für
+ * sie stimmt der Erledigungseintrag womöglich nicht mehr (#2078,
+ * applySyncedCompletions). Der Lauf ruft das in einer eigenen Transaktion,
+ * damit ein Fehler mitten in der Schleife keine halbe Hierarchie hinterlässt,
+ * zu der die gemeldete Menge nicht passt.
+ *
  * @param {Map<string, {taskId: number, parentUid: string|null, childUids: string[]}>} seen
+ * @returns {Set<number>}
  */
 function applyTaskRelations(seen) {
   const idByUid = new Map([...seen].map(([uid, entry]) => [uid, entry.taskId]));
@@ -320,13 +438,15 @@ function applyTaskRelations(seen) {
   };
 
   const update = db.get().prepare('UPDATE tasks SET parent_task_id = ? WHERE id = ? AND parent_task_id IS NOT ?');
+  const changed = new Set();
   for (const [uid, entry] of seen) {
     const rootUid = parentUidOf.has(uid) ? rootOf(uid) : null;
     const parentId = rootUid ? idByUid.get(rootUid) ?? null : null;
     // Auch der NULL-Fall muss geschrieben werden: wer auf dem Server aus der
     // Unterliste gezogen wurde, ist sonst in Yuvomi für immer ein Kind.
-    update.run(parentId, entry.taskId, parentId);
+    if (update.run(parentId, entry.taskId, parentId).changes > 0) changed.add(Number(entry.taskId));
   }
+  return changed;
 }
 
 function upsertShoppingItem(sel, todo, accountId, objectUrl = null) {
@@ -560,6 +680,9 @@ async function runSync({ createClient: makeClient } = {}) {
       // UID → lokale Aufgabe dieses Laufs, für die Hierarchie-Auflösung nach
       // allen Listen (#671). Nur Aufgaben: der Einkauf kennt keine Unterposten.
       const taskRelations = new Map();
+      // Statuswechsel dieses Laufs je Aufgabe (#1836), erst nach der Hierarchie
+      // geschrieben (applySyncedCompletions).
+      const completionTransitions = new Map();
 
       for (const sel of enabledLists) {
         const module = sel.target_module === 'shopping' ? 'shopping' : 'tasks';
@@ -652,7 +775,7 @@ async function runSync({ createClient: makeClient } = {}) {
               if (module === 'shopping') {
                 upsertShoppingItem(sel, todo, account.id, obj.url || null);
               } else {
-                const taskId = upsertTask(todo, account.id, createdBy, obj.url || null);
+                const taskId = upsertTask(todo, account.id, createdBy, obj.url || null, { completions: completionTransitions });
                 taskRelations.set(todo.uid, {
                   taskId,
                   parentUid: todo.parentUid || null,
@@ -669,13 +792,25 @@ async function runSync({ createClient: makeClient } = {}) {
 
       // Unteraufgaben verdrahten, sobald alle Listen des Kontos gelesen sind
       // (#671) - vorher ist die UID des Elternteils womöglich noch keine ID.
-      if (taskRelations.size > 0) {
-        try {
-          applyTaskRelations(taskRelations);
-        } catch (err) {
-          log.error(`Failed to apply VTODO relations for account ${account.id}:`, err.message);
+      // Hierarchie und Erledigungen in EINER Transaktion (#2078): stürbe der
+      // Lauf dazwischen, sähe der nächste den neuen Elternteil als
+      // unverändert, und der Eintrag bliebe für immer falsch. Jede Hälfte
+      // ist ein eigener Savepoint, ein Fehler in einer lässt die andere stehen.
+      db.get().transaction(() => {
+        let reparented = new Set();
+        if (taskRelations.size > 0) {
+          try {
+            reparented = db.get().transaction(() => applyTaskRelations(taskRelations))();
+          } catch (err) {
+            log.error(`Failed to apply VTODO relations for account ${account.id}:`, err.message);
+          }
         }
-      }
+        try {
+          applySyncedCompletions(db.get(), completionTransitions, reparented);
+        } catch (err) {
+          log.error(`Failed to record synced task completions for account ${account.id}:`, err.message);
+        }
+      })();
 
       // Prune locally-stored caldav items that vanished remotely.
       // Module mit einer nicht abgerufenen Liste werden übersprungen (#508).
@@ -864,6 +999,8 @@ function getStatus() {
 export {
   mapVtodoPriority,
   mapVtodoStatus,
+  upsertTask,
+  applySyncedCompletions,
   splitDue,
   applyTaskRelations,
   getReminderLists,

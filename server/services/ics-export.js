@@ -13,7 +13,7 @@ import {
   householdTimeZone, isValidTimeZone, localToUTC, shiftDateKey, storedToInstantIso, utcToWall,
 } from '../utils/timezone.js';
 import { formatWall, vtimezoneFor } from '../utils/vtimezone.js';
-import { outboundDateRange } from './outbound-dtstart.js';
+import { outboundDateRange, outboundRecurrenceRule } from './outbound-dtstart.js';
 import { rruleLine } from './recurrence.js';
 import { timedSeriesUntil } from '../utils/rrule-until.js';
 import { activeAccountSql } from './account-state.js';
@@ -275,10 +275,12 @@ function buildVEvent(
   // Ein reines Datum als UNTIL ist neben einem getimten DTSTART ungueltig und
   // wird zum Ende des Ortstags in der Zone, in der DTSTART oben steht (#1974,
   // utils/rrule-until.js): TZID der Serie, sonst die Feed-Zone fuer naive
-  // Werte, sonst UTC.
+  // Werte, sonst UTC. Ein UNTIL mit Uhrzeit aus dem alten Formular geht an einer
+  // eigenen Serie ohne Zone zuvor als Datum hinaus (#1992, outboundRecurrenceRule).
   if (ev.recurrence_rule && !recurrenceMaster) {
     const untilZone = usesTzid(ev) ? ev.tzid : (hasExplicitOffset(dtstart) ? null : feedZone);
-    lines.push(rruleLine(ev.all_day ? ev.recurrence_rule : timedSeriesUntil(ev.recurrence_rule, untilZone)));
+    const rule = outboundRecurrenceRule(ev);
+    lines.push(rruleLine(ev.all_day ? rule : timedSeriesUntil(rule, untilZone)));
   }
   // Einzeln ausgenommene Vorkommen (EXDATE, #489). Zeit-Teil = Master-Startzeit,
   // damit die EXDATE-Instanz exakt auf ein RRULE-Vorkommen trifft.
@@ -464,8 +466,11 @@ function clearFeedToken(conn, userId) {
   conn.prepare(`UPDATE users SET calendar_feed_token = NULL WHERE id = ?`).run(userId);
 }
 
+/** Spalten, die `findUserIdByFeedToken` lesen darf - niemals aus dem Input. */
+const FEED_TOKEN_COLUMNS = new Set(['calendar_feed_token', 'waste_feed_token', 'birthday_feed_token']);
+
 /**
- * Findet den Besitzer eines Feed-Tokens ueber timingSafeEqual statt eine
+ * Findet den Besitzer eines Feed-Tokens ueber timingSafeEqual statt einer
  * SQL-Gleichheit `WHERE token = ?` (die als String-Vergleich je Zeile frueh
  * abbrechen kann, sobald das erste Byte abweicht - dieselbe Klasse Fehler,
  * gegen die CSRF/TOTP timingSafeEqual schon einsetzen). Ein Token ist immer
@@ -473,11 +478,15 @@ function clearFeedToken(conn, userId) {
  * vom Client dagegen beliebig lang - die Laengenpruefung selbst verraet
  * nichts Geheimes, sie steht nur davor, weil timingSafeEqual bei
  * ungleicher Laenge wirft.
+ *
+ * `column` muss eine der drei bekannten Feed-Token-Spalten sein - sie kommt
+ * aus einer Konstante im Aufrufer, nie aus dem Request.
  */
-function findUserIdByFeedToken(conn, token) {
+function findUserIdByFeedToken(conn, column, token) {
+  if (!FEED_TOKEN_COLUMNS.has(column)) throw new Error(`Unknown feed token column: ${column}`);
   if (!token) return null;
   const candidate = Buffer.from(token, 'utf8');
-  for (const row of conn.prepare(`SELECT id, calendar_feed_token AS t FROM users WHERE calendar_feed_token IS NOT NULL AND ${activeAccountSql('users')}`).all()) {
+  for (const row of conn.prepare(`SELECT id, ${column} AS t FROM users WHERE ${column} IS NOT NULL AND ${activeAccountSql('users')}`).all()) {
     const stored = Buffer.from(row.t, 'utf8');
     if (stored.length === candidate.length && timingSafeEqual(stored, candidate)) return row.id;
   }

@@ -15,6 +15,7 @@ db.exec(`CREATE TABLE users (deactivated_at TEXT,
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL,
   password_hash TEXT NOT NULL, avatar_color TEXT NOT NULL DEFAULT '#007AFF',
+  avatar_data TEXT, avatar_key TEXT,
   role TEXT NOT NULL DEFAULT 'member',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
@@ -60,7 +61,7 @@ d2.exec('PRAGMA foreign_keys = ON;');
 d2.exec(`CREATE TABLE users (deactivated_at TEXT, 
   id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
   display_name TEXT NOT NULL, password_hash TEXT NOT NULL,
-  avatar_color TEXT NOT NULL DEFAULT '#007AFF', avatar_data BLOB,
+  avatar_color TEXT NOT NULL DEFAULT '#007AFF', avatar_data BLOB, avatar_key TEXT,
   role TEXT NOT NULL DEFAULT 'member',
   created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '');`);
 d2.exec(MIGRATIONS_SQL[10]);
@@ -591,16 +592,16 @@ test('regenerateFeedToken erzeugt Token und persistiert', () => {
 
 test('findUserIdByFeedToken findet Nutzer', () => {
   const tok = regenerateFeedToken(d2, u2);
-  assert(findUserIdByFeedToken(d2, tok) === u2, 'Lookup falsch');
-  assert(findUserIdByFeedToken(d2, 'unbekannt') === null, 'unbekannter Token darf null sein');
+  assert(findUserIdByFeedToken(d2, 'calendar_feed_token', tok) === u2, 'Lookup falsch');
+  assert(findUserIdByFeedToken(d2, 'calendar_feed_token', 'unbekannt') === null, 'unbekannter Token darf null sein');
 });
 
 test('regenerate ersetzt alten Token (alter wird ungültig)', () => {
   const oldTok = regenerateFeedToken(d2, u1);
   const newTok = regenerateFeedToken(d2, u1);
   assert(oldTok !== newTok, 'Token unverändert');
-  assert(findUserIdByFeedToken(d2, oldTok) === null, 'alter Token noch gültig');
-  assert(findUserIdByFeedToken(d2, newTok) === u1, 'neuer Token ungültig');
+  assert(findUserIdByFeedToken(d2, 'calendar_feed_token', oldTok) === null, 'alter Token noch gültig');
+  assert(findUserIdByFeedToken(d2, 'calendar_feed_token', newTok) === u1, 'neuer Token ungültig');
 });
 
 test('clearFeedToken deaktiviert Feed', () => {

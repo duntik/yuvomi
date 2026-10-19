@@ -20,7 +20,7 @@
 
 import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startHarness, openPage, gotoRoute } from './document-guards-harness.js';
+import { startHarness, openPage, gotoRoute, enterDashboardWall } from './document-guards-harness.js';
 
 let harness;
 
@@ -450,7 +450,7 @@ test('Wand-Modus: Einschalten sagt, was das ist und wie man herauskommt; Zurueck
   await gotoRoute(page, '/');
   await markDocument(page);
   const depthBefore = await page.evaluate(() => history.length);
-  await page.click('#dashboard-wall-enter');
+  await enterDashboardWall(page);
   await page.waitForFunction(() => document.documentElement.hasAttribute('data-wall-mode'), { timeout: 5000 });
   await wait(300);
   const hint = await page.evaluate(async () => {
@@ -566,7 +566,12 @@ async function gridCells(page) {
   });
 }
 
+// Der Knopf steht erst mit den Daten: bis `/dashboard` antwortet, zeigt die
+// Shell das Skelett ohne Werkzeuge. `settle()` gibt nach hoechstens rund 2,7s
+// auf, auch wenn die Antwort noch aussteht - unter Last (volle Kette, R19) war
+// das zu frueh, und `page.click` fand `#dashboard-customize-btn` nicht.
 async function enterEditMode(page) {
+  await page.waitForSelector('#dashboard-customize-btn', { visible: true, timeout: 15000 });
   await page.click('#dashboard-customize-btn');
   await page.waitForSelector('#dashboard-widget-grid .widget-wrapper--editing', { timeout: 10000 });
   await wait(300);
@@ -710,6 +715,24 @@ test('Raster: ohne Loch schweigt der Hinweis', async () => {
   const hint = await page.evaluate(() => !!document.querySelector('.dashboard-grid-hint'));
   await page.close();
   assert.ok(!hint, 'Ein Hinweis ohne Loch ist Laerm');
+});
+
+// Der Flake aus R19 als fester Fall: `/dashboard` antwortet erst nach
+// `settle()`. Gegen den alten Helfer (Klick ohne Warten) rot mit "No element
+// found for selector: #dashboard-customize-btn".
+test('Raster: der Bearbeiten-Modus wartet auf den Knopf, auch wenn /dashboard spaet antwortet', async () => {
+  const page = await openPage(harness, { device: 'desktop' });
+  await saveLayout(page, REORDERED);
+  page.__yuvomiRequestInterceptor = (req) => {
+    if (!/\/api\/v1\/dashboard(\?|$)/.test(req.url())) return false;
+    setTimeout(() => { req.continue().catch(() => {}); }, 4000);
+    return true;
+  };
+  await gotoRoute(page, '/');
+  await enterEditMode(page);
+  const editing = await page.evaluate(() => document.querySelectorAll('#dashboard-widget-grid .widget-wrapper--editing').length);
+  await page.close();
+  assert.ok(editing > 0, 'Reichweite: der Bearbeiten-Modus steht');
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -858,7 +881,7 @@ test('FAB: beim Betreten des Wand-Modus steht keiner auf der Wand, auch solange 
     held.push(req);
     return true;
   };
-  await page.click('#dashboard-wall-enter');
+  await enterDashboardWall(page);
   await page.waitForSelector('.wall #wall-exit');
   await wait(300);
   const state = await page.evaluate(() => ({
@@ -877,7 +900,7 @@ test('FAB: beim Betreten des Wand-Modus steht keiner auf der Wand, auch solange 
 test('FAB: nach dem Verlassen des Wand-Modus steht er in der Shell-Ebene, mit Plus, neben der Kapsel (mobile, #1588)', async () => {
   const page = await openPage(harness, { device: 'mobile' });
   assertFabDocked(await fabOverCapsule(page), 'vor dem Wand-Modus');
-  await page.click('#dashboard-wall-enter');
+  await enterDashboardWall(page);
   await page.waitForSelector('.wall #wall-exit');
   // Die Wand hat sich gesetzt: der Knopf der Vorseite ist aus der Shell-Ebene
   // geraeumt, wie nach jeder Weile an der Wand.

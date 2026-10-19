@@ -73,6 +73,8 @@ import screensaverRouter from './routes/screensaver.js';
 import remindersRouter from './routes/reminders.js';
 import searchRouter from './routes/search.js';
 import familyRouter from './routes/family.js';
+import personAvatarsRouter from './routes/people.js';
+import { isPersonAvatarRead, inlineAvatarUrls } from './services/person-avatar.js';
 // ZWEI IMPORTZEILEN FUER EINE DATEI, ABSICHTLICH. `test:openapi-coverage`
 // findet die Routen eines Routers, indem es hier Namen auf Dateien abbildet -
 // und seine Muster kennen den reinen Default-Import und den reinen
@@ -224,13 +226,41 @@ app.use('/api/', (req, res, next) => {
 // Früh definiert, damit auch die nicht unter /api/ liegenden Admin-Routen
 // (/docs, /openapi.json) ihn als Route-Middleware nutzen können.
 // --------------------------------------------------------
+// BILDER ZAEHLEN NICHT INS ALLGEMEINE BUDGET (#2048). Eine Rezeptliste mit 500
+// gespiegelten Rezepten war ein Bildabruf je Zeile; schon das Durchscrollen
+// verbrauchte die 300 Anfragen, und danach antwortete JEDE Route 429 - die App
+// stand, obwohl nur Vorschaubilder geladen wurden. Die drei Bildrouten lesen
+// nur, schreiben nichts und liegen hinter derselben Anmeldung wie der Rest;
+// sie bekommen deshalb einen eigenen, groesseren Topf (`imageLimiter`). Ein
+// 429 dort kostet ein Vorschaubild (der Platzhalter springt ein), nie die
+// Navigation. Die Anmelde-Limiter in server/auth.js bleiben, wie sie sind.
+const IMAGE_READ_PATH = /^\/v1\/(?:recipes\/\d+\/(?:image|provider-thumbnail)|people\/\d+\/avatar)\/?$/i;
+function isImageRead(req) {
+  return (req.method === 'GET' || req.method === 'HEAD') && IMAGE_READ_PATH.test(req.path);
+}
+
 const apiLimiter = rateLimit({
   windowMs: 60_000,         // 1 Minute
   max: 300,                 // 300 Requests/Minute pro IP (großzügig für Familien-App)
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please wait a moment.', code: 429 },
-  skip: (req) => req.path === '/health', // Health-Check ausgenommen
+  // Health-Check ausgenommen; Bildabrufe zaehlt der imageLimiter.
+  skip: (req) => req.path === '/health' || isImageRead(req),
+});
+
+// 1200 je Minute und Adresse: ein kalter Durchlauf durch eine Liste mit 500
+// Bildern bleibt darunter, auch wenn ein zweites Geraet hinter demselben
+// Router dasselbe tut. Nach oben begrenzt bleibt es trotzdem, weil jeder
+// ungecachte Abruf von provider-thumbnail einen Abruf beim Provider ausloest
+// (routes/recipes.js) - ohne Deckel liesse sich Mealie ueber Yuvomi fluten.
+const imageLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 1200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please wait a moment.', code: 429 },
+  skip: (req) => !isImageRead(req),
 });
 
 if (process.env.NODE_ENV === 'production' && process.env.ENABLE_API_DOCS !== 'true') {
@@ -333,8 +363,10 @@ app.use(express.static(PUBLIC_DIR, {
   setHeaders: setStaticHeaders,
 }));
 
-// Globaler API-Rate-Limiter auf alle /api/-Endpunkte (Definition siehe oben).
+// Globaler API-Rate-Limiter auf alle /api/-Endpunkte (Definition siehe oben),
+// daneben der eigene Topf fuer Bildabrufe; jede Anfrage zaehlt in genau einem.
 app.use('/api/', apiLimiter);
+app.use('/api/', imageLimiter);
 
 // --------------------------------------------------------
 // API-Routen
@@ -483,7 +515,7 @@ const feedLimiter = rateLimit({
 
 app.get('/feed/calendar/:token.ics', feedLimiter, (req, res) => {
   try {
-    const userId = icsExport.findUserIdByFeedToken(db.get(), req.params.token);
+    const userId = icsExport.findUserIdByFeedToken(db.get(), 'calendar_feed_token', req.params.token);
     const localCalendar = userId ? null : findCalendarByFeedToken(db.get(), req.params.token);
     if (!userId && !localCalendar) return res.status(404).type('text/plain').send('Not found');
     const ics = userId
@@ -640,6 +672,16 @@ app.use('/api/v1', (req, res, next) => {
 // `authScopes === null` und steigen in derselben Zeile aus wie vorher.
 app.use('/api/v1', (req, res, next) => {
   if (req.authScopes == null) return next();
+  // DAS PROFILBILD EINER PERSON IST KEIN MODUL (routes/people.js). Ein Display
+  // bekommt seine Adresse in den Zeilen, die es lesen darf (Aufgaben, Termine,
+  // Uebersicht); haengte das Bild an einem Modul, stuende an der Wand neben
+  // jedem Termin ein kaputtes Bild. NUR FUER DAS DISPLAY: ein Token bekommt die
+  // Bilder als Data-URL in den Zeilen selbst (`inlineAvatarUrls` unten) und
+  // braucht die Route nicht - fuer jedes Token offen, holte eines mit
+  // `weather:read` per Durchzaehlen der ids jedes Profilbild (Codex-Review zu
+  // #2056). Nur GET, nur dieser Pfad. Ein Ausgaben-Gast ist am Gate davor
+  // schon abgewiesen.
+  if (req.authMethod === 'display' && isPersonAvatarRead(req.method, req.path)) return next();
   // Ein gekoppeltes Display darf zusaetzlich zu seinen Modulen eine Handvoll
   // Geruestpfade LESEN (display-scopes.js, `DISPLAY_READ_PATHS`): die eigene
   // Zeile, die Darstellungseinstellungen, die Modulliste, die Personen fuer
@@ -727,6 +769,19 @@ app.use('/api/v1', csrfMiddleware);
 // `Idempotency-Key` mitkommt, und liegt hinter Auth, Scopes und CSRF - ein
 // abgewiesener Aufruf darf keinen Schlüssel verbrauchen.
 app.use('/api/v1', idempotencyMiddleware);
+// Ein API-Token bekommt Profilbilder weiter als Data-URL statt als Adresse
+// (services/person-avatar.js, `inlineAvatarUrls`): sein Client schickt beim
+// Bildabruf kein Bearer-Token mit. Nur die App selbst bekommt die Adresse.
+// HINTER der Idempotenz: so speichert sie die Antwort, die das Token bekam,
+// und eine Wiederholung gibt genau diese zurueck - davor setzte sie beim
+// Wiederholen das Bild von jetzt ein (Codex-Review zu #2056).
+app.use('/api/v1', (req, res, next) => {
+  if (req.authMethod !== 'api_token') return next();
+  const json = res.json.bind(res);
+  const lookup = (id) => db.get().prepare('SELECT avatar_data FROM users WHERE id = ?').get(id)?.avatar_data ?? null;
+  res.json = (body) => json(inlineAvatarUrls(body, lookup));
+  return next();
+});
 app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/tasks', tasksRouter);
 app.use('/api/v1/shopping', shoppingRouter);
@@ -755,6 +810,7 @@ app.use('/api/v1/screensaver', screensaverRouter);
 app.use('/api/v1/reminders', remindersRouter);
 app.use('/api/v1/search', searchRouter);
 app.use('/api/v1/family', familyRouter);
+app.use('/api/v1/people', personAvatarsRouter);
 // Die Personenliste fuer den Picker eines Tabletts (#1209) haengt VOR dem
 // Administrator-Router: der traegt `requireAdmin` auf dem ganzen Router, und ein
 // Display ist ein Mitglied ohne Adminrecht. Express nimmt den ersten Router, der

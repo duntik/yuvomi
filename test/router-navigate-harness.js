@@ -17,7 +17,7 @@
  * laut, nicht still.
  */
 import { unknownPathDetour, publicPathDetour, detourPaths } from '../public/utils/unknown-route.js';
-import { createNavigate } from '../public/utils/router-navigate.js';
+import { createNavigate, unlessAborted } from '../public/utils/router-navigate.js';
 
 /** Routen wie in der Tabelle des Routers: Pfad, Anmeldepflicht, Modul. */
 export const HARNESS_ROUTES = Object.freeze([
@@ -36,6 +36,7 @@ export const HARNESS_ROUTES = Object.freeze([
  * @param {object} [options]
  * @param {object|null} [options.user] - schon angemeldet (laufende Sitzung)
  * @param {object|null} [options.sessionUser] - was `auth.me()` beim Kaltstart liefert; null: 401
+ * @param {unknown} [options.sessionError] - statt des 401: dieser Fehler (429, 503, Netz)
  * @param {boolean} [options.preferencesLoaded] - Vorgabe: ob `user` gesetzt ist
  * @param {boolean} [options.setupRequired]
  * @param {(module: string) => boolean} [options.canAccess]
@@ -43,11 +44,17 @@ export const HARNESS_ROUTES = Object.freeze([
  * @param {{ search?: string, hash?: string }} [options.location]
  * @param {() => Promise<boolean>} [options.leaveGuard] - Verlassen-Schutz; fehlt er, gibt es keinen
  * @param {(route: object) => Promise<void>} [options.onRender] - haelt das Rendern an
+ * @param {(route: object) => Promise<void>} [options.onPageRender] - der Rest von
+ *   `module.render()` NACH dem Tausch (Daten); haelt die Navigation an, bis er
+ *   fertig ist oder sie ueberholt wird
  * @param {() => void} [options.armScreensaver] - die echte Komponente statt der Attrappe (#1919)
+ * @param {(route: object) => boolean} [options.failRender] - das Seitenmodul laedt nicht: wie der
+ *   catch in renderPage() zeichnet das nur den Fehler in den Inhalt, eine stehende Shell bleibt
  */
 export function createNavigateHarness({
   user = null,
   sessionUser = null,
+  sessionError = null,
   preferencesLoaded = Boolean(user),
   setupRequired = false,
   canAccess = () => true,
@@ -55,11 +62,13 @@ export function createNavigateHarness({
   location = {},
   leaveGuard = null,
   onRender = null,
+  onPageRender = null,
   armScreensaver = null,
+  failRender = null,
   routes = HARNESS_ROUTES,
 } = {}) {
   /** Was nach aussen sichtbar wurde, in der Reihenfolge des Geschehens. */
-  const log = { rendered: [], history: [], toasts: [], leaveAsked: [], authCalls: 0 };
+  const log = { rendered: [], swapped: [], history: [], toasts: [], leaveAsked: [], authCalls: 0, unreachable: [], forgotten: 0 };
   let shell = false;
 
   const env = {
@@ -90,8 +99,11 @@ export function createNavigateHarness({
       pushState: (_state, _title, address) => log.history.push(['push', address]),
       replaceState: (_state, _title, address) => log.history.push(['replace', address]),
     },
-    window: {},
-    document: { querySelector: () => null, getElementById: () => null },
+    // Ein echtes EventTarget: navigate() haengt seinen `auth:expired`-Listener
+    // hier an (#1945), und `expire()` unten feuert ihn wie api.js.
+    window: new EventTarget(),
+    // Wie im Router steht `.nav-bottom` fuer die Shell der angemeldeten Sitzung.
+    document: { querySelector: (sel) => (sel === '.nav-bottom' && shell ? {} : null), getElementById: () => null },
     // ── Verlassen-Schutz ──
     hasLeaveGuard: () => Boolean(leaveGuard),
     mayLeave: async (path) => { log.leaveAsked.push(path); return leaveGuard(); },
@@ -101,9 +113,20 @@ export function createNavigateHarness({
     auth: {
       me: async () => {
         log.authCalls += 1;
+        if (env.sessionError) throw env.sessionError;
         if (!sessionUser) throw Object.assign(new Error('Sitzung abgelaufen.'), { status: 401 });
         return { user: sessionUser };
       },
+    },
+    // Fehlerzustand der Shell (utils/session-unreachable.js): mitschreiben,
+    // der Test ruft `retry` selbst.
+    sessionError,
+    showSessionUnreachable: (error, retry) => { log.unreachable.push({ error, retry }); },
+    // Wie forgetSessionState() in router.js, soweit navigate() es liest.
+    forgetSessionState: () => {
+      log.forgotten += 1;
+      env.currentUser = null;
+      env._preferencesLoaded = false;
     },
     syncPreferencesOnce: async () => {
       if (env._preferencesLoaded) return;
@@ -118,12 +141,25 @@ export function createNavigateHarness({
     // ── Seite ──
     rememberScrollPosition: () => {},
     scrollPositionFor: () => 0,
-    renderPage: async (route) => {
+    renderPage: async (route, _previousPath, _scrollTarget, { signal = null } = {}) => {
       if (onRender) await onRender(route);
+      // Wie renderPage(): ein waehrend des Ladens ueberholtes Ziel rendert
+      // nichts mehr (R19, letzter Tipp gewinnt) und meldet das mit `false`.
+      if (signal?.aborted) return false;
+      // Wie der catch in renderPage(): Fehler in den Inhalt, die Shell bleibt.
+      if (failRender?.(route)) return undefined;
       // Wie renderPage(): die Shell - und mit ihr die Toast-Flaeche - gibt es
       // nur auf Seiten mit Anmeldung.
       shell = route.requiresAuth;
+      // Wie renderPage(): die Seite ist getauscht, ihr render() laeuft. Auf den
+      // Rest wartet der Router nur, bis die Navigation ueberholt ist (Review
+      // #2049) - dieselbe Funktion wie dort.
+      if (onPageRender) {
+        log.swapped.push(route.path);
+        if (!(await unlessAborted(onPageRender(route), signal))) return true;
+      }
       log.rendered.push(route.path);
+      return true;
     },
     adoptPageFab: () => {},
     updateNav: () => {},
@@ -142,5 +178,8 @@ export function createNavigateHarness({
   // (`env.isNavigating`), und die Attrappen oben schreiben ihn dort.
   const navigate = createNavigate(env, env);
 
-  return { navigate, env, log, setShell: (value) => { shell = value; } };
+  // Sitzungsende, wie api.js es vor dem Wurf eines 401 meldet.
+  const expire = () => env.window.dispatchEvent(new Event('auth:expired'));
+
+  return { navigate, env, log, expire, setShell: (value) => { shell = value; } };
 }

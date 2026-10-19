@@ -69,8 +69,20 @@ export function settingsLeafLabel(leaf, translate) {
   return resolveExtensionLabel(module.id, { labelKey: module.settings.labelKey, fallback: moduleDisplayLabel(module) });
 }
 
-export function settingsLeafDescription(leaf, translate) {
-  return leaf?.extensionModule?.description || (leaf?.descriptionKey ? translate(leaf.descriptionKey) : '');
+/**
+ * Die Unterzeile eines Blatts. `ssoOnlyDescriptionKey` ersetzt sie fuer ein
+ * Konto ohne Passwort (#1703): "Konto" verspricht sonst ein Passwort, das das
+ * Blatt diesem Konto gar nicht mehr anbietet. Wie bei der Passwort-Karte nur
+ * auf ein ausdrueckliches `sso_only === true` aus GET /auth/me.
+ * @param {object} leaf
+ * @param {(key: string) => string} translate
+ * @param {{ sso_only?: boolean }|null} [user]
+ * @returns {string}
+ */
+export function settingsLeafDescription(leaf, translate, user = null) {
+  if (leaf?.extensionModule?.description) return leaf.extensionModule.description;
+  const key = (user?.sso_only === true && leaf?.ssoOnlyDescriptionKey) || leaf?.descriptionKey;
+  return key ? translate(key) : '';
 }
 
 function allSettingsLeaves() { return [...SETTINGS_LEAVES, ...extensionSettingsLeaves]; }
@@ -130,10 +142,6 @@ export const SETTINGS_SECTIONS = freezeEntries([
     descriptionKey: 'settings.pageAppearanceDescription',
     options: [
       { key: 'settings.sectionDesign', also: ['settings.themeSystem', 'settings.themeLight', 'settings.themeDark'] },
-      'settings.wallModeLabel',
-      'settings.screensaverIdleLabel',
-      'settings.screensaverClockLabel',
-      'settings.screensaverCoverLabel',
       'settings.localeLabel',
       'settings.dataLanguageLabel',
       'settings.regionLabel',
@@ -156,6 +164,24 @@ export const SETTINGS_SECTIONS = freezeEntries([
     ],
     adminOnly: false,
     loader: () => import('/settings/pages/personal-device.js'),
+  },
+  {
+    // Geraetelokal wie die Installation (R19): Wand-Modus und Bildschirmschoner
+    // stehen im Blatt "Dieses Geraet", gerendert von personal-appearance.js.
+    id: 'device-display',
+    sheetId: 'personal-device',
+    scope: 'mine',
+    labelKey: 'settings.sectionDeviceDisplay',
+    descriptionKey: 'settings.wallModeHint',
+    options: [
+      'settings.wallModeLabel',
+      'settings.screensaverIdleLabel',
+      'settings.screensaverClockLabel',
+      'settings.screensaverCoverLabel',
+    ],
+    adminOnly: false,
+    loader: () => import('/settings/pages/personal-appearance.js'),
+    props: { part: 'device' },
   },
   {
     id: 'personal-notifications',
@@ -733,7 +759,7 @@ export const SETTINGS_SECTIONS = freezeEntries([
  */
 export const SETTINGS_LEAVES = freezeEntries([
   // Konto
-  { id: 'personal-account', domainId: 'personal', path: '/settings/personal/account', labelKey: 'settings.pageAccount', descriptionKey: 'settings.pageAccountDescription', icon: 'circle-user' },
+  { id: 'personal-account', domainId: 'personal', path: '/settings/personal/account', labelKey: 'settings.pageAccount', descriptionKey: 'settings.pageAccountDescription', ssoOnlyDescriptionKey: 'settings.pageAccountDescriptionSsoOnly', icon: 'circle-user' },
   { id: 'personal-appearance', domainId: 'personal', path: '/settings/personal/appearance', labelKey: 'settings.pageAppearance', descriptionKey: 'settings.pageAppearanceDescription', icon: 'palette' },
   { id: 'personal-device', domainId: 'personal', path: '/settings/personal/device', labelKey: 'settings.pageDevice', descriptionKey: 'settings.pageDeviceDescription', icon: 'smartphone' },
   { id: 'personal-notifications', domainId: 'personal', path: '/settings/personal/notifications', labelKey: 'settings.pageNotifications', descriptionKey: 'settings.pageNotificationsDescription', icon: 'bell' },
@@ -753,14 +779,14 @@ export const SETTINGS_LEAVES = freezeEntries([
   { id: 'modules-navigation', domainId: 'modules', path: '/settings/modules/navigation', labelKey: 'settings.pageNavigation', descriptionKey: 'settings.pageNavigationDescription', icon: 'panel-left' },
   { id: 'module-dashboard', domainId: 'modules', path: '/settings/modules/overview', labelKey: 'nav.dashboard', descriptionKey: 'settings.sheetDashboardDescription', icon: 'layout-dashboard', module: 'dashboard' },
   { id: 'module-calendar', domainId: 'modules', path: '/settings/modules/calendar', labelKey: 'nav.calendar', descriptionKey: 'settings.sheetCalendarDescription', icon: 'calendar', module: 'calendar' },
-  { id: 'module-schedule', domainId: 'modules', path: '/settings/modules/schedule', labelKey: 'nav.schedule', descriptionKey: 'settings.sheetScheduleDescription', icon: 'calendar-clock', module: 'schedule' },
   { id: 'module-tasks', domainId: 'modules', path: '/settings/modules/tasks', labelKey: 'nav.tasks', descriptionKey: 'settings.sheetTasksDescription', icon: 'check-square', module: 'tasks' },
+  { id: 'module-rewards', domainId: 'modules', path: '/settings/modules/rewards', labelKey: 'nav.rewards', descriptionKey: 'settings.sheetRewardsDescription', icon: 'award', module: 'rewards' },
+  { id: 'module-schedule', domainId: 'modules', path: '/settings/modules/schedule', labelKey: 'nav.schedule', descriptionKey: 'settings.sheetScheduleDescription', icon: 'briefcase-business', module: 'schedule' },
   { id: 'module-kitchen', domainId: 'modules', path: '/settings/modules/kitchen', labelKey: 'nav.kitchen', descriptionKey: 'settings.pageKitchenDescription', icon: 'utensils', module: 'kitchen' },
   { id: 'module-housekeeping', domainId: 'modules', path: '/settings/modules/housekeeping', labelKey: 'nav.housekeeping', descriptionKey: 'settings.sheetHousekeepingDescription', icon: 'paintbrush', module: 'housekeeping' },
   { id: 'module-waste', domainId: 'modules', path: '/settings/modules/waste', labelKey: 'nav.waste', descriptionKey: 'settings.sheetWasteDescription', icon: 'trash-2', module: 'waste' },
   { id: 'module-documents', domainId: 'modules', path: '/settings/modules/documents', labelKey: 'nav.documents', descriptionKey: 'settings.sheetDocumentsDescription', icon: 'folder-lock', module: 'documents' },
   { id: 'module-inventory', domainId: 'modules', path: '/settings/modules/inventory', labelKey: 'nav.inventory', descriptionKey: 'settings.sheetInventoryDescription', icon: 'package', module: 'inventory' },
-  { id: 'module-rewards', domainId: 'modules', path: '/settings/modules/rewards', labelKey: 'nav.rewards', descriptionKey: 'settings.sheetRewardsDescription', icon: 'award', module: 'rewards' },
   { id: 'module-contacts', domainId: 'modules', path: '/settings/modules/contacts', labelKey: 'nav.contacts', descriptionKey: 'settings.pageSyncContactsDescription', icon: 'book-user', module: 'contacts' },
   { id: 'module-health', domainId: 'modules', path: '/settings/modules/health', labelKey: 'nav.health', descriptionKey: 'settings.sheetHealthDescription', icon: 'heart-pulse', module: 'health' },
   { id: 'module-budget', domainId: 'modules', path: '/settings/modules/budget', labelKey: 'nav.budget', descriptionKey: 'settings.sheetBudgetDescription', icon: 'wallet', module: 'budget' },

@@ -318,9 +318,10 @@ test('Darlehenskarte mit `budget: read`: Bearbeiten, Loeschen und Rate buchen we
     assert.doesNotMatch(html, /loan-edit|loan-delete|loan-pay/);
     assert.doesNotMatch(html, /budget-loan-card__actions/);
     assert.match(html, /data-action="loan-filter"/, 'der Raten-Filter liest nur');
-    // Ein Umschalter, der seinen Zustand ansagt, als geteilte Zeilenaktion mit
-    // dem Darlehen im Namen (Komponenten-Kanon 2026-09-26).
-    assert.match(html, /<button type="button" class="row-action budget-loan-card__filter" data-action="loan-filter" aria-label="budget\.filterLoanNamed\{&quot;name&quot;:&quot;Autokredit&quot;\}" data-id="9" aria-pressed="false">/);
+    // Ein Umschalter, der seinen Zustand ansagt - seit D6 (Critique 2026-10-16)
+    // als Eintrag mit Haken im Mehr-Knopf der Karte, der das Darlehen nennt.
+    assert.match(html, /class="row-action row-action--more budget-loan-card__more popover-menu__trigger"[^>]*aria-label="common\.moreActionsNamed\{&quot;name&quot;:&quot;Autokredit&quot;\}"/);
+    assert.match(html, /role="menuitemcheckbox" aria-checked="false"[\s\S]{0,120}data-action="loan-filter" data-id="9"/);
     assert.match(html, /role="progressbar"/);
     assert.match(html, /Autokredit/);
     assert.match(html, /budget\.loanNextDue/);
@@ -622,7 +623,7 @@ test('Gruppe mit `budget: read`: keine Handlung, aber Salden, Ausgaben und Verla
     assert.doesNotMatch(html, /splitExpenses\.editExpense/);
     assert.match(html, /Urlaub Ostsee/);
     assert.match(html, /Ferienwohnung/);
-    assert.match(html, /splitExpenses\.owes/);
+    assert.match(html, /splitExpenses\.debt(?:Owes|YouOwe|OwesYou)\{/, 'der Saldo steht da (R20: ein Satz je Sicht)');
   });
 });
 
@@ -833,8 +834,8 @@ test('Geteilte Ausgaben: Kopfknopf und Gruppe-Anlegen haengen am Recht', () => {
 // -------------------------------------------------------------------------
 
 test('READ_SAFE_ACTIONS ist eine Positivliste und enthaelt nur lesende Aktionen', () => {
-  assert.deepEqual([...budget.READ_SAFE_ACTIONS], ['loan-filter', 'toggle-planned'],
-    'der Raten-Filter und der Aufklapper von "Geplant" (R17/E4) sind die lesenden `data-action` dieser Seite');
+  assert.deepEqual([...budget.READ_SAFE_ACTIONS], ['loan-filter', 'toggle-planned', 'toggle-loan-payments'],
+    'der Raten-Filter und die Aufklapper von "Geplant" (R17/E4) und der Raten (R20) sind die lesenden `data-action` dieser Seite');
   const alle = new Set([...BUDGET_CODE.matchAll(/data-action="([a-z-]+)"/g)].map((m) => m[1]));
   // Untergrenze nur als Blindheits-Probe: seit R14 P8 stehen Loeschen und
   // Bearbeiten in den Blaettern, die Seite traegt 7 Aktionsnamen.
@@ -1767,3 +1768,12 @@ test('Abo: saving sends the reminder switch for both new and existing subscripti
 });
 
 test.after(() => miniDomAbraeumen());
+
+// R20 (Re-Critique 2026-10-17, A4 P3): eine feste Miete ist am Ersten zu 100 %
+// gebucht und stand den Monat ueber in Bernstein. Genau auf Plan ist keine Warnung.
+test('R20: genau auf Plan ist kein "knapp" - kurz davor schon, darueber rot', () => {
+  assert.equal(plans.toneForRatio(1, false), 'under', 'feste Kosten, genau getroffen');
+  assert.equal(plans.toneForRatio(0.9, false), 'near');
+  assert.equal(plans.toneForRatio(0.5, false), 'under');
+  assert.equal(plans.toneForRatio(1.2, true), 'over');
+});

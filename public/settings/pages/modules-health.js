@@ -8,11 +8,12 @@
  */
 import { api } from '/api.js';
 import { t } from '/i18n.js';
-import { esc } from '/utils/html.js';
+import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { openModal, closeModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
 import { intervalMonthsToInput, intervalInputToMonths } from '/utils/health-prevention.js';
 import { rowActionHtml } from '/utils/row-action.js';
 import { errorSentence, isGone, isAlreadyDeleted } from '/utils/friendly-error.js';
+import { reloadAfterSave } from '/utils/reload-after-save.js';
 
 const KINDS = ['vaccination', 'checkup'];
 const MAX_INTERVAL_MONTHS = 600;
@@ -134,7 +135,7 @@ function openTypeModal(type) {
     content: `
       <form id="health-prevention-type-form" class="form-stack">
         <div class="form-field">
-          <label class="label" for="hpt-name">${esc(t('settings.healthPreventionTypeName'))}</label>
+          <label class="label" for="hpt-name">${esc(t('settings.healthPreventionTypeName'))}${REQUIRED_MARK}</label>
           <input class="input" id="hpt-name" type="text" maxlength="200" required value="${esc(val(type?.name))}">
         </div>
         <div class="form-field">
@@ -172,10 +173,11 @@ function openTypeModal(type) {
         </div>
       </form>`,
     onSave(panel) {
-      panel.querySelector('#hpt-icon-trigger').addEventListener('click', async () => {
+      panel.querySelector('#hpt-icon-trigger').addEventListener('click', async (event) => {
+        const trigger = event.currentTarget;
         const { openIconPicker } = await import('/components/icon-picker.js');
         const hidden = panel.querySelector('#hpt-icon');
-        const chosen = await openIconPicker(hidden.value || null, { suggestions: ICON_SUGGESTIONS });
+        const chosen = await openIconPicker(hidden.value || null, { suggestions: ICON_SUGGESTIONS, owner: trigger });
         if (chosen === undefined) return; // Abbruch - nichts aendern
         hidden.value = chosen || 'syringe'; // "kein Symbol" ergibt hier keinen Sinn - der Typ behaelt sein Zeichen
         const btn = panel.querySelector('#hpt-icon-trigger');
@@ -238,7 +240,7 @@ function openTypeModal(type) {
           }
           closeModal({ force: true });
           window.yuvomi?.showToast(t('settings.healthPreventionTypeSaved'), 'success');
-          await reload();
+          await reloadAfterSave(() => reload());
           refocusAfterRender();
         } catch (err) {
           submitBtn.disabled = false;

@@ -276,6 +276,45 @@ async function visitViews(page, where, visit) {
   }
 }
 
+/**
+ * Die Sichten, die nur im Werkzeugmenue waehlbar sind (D1, Critique 2026-10-16).
+ *
+ * Unter 768px steht die Ansichtswahl einiger Module nicht als Segment im Kopf,
+ * sondern als Einfachauswahl im "..."-Menue (Aufgaben Liste/Brett, Dokumente
+ * Raster/Liste) - der Umschalter ist dort ausgeblendet, und `visitViews` sieht
+ * nur, was sichtbar ist. Ohne diesen Weg erreichte Sonde 7 das Board mobil nie
+ * mehr, und die Ausnahme `kanban-card` stand ohne Fundstelle da.
+ *
+ * Geklickt wird der Menue-Eintrag selbst (`[data-view-choice]`), also derselbe
+ * Weg, den die App geht - ueber den delegierten Handler des Kopfs, nicht ueber
+ * Speicher-Schluessel. Nur Eintraege, deren Gruppe in dieser Breite gilt (ab
+ * 768px blendet das Modul die Gruppe aus, dann waehlt das Segment). Danach
+ * zurueck auf die Ausgangssicht: die Wahl wird gespeichert und traefe sonst die
+ * naechste Route.
+ */
+async function visitMenuViews(page, where, visit) {
+  const choices = await page.evaluate(() => [...document.querySelectorAll('.popover-menu__item[data-view-choice]')]
+    .filter((item) => {
+      const group = item.closest('.popover-menu__group') ?? item;
+      return getComputedStyle(group).display !== 'none';
+    })
+    .map((item) => ({ view: item.dataset.viewChoice, on: item.getAttribute('aria-checked') === 'true' })));
+  const start = choices.find((c) => c.on)?.view;
+  if (!start) return;
+  const pick = (view) => page.evaluate((v) => {
+    const item = document.querySelector(`.popover-menu__item[data-view-choice="${CSS.escape(v)}"]`);
+    if (!item) return false;
+    item.click();
+    return true;
+  }, view);
+  for (const { view, on } of choices) {
+    if (on || !(await pick(view))) continue;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await visit(`${where}:menu-${view}`);
+  }
+  if (await pick(start)) await new Promise((resolve) => setTimeout(resolve, 600));
+}
+
 before(async () => {
   harness = await startHarness();
 });
@@ -467,23 +506,33 @@ test('der verspaetete Erstfokus nimmt dem fortgesetzten Speichern-Tor den Fokus 
       return document.activeElement?.id;
     }), 'slow-title', 'ohne spaeter gewaehlten Fokus landet der Erstfokus wie bisher im ersten Feld');
 
-    // Wie das Datepicker-Popover: ein Fokusziel direkt unter body, AUSSERHALB des
-    // Modals, ohne dass das Modal inert wird (Befund aus der claude-review zu #1193).
+    // Wie das Datepicker-Popover: ein Fokusziel AUSSERHALB der Tafel, ohne dass das
+    // Modal inert wird (Befund aus der claude-review zu #1193). Seit D7 ist das
+    // Modal ein natives <dialog> mit showModal(): alles ausserhalb ist inert, ein
+    // Popover direkt unter body nimmt gar keinen Fokus an (gemessen). Echte
+    // Popover haengen deshalb ueber `overlayHost()` im Dialog, neben der Tafel -
+    // genau dort, wo der Datepicker sie hinhaengt. Die Sonde nimmt denselben Weg
+    // und prueft zuerst, dass das Popover den Fokus WIRKLICH hatte; sonst
+    // bestaetigte sie eine Wahl, die nie stattfand.
     await page.evaluate(() => window.slowGate.modal.closeModal({ force: true }));
     await openSlow('Slow editor with a popover');
-    assert.equal(await page.evaluate(async () => {
+    assert.deepEqual(await page.evaluate(async () => {
+      const { overlayHost } = await import('/utils/overlay-host.js');
       const popover = document.createElement('div');
       popover.id = 'slow-popover';
       popover.setAttribute('popover', 'manual');
       popover.tabIndex = -1;
-      document.body.appendChild(popover);
+      overlayHost().appendChild(popover);
       popover.showPopover?.();
       popover.focus();
+      const took = document.activeElement?.id;
+      const outsidePanel = !popover.closest('.modal-panel');
       await new Promise((resolve) => setTimeout(resolve, 2000));
       const focus = document.activeElement?.id;
       popover.remove();
-      return focus;
-    }), 'slow-popover', 'der Erstfokus-Timer darf den Fokus nicht aus einem Popover unter body ziehen');
+      return { took, outsidePanel, focus };
+    }), { took: 'slow-popover', outsidePanel: true, focus: 'slow-popover' },
+    'der Erstfokus-Timer darf den Fokus nicht aus einem Popover ueber der Tafel ziehen');
 
     // Faellt der Fokus nur auf body, weil der Ausloeser weggerendert wurde, ist
     // das keine Wahl: das Modal bekommt seinen Erstfokus trotzdem.
@@ -501,9 +550,9 @@ test('der verspaetete Erstfokus nimmt dem fortgesetzten Speichern-Tor den Fokus 
       return document.activeElement?.id;
     }), 'slow-title', 'ein auf body gefallener Fokus ist keine Wahl - das erste Feld bekommt ihn trotzdem');
 
-    // Tab waehrend der Verzoegerung landet auf der Seite DAHINTER (nicht inert, der
-    // Trap haengt nur am Panel). Das ist keine Wahl: der Fokus muss in den Dialog
-    // (zweite Runde der Review zu #1193).
+    // Tab waehrend der Verzoegerung landete auf der Seite DAHINTER (zweite Runde
+    // der Review zu #1193). Seit D7 ist sie inert und nimmt den Fokus gar nicht
+    // erst; die Zusage bleibt dieselbe: der Fokus muss in den Dialog.
     await page.evaluate(() => {
       window.slowGate.modal.closeModal({ force: true });
       document.getElementById('slow-background')?.remove();
@@ -760,7 +809,9 @@ test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen ble
       return {
         repeatLabel: repeat?.getAttribute('aria-label') || '',
         repeatIsSvg: Boolean(repeat?.querySelector('svg')),
-        dayLabel: chip?.closest('.month-day')?.getAttribute('aria-label') || '',
+        // Seit R20 traegt die Zelle ihren Namen als Inhalt (`.month-day__label`,
+        // sr-only), nicht als aria-label - dieselbe Zusammenfassung.
+        dayLabel: chip?.closest('.month-day')?.querySelector('.month-day__label')?.textContent || '',
       };
     }, title);
     assert.ok(monthA11y.repeatLabel, 'die Serienmarke hat nach der Lucide-Ersetzung einen Namen');
@@ -804,6 +855,16 @@ for (const [name, answer] of [
       await gotoRoute(page, '/calendar');
       await page.click('#cal-view-tab-day');
       await page.waitForSelector('#cal-view-tab-day[aria-selected="true"]');
+      // DER WECHSEL MUSS DURCH SEIN (R19): die Ansicht gleitet seither per
+      // View Transition herein (swapRegion, utils/content-swap.js), und
+      // solange sie laeuft, trifft Chromium nur <html> - ein Tipp beendet sie
+      // bloss, der naechste erreicht die Seite. `aria-selected` steht schon,
+      // bevor die Daten der Tagesansicht geladen sind und der Wechsel beginnt;
+      // der FAB-Klick fiel im Handlauf R19 mitten hinein und verpuffte (der
+      // Dialog ging nie auf). Ein Finger tippt nach dem sichtbaren Wechsel,
+      // die Sonde wartet ihn ebenso ab: Tagesansicht steht, Transition vorbei.
+      await page.waitForFunction(() => Boolean(document.querySelector('#cal-body .day-view'))
+        && !document.documentElement.classList.contains('page-swapping'));
       await page.click('#fab-new-event');
       await page.waitForSelector('#modal-title');
       await page.evaluate((eventTitle) => {
@@ -2219,7 +2280,12 @@ test('Sonde 7 - eine Zeilenfolge ist keine Spalte aus Karten', async () => {
       // Auf einem Blatt nur der Zustand selbst - siehe `isLeaf`: zwei der drei
       // Umschaltergruppen in den Einstellungen schreiben eine Einstellung.
       if (isLeaf(name)) await note(name);
-      else await visitViews(page, name, note);
+      else {
+        await visitViews(page, name, note);
+        // Mobil steht Liste/Brett der Aufgaben im Menue (D1) - ohne diesen
+        // Weg saehe die Sonde das Board nur am Desktop.
+        await visitMenuViews(page, name, note);
+      }
     }
     await page.close();
     perDevice.set(device, found);
@@ -2362,6 +2428,7 @@ test('Sonde 8 - ein Kopf mit Lead-Zone traegt seine Linie erst angedockt, und do
   const findings = [];
   let headsSeen = 0;
   let leadHeads = 0;
+  const leadNames = [];
 
   for (const name of sweep('Sonde 8')) {
     await gotoRoute(page, ALL_ROUTES[name]);
@@ -2384,6 +2451,7 @@ test('Sonde 8 - ein Kopf mit Lead-Zone traegt seine Linie erst angedockt, und do
       continue;
     }
     leadHeads += 1;
+    leadNames.push(name);
 
     // EINE LEAD-ZONE AUF EINEM EINZEILIGEN KOPF IST KEINE. Sie kostet dann
     // nicht nur nichts, sie verbirgt die Linie dauerhaft: `--stacked` schaltet
@@ -2427,8 +2495,30 @@ test('Sonde 8 - ein Kopf mit Lead-Zone traegt seine Linie erst angedockt, und do
   // die triviale Haelfte der Regel, und genau die andere war kaputt.
   assert.ok(headsSeen >= ROUTE_NAMES.length - 3,
     `Nur ${headsSeen} Modulkoepfe von ${ROUTE_NAMES.length} Routen gesehen - die Sonde erreicht die Koepfe nicht mehr.`);
-  assert.ok(leadHeads >= 5,
-    `Nur ${leadHeads} Koepfe mit Lead-Zone gesehen (gemessen: 10). Ohne sie prueft diese Sonde nur, `
+  // DIE ZAHL IST GEMESSEN UND SIE SINKT MIT ABSICHT. Die "10" stammte aus der
+  // Zeit vor der Kopfregel 1a (R16): seither stehen die Werkzeuge vieler Koepfe
+  // in der Titelzeile, und ein einzeiliger Kopf hat keine Lead-Zone. Mit D1
+  // (Critique 2026-10-16) wurde auch der Aufgabenkopf einzeilig (120 -> 65px).
+  // Gemessen 2026-10-16 bei 375px (origin/main 5f752e7a2): vier Koepfe mit
+  // Lead-Zone - Kalender, Budget (Zeitraum-Kopf, gedeckelt), Belohnungen,
+  // Haushaltshilfe (Band ueber der Reiterleiste, `--dock-band`).
+  // R19 (68f1c0ef0, Critique 2026-10-16 "Koepfe auf das 65px-Muster"): unter
+  // 1024px stehen die Reiter von Belohnungen und Haushaltshilfe IN der
+  // Titelzeile (`.page-toolbar--tabs-title`), beide Koepfe sind einzeilig
+  // (121/129 -> 65px), tragen ihre Linie durchgehend und haben zu Recht keine
+  // Lead-Zone mehr. Gemessen 2026-10-17 bei 375px, Laufart dieser Sonde: main
+  // 4 (Kalender, Budget, Belohnungen, Haushaltshilfe), R19 2 (Kalender,
+  // Budget). Die Band-Bauart hat in dieser Laufart keine Route mehr; sie haelt
+  // nur noch test:ux-utils. Damit die Untergrenze scharf bleibt, nennt sie die Koepfe:
+  // verliert Kalender oder Budget die Lead-Zone, wird die Sonde rot, auch wenn
+  // ein anderer Kopf eine dazubekommt.
+  for (const name of ['calendar', 'budget']) {
+    assert.ok(leadNames.includes(name),
+      `${name}: keine Lead-Zone mehr gesehen (gemessen 2026-10-17: Kalender und Budget docken an). `
+      + `Gesehen: ${leadNames.join(', ') || 'keiner'}.`);
+  }
+  assert.ok(leadHeads >= 2,
+    `Nur ${leadHeads} Koepfe mit Lead-Zone gesehen (gemessen 2026-10-17: 2). Ohne sie prueft diese Sonde nur, `
     + 'dass einzeilige Koepfe eine Linie tragen.');
 
   assert.deepEqual(findings, [],

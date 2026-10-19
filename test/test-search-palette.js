@@ -308,3 +308,181 @@ test('A1 P1-1: router.js verdrahtet die Combobox nach jedem Rendern der Palette'
   assert.doesNotMatch(init, /hits\[[^\]]*\]\.focus\(\)|\.focus\(\);\s*\} else if \(idx/,
     'die Pfeile schieben den Fokus nicht mehr aus dem Feld');
 });
+
+// R19 (Critique 2026-10-16, Alex): ⌘K mit leerem Feld zeigte kein „zuletzt
+// geoeffnet". Gemerkt werden ORTE aus der Palette - je Konto, hoechstens
+// fuenf, der neueste zuerst, je Ziel einmal.
+// Sicherheits-Review R19: im Speicher stehen nur Ziel und Modul, nie ein Name
+// oder Kontext (Datentreffer aus Gesundheit, Dokumenten, privaten Notizen
+// ueberlebten das Abmelden), und beim Abmelden gehen alle Listen.
+test('R19: zuletzt geoeffnet - nur Ziel und Modul im Speicher, je Konto, neueste zuerst', async () => {
+  const { pushRecent, readRecent, rememberRecent, visibleRecent, recentStorageKey, RECENT_MAX } = await import('../public/utils/search-sections.js');
+  let list = [];
+  for (let i = 1; i <= 7; i++) list = pushRecent(list, { route: `/m${i}`, module: `m${i}` });
+  assert.equal(list.length, RECENT_MAX);
+  assert.deepEqual(list.map((e) => e.route), ['/m7', '/m6', '/m5', '/m4', '/m3']);
+  list = pushRecent(list, { route: '/m5', module: 'm5' });
+  assert.deepEqual(list.map((e) => e.route), ['/m5', '/m7', '/m6', '/m4', '/m3'], 'dasselbe Ziel rueckt nach vorn statt doppelt');
+  assert.equal(pushRecent([], { route: 'https://evil.example/', module: 'x' }).length, 0, 'nur Ziele in der App');
+  assert.equal(pushRecent([], { route: '//evil.example/', module: 'x' }).length, 0);
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  rememberRecent(storage, 1, { route: '/health?open=3', module: 'health', label: 'Blutdruck 180/110', context: 'Befund' });
+  const raw = store.get(recentStorageKey(1));
+  assert.doesNotMatch(raw, /Blutdruck|Befund|label|context/, `ein Name liegt im Speicher: ${raw}`);
+  assert.deepEqual(JSON.parse(raw), [{ route: '/health?open=3', module: 'health' }]);
+  rememberRecent(storage, 2, { route: '/budget', module: 'budget' });
+  assert.deepEqual(readRecent(storage, 1).map((e) => e.module), ['health'], 'ein Konto sieht nicht die Liste eines anderen');
+  store.set(recentStorageKey(3), '{kaputt');
+  assert.deepEqual(readRecent(storage, 3), [], 'Unlesbares ist eine leere Liste');
+  store.set(recentStorageKey(4), JSON.stringify([{ route: '/notes', module: 'notes', label: 'alt gespeichert' }]));
+  assert.deepEqual(readRecent(storage, 4), [{ route: '/notes', module: 'notes' }], 'ein alter Name wird nicht wieder hervorgeholt');
+  const throwing = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+  assert.deepEqual(readRecent(throwing, 1), []);
+  assert.doesNotThrow(() => rememberRecent(throwing, 1, { route: '/a', module: 'a' }));
+  const resolve = ({ module }) => (module === 'calendar' ? { label: 'Kalender' } : null);
+  assert.deepEqual(visibleRecent([{ route: '/budget', module: 'budget' }, { route: '/calendar', module: 'calendar' }], resolve),
+    [{ route: '/calendar', module: 'calendar', label: 'Kalender', context: '' }], 'der Name kommt beim Anzeigen, Unaufloesbares faellt heraus');
+});
+
+test('R19: beim Abmelden gehen alle Listen, nur diese', async () => {
+  const { forgetAllRecent, recentStorageKey } = await import('../public/utils/search-sections.js');
+  const store = new Map([[recentStorageKey(1), '[]'], [recentStorageKey(2), '[]'], ['yuvomi-theme', 'dark']]);
+  const storage = {
+    get length() { return store.size; },
+    key: (i) => [...store.keys()][i] ?? null,
+    removeItem: (k) => store.delete(k),
+  };
+  forgetAllRecent(storage);
+  assert.deepEqual([...store.keys()], ['yuvomi-theme']);
+  assert.doesNotThrow(() => forgetAllRecent(null));
+  const forget = router.slice(router.indexOf('function forgetSessionState()'), router.indexOf('// Session abgelaufen'));
+  assert.match(forget, /forgetAllRecent\(safeLocalStorage\(\)\)/, 'forgetSessionState (Abmelden, abgelaufene Sitzung) leert sie');
+});
+
+test('R19: die leere Palette zeigt "Zuletzt geoeffnet", gemerkt werden nur Orte, ohne Namen', () => {
+  const hint = router.slice(router.indexOf('function renderSearchHint()'), router.indexOf("const scopes = document.createElement('div');", router.indexOf('function renderSearchHint()')));
+  assert.match(hint, /visibleRecent\(readRecent\(safeLocalStorage\(\), routerState\.currentUser\?\.id\), recentPlace\(navItems\(\)\)\)/,
+    'gelesen je Konto, Namen frisch aus Navigation und Einstellungen');
+  assert.match(hint, /paletteRowsSection\(t\('search\.recentLabel'\)/, 'eine benannte Gruppe in der Bauart der Treffer');
+  assert.equal(de.search.recentLabel, 'Zuletzt geöffnet');
+  for (const call of router.match(/rememberRecent\([^;]*\);/g) ?? []) {
+    assert.match(call, /\{ route: item\.route, module: item\.module \}/, `nur Ziel und Modul: ${call}`);
+  }
+  const make = router.slice(router.indexOf('function makeSection('), router.indexOf('// 1. GEHE ZU'));
+  assert.match(make, /remember = false/, 'Datentreffer merken sich nicht (Standard aus)');
+  const goTo = router.slice(router.indexOf("makeSection(t('search.goTo')"), router.indexOf("makeSection(t('search.newSection')"));
+  assert.match(goTo, /remember: true/, 'nur die Orte');
+  const place = router.slice(router.indexOf('function recentPlace('), router.indexOf('function paletteRowsSection('));
+  assert.match(place, /findSettingsLeaf\(/, 'ein Einstellungsblatt nur, wenn der Betrachter es sehen darf');
+  const rows = router.slice(router.indexOf('function paletteRowsSection('), router.indexOf('/** Text mit markierten Fundstellen'));
+  assert.match(rows, /btn\.className = 'search-result'/, 'dieselbe Zeile wie ein Treffer - die Combobox zaehlt .search-result');
+});
+
+// R19: der Dialog hinter `?` und „Tastenkombinationen" hiess „Hilfe" und
+// zeigte am Desktop nur Kuerzel. Er heisst jetzt, was er zeigt - am Finger
+// (Klartext-Hilfe ohne Kuerzel) bleibt es „Hilfe".
+// R20 (Re-Critique 2026-10-17, A1 P1-2): der Kuerzel-Dialog baute sein eigenes
+// Overlay - `aria-modal` am Grund, Titel als `span`, Esc am Dokument. Der Fokus
+// blieb auf MAIN, Tab lief hinaus, nach dem Schliessen fand er nicht zurueck.
+// Er oeffnet jetzt ueber den geteilten Dialog (Top-Layer, Fokusfalle, Esc,
+// Zurueck-Geste, Fokus-Rueckgabe) und zeigt die Kuerzel am Zeiger zweispaltig.
+test('R20: der Kuerzel-Dialog ist der geteilte Dialog, am Zeiger zweispaltig', () => {
+  const help = router.slice(router.indexOf('function showHelpModal('), router.indexOf('// Update-Hinweis (#490)'));
+  assert.match(help, /openModal\(\{/, 'oeffnet ueber components/modal.js');
+  assert.doesNotMatch(help, /createElement\('div'\)|setAttribute\('aria-modal'|addEventListener\('keydown'/, 'kein eigenes Overlay, kein eigener Esc-Weg');
+  assert.match(help, /dirtyGuard: false/, 'nichts Ungespeichertes - keine Verwerfen-Rueckfrage');
+  assert.match(help, /shortcuts-list--columns/, 'zwei Spalten am Zeiger');
+  const css = readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8');
+  const rule = css.slice(css.indexOf('.shortcuts-list--columns {'), css.indexOf('}', css.indexOf('.shortcuts-list--columns {')));
+  assert.match(rule, /grid-template-columns:\s*repeat\(2,/);
+  assert.match(rule, /grid-auto-flow:\s*column/, 'spaltenweise gelesen');
+});
+
+test('R19: der Kuerzel-Dialog heisst "Tastenkombinationen", die Klartext-Hilfe "Hilfe"', () => {
+  const help = router.slice(router.indexOf('function showHelpModal('), router.indexOf('// Update-Hinweis (#490)'));
+  assert.match(help, /const helpTitle = coarsePointer \? t\('help\.title'\) : t\('shortcuts\.help'\);/);
+  // Seit R20 traegt openModal() den Titel: sichtbare Ueberschrift (h2) und
+  // Name des Dialogs (aria-labelledby) aus derselben Zeichenkette.
+  assert.match(help, /openModal\(\{\s*title: helpTitle,/, 'Ueberschrift und Name des Dialogs');
+  assert.doesNotMatch(help, /t\('help\.title'\)\)/, 'kein fester Titel "Hilfe" mehr im Kopf');
+  assert.equal(de.shortcuts.help, 'Tastenkombinationen');
+});
+
+// R20 (Re-Critique 2026-10-17, A1 P2-4): die Palette ordnete nach der
+// Navigation - „ge" stellte „Belohnungen" (enthaelt es) vor „Geburtstage"
+// (beginnt damit) -, das Verb „Neu anlegen" holte bei „an" alle Anlege-
+// Befehle herein, die Datentreffer standen darunter, die Zeilen der gemischten
+// Sektionen trugen kein Siegel, und ohne Treffer gab es keinen Weg weiter.
+test('R20: ein Anfang schlaegt ein Teilstueck, das Verb holt keine Befehle mehr herein', async () => {
+  const { paletteRank } = await import('../public/utils/search-sections.js');
+  assert.equal(paletteRank('ge', 'Geburtstage'), 0);
+  assert.equal(paletteRank('ver', 'Einstellungen verwalten'), 1);
+  assert.equal(paletteRank('ge', 'Belohnungen'), 2);
+  const places = [{ label: 'Übersicht' }, { label: 'Belohnungen' }, { label: 'Geburtstage' }];
+  const settings = [{ label: 'Gesundheit' }];
+  assert.deepEqual(paletteCommands('ge', { places, settings }).places.map((p) => p.label),
+    ['Geburtstage', 'Gesundheit', 'Belohnungen'], 'Anfaenge zuerst, Orte und Einstellungen in einer Rangfolge');
+  const actions = [
+    { label: 'Aufgabe', context: 'Aufgaben', verb: 'Neu anlegen' },
+    { label: 'Termin', context: 'Kalender', verb: 'Neu anlegen' },
+  ];
+  assert.deepEqual(paletteCommands('an', { actions }).actions, [], 'ein Teilstueck des Verbs ist kein Wunsch nach allen Befehlen');
+  assert.equal(paletteCommands('anlegen', { actions }).actions.length, 2, 'das ausgeschriebene Verb bleibt ein Weg zu ihnen');
+  assert.deepEqual(paletteCommands('kal', { actions }).actions.map((a) => a.label), ['Termin'], 'das Modul bleibt ein Weg');
+});
+
+test('R20: Daten vor den Anlege-Befehlen, Siegel an gemischten Zeilen, ohne Treffer „als Aufgabe anlegen"', () => {
+  const render = body('function renderSearchResults(', '// Read-only-Modus für ein Modul anwenden');
+  const goTo = render.indexOf("makeSection(t('search.goTo')");
+  const dataAt = render.indexOf('SEARCH_SECTIONS.forEach');
+  const create = render.indexOf("makeSection(t('search.newSection')");
+  assert.ok(goTo >= 0 && dataAt > goTo && create > dataAt, 'Gehe zu, Daten, Neu anlegen');
+  assert.match(render.slice(goTo, dataAt), /rowSeals: true/, '„Gehe zu" traegt Siegel an den Zeilen');
+  assert.match(render.slice(create), /rowSeals: true/, '„Neu anlegen" auch');
+  assert.match(render, /createTaskFromQuery\(query\)/, 'ohne Treffer der Weg zur neuen Aufgabe');
+  const fn = body('function createTaskFromQuery(', 'function prefillNewTaskTitle(');
+  assert.match(fn, /navModuleAccess\('tasks'\) !== 'write'/, 'nur wer Aufgaben schreiben darf');
+  assert.match(body('function prefillNewTaskTitle(', '/** Text mit markierten Fundstellen'), /if \(!input\.value\)/, 'ein angefangenes Feld bleibt');
+  assert.match(de.search.createTaskNamed, /\{\{title\}\}/);
+});
+
+test('R20: nachkommende Daten lassen die Markierung an ihrer Zeile, nicht an ihrer Nummer', async () => {
+  const { wirePaletteCombobox } = await import('../public/utils/palette-combobox.js');
+  const input = new Stub('', { id: 'search-input' });
+  const results = new Stub('', { id: 'search-results' });
+  const row = (text) => Object.assign(new Stub('search-result'), { textContent: text });
+  const place = row('Geburtstage');
+  const action = row('Geburtstag');
+  results.append(new Stub('search-section').append(new Stub('search-section__rows').append(place)),
+    new Stub('search-section').append(new Stub('search-section__rows').append(action)));
+  const combo = wirePaletteCombobox({ input, listbox: results });
+  combo.refresh();
+  input.key('ArrowDown');
+  assert.equal(input.getAttribute('aria-activedescendant'), action.id);
+  // Die Daten kommen ZWISCHEN Orte und Befehle.
+  results.children.splice(1, 0, new Stub('search-section').append(new Stub('search-section__rows').append(row('Geburtstagstorte'))));
+  combo.refresh({ keep: true });
+  assert.equal(input.getAttribute('aria-activedescendant'), action.id, 'Enter oeffnet weiter, was markiert war');
+});
+
+// Codex-Review PR #2053 (P2): ohne Treffer steht „als Aufgabe anlegen" als
+// waehlbare Zeile da, renderSearchResults gab aber 0 zurueck - die Ansage
+// sagte „Keine Ergebnisse" und verschwieg die Zeile, die der Pfeil erreicht.
+test('R20: ohne Treffer nennt die Ansage die Zeile „als Aufgabe anlegen" und zaehlt sie mit', async () => {
+  const { paletteStatusText } = await import('../public/utils/search-sections.js');
+  assert.equal(typeof paletteStatusText, 'function', 'utils/search-sections.js exportiert paletteStatusText nicht');
+  const tr = (key, params) => (params ? `${key}:${params.count}` : key);
+  assert.equal(paletteStatusText(0, {}, tr), 'search.noResults');
+  assert.equal(paletteStatusText(1, {}, tr), 'search.resultCountOne:1');
+  assert.equal(paletteStatusText(3, {}, tr), 'search.resultCountMany:3');
+  assert.equal(paletteStatusText(1, { createLabel: '„Zahnarzt" als Aufgabe anlegen' }, tr),
+    'search.noResults „Zahnarzt" als Aufgabe anlegen');
+  const render = body('function renderSearchResults(', '// Read-only-Modus für ein Modul anwenden');
+  assert.match(render, /return createTask \? \{ count: 1, createLabel: createTask\.label \}/,
+    'die Zeile „als Aufgabe anlegen" zaehlt in der Rueckgabe mit');
+  const input = body("input.addEventListener('input'", 'return openSearch;');
+  assert.match(input, /const \{ count, createLabel \} = renderSearchResults\(results, data,/);
+  assert.match(input, /announceCount\(count, \{ createLabel \}\)/, 'die Ansage bekommt die Zeile');
+  assert.match(router, /const announceCount = \(count, opts\) => setStatus\(paletteStatusText\(count, opts, t\)\)/);
+});

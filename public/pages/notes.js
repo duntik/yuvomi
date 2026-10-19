@@ -7,11 +7,11 @@
 import { api } from '/api.js';
 import { openModal as openSharedModal, closeModal, btnError, advancedSection, reportFieldError } from '/components/modal.js';
 import { wireCategoryScopeHelp } from '/components/category-manager.js';
-import { stagger, vibrate, scheduleUndoableDelete, wireScrollFade, acknowledgeCheck } from '/utils/ux.js';
+import { stagger, vibrate, scheduleUndoableDelete, wireScrollFade, acknowledgeCheck, isImeComposing } from '/utils/ux.js';
 import { redrawList } from '/utils/list-motion.js';
 import { t } from '/i18n.js';
 import { esc, renderMarkdownLight } from '/utils/html.js';
-import { rowActionHtml } from '/utils/row-action.js';
+import { rowMenuHtml } from '/utils/row-action.js';
 import { splitKeepingLineEndings } from '/utils/markdown-checklist.js';
 import { renderMarkdownToolbar, wireMarkdownToolbar } from '/utils/markdown-toolbar.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
@@ -19,7 +19,7 @@ import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { pageToolsMenuHtml, pageToolsActionEl, installPopoverMenus } from '/utils/popover-menu.js';
 import { findPageFab } from '/utils/fab.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
-import { emptyStateHTML } from '/utils/empty-state.js';
+import { emptyStateHTML, searchEmptyHTML } from '/utils/empty-state.js';
 import { AVATAR_FALLBACK_COLOR } from '/utils/color.js';
 import {
   noteMatchesCategories,
@@ -78,6 +78,8 @@ let state = {
   filterCategoryIds: [],
 };
 let _container = null;
+/** Das Suchfeld (wirePageSearch) - der Leerzustand einer leeren Suche leert es. */
+let _search = null;
 
 // --------------------------------------------------------
 // Nur-lesen (#467, #1265 P1)
@@ -117,17 +119,22 @@ function readOnly() {
  * und verspraeche „Anpinnen aufheben" fuer eine Beruehrung, die nichts tut
  * (dieselbe Begruendung wie am Statushaken der Aufgaben, #1209).
  */
+// EIN ZEICHEN, ZWEI ZUSTAENDE (Critique 2026-10-16): angepinnt stand hier
+// `pin-off` - auf der Scheibe las es sich als Knopf "loesen", ohne Scheibe als
+// "nicht angepinnt". Jetzt immer die Nadel: gefuellt in voller Tinte heisst
+// angepinnt (notes.css), offen in Tertiaerfarbe heisst nicht; die Beschriftung
+// nennt weiter die Handlung.
 function pinMarkup(note) {
   if (!readOnly()) {
     return `<button class="note-card__pin" data-action="pin" data-id="${note.id}"
               aria-label="${note.pinned ? t('notes.unpinAction') : t('notes.pinAction')}">
-        <i data-lucide="${note.pinned ? 'pin-off' : 'pin'}" class="icon-sm" aria-hidden="true"></i>
+        <i data-lucide="pin" aria-hidden="true"></i>
       </button>`;
   }
   if (!note.pinned) return '';
   return `<span class="note-card__pin note-card__pin--static" role="img"
               aria-label="${esc(t('notes.pinnedState'))}">
-        <i data-lucide="pin" class="icon-sm" aria-hidden="true"></i>
+        <i data-lucide="pin" aria-hidden="true"></i>
       </span>`;
 }
 
@@ -268,7 +275,14 @@ export async function render(container, { user, signal }) {
              2026-09-26). Zwischen Kopf und Port kostete sie dauerhaft 65px
              (Port ab y=179 statt 114), die auch der Kopf-Kollaps nicht
              zurueckholte (A8); hier scrollt sie mit dem Raster weg. -->
-        <div class="notes-filters page-chip-row" id="notes-filters" hidden></div>
+        <!-- DIE REIHE HAELT IHREN PLATZ, BIS DIE DATEN DA SIND (R20, Re-Critique
+             2026-10-17 a2 P2-3: CLS 0,067). Sie stand verborgen und erschien
+             nach dem Laden - das Raster sprang um ihre Hoehe nach unten. In
+             einem Haushalt mit zwei Personen steht sie fast immer; ohne
+             Auswahl faellt sie nach dem Laden weg (renderFilters). -->
+        <div class="notes-filters page-chip-row" id="notes-filters" aria-hidden="true" data-pending>
+          <span class="skeleton notes-filters__skeleton"></span><span class="skeleton notes-filters__skeleton"></span><span class="skeleton notes-filters__skeleton"></span>
+        </div>
         <div id="notes-grid" class="notes-grid" aria-busy="true">${renderSkeletonList({ rows: 5, lines: 3 })}</div>
       </div>
       <button class="page-fab" id="fab-new-note" aria-label="${t('notes.addNoteLabel')}" data-dock-label="${t('newLabel.notes')}">
@@ -291,21 +305,6 @@ export async function render(container, { user, signal }) {
     throw err;
   }
   const grid = container.querySelector('#notes-grid');
-  // Die Spaltenzahl folgt der Breite (Container-Abfragen): der Fluss zwischen
-  // den Gruppen rechnet bei jedem Wechsel neu (syncGroupFlow).
-  if (typeof ResizeObserver === 'function') {
-    let columnsSeen = '';
-    const flowRo = new ResizeObserver(() => {
-      const now = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
-      if (String(now) === columnsSeen) return;
-      columnsSeen = String(now);
-      syncGroupFlow(grid);
-    });
-    flowRo.observe(grid);
-    signal?.addEventListener('abort', () => flowRo.disconnect(), { once: true });
-  }
-  // Und am Fenster: ein Beobachter schweigt, solange der Tab verdeckt ist.
-  window.addEventListener('resize', () => syncGroupFlow(grid), { signal, passive: true });
   grid.addEventListener('click', async (e) => {
     // EIN RIEGEL FUER ALLE SCHREIB-ZWEIGE dieses Handlers (anpinnen, loeschen,
     // abhaken). Das Markup oben nimmt die Affordanz, das hier nimmt auch dem
@@ -331,6 +330,10 @@ export async function render(container, { user, signal }) {
       if (owner) await toggleCheck(parseInt(owner.dataset.id, 10), box);
       return;
     }
+
+    // Der Mehr-Knopf und sein Menue haengen im DOM der Karte: ein Tipp auf
+    // Ausloeser oder Menuepolster oeffnet nicht die Notiz.
+    if (e.target.closest('.popover-menu, .popover-menu__trigger')) return;
 
     // [data-action="open"] fällt bewusst durch auf den Karten-Zweig darunter —
     // der Button liegt in der Karte, ein Treffer reicht.
@@ -365,7 +368,7 @@ export async function render(container, { user, signal }) {
   });
   findPageFab('fab-new-note').addEventListener('click', addHandler);
 
-  wirePageSearch(_container, {
+  _search = wirePageSearch(_container, {
     id: 'notes-search',
     delay: 0,
     onQuery: (value) => {
@@ -407,6 +410,8 @@ function renderFilters() {
   ));
 
   row.hidden = creators.length < 2 && filterCategories.length === 0;
+  row.removeAttribute('aria-hidden');
+  delete row.dataset.pending;
   const focused = row.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = ['creator', 'categoryId', 'clearCategories'].find((key) => focused && Object.hasOwn(focused.dataset, key));
   const focusValue = focusKey ? focused.dataset[focusKey] : null;
@@ -533,6 +538,14 @@ function drawGrid(grid) {
     grid.querySelector('#empty-cta-notes')?.addEventListener('click', () => {
       document.querySelector('.page-fab')?.click();
     });
+    grid.querySelector('#notes-reset-search')?.addEventListener('click', () => {
+      state.filterQuery = '';
+      state.filterCreator = '';
+      state.filterCategoryIds = [];
+      _search?.clear();
+      renderNotesAndFilters();
+      _search?.input?.focus();
+    });
     return;
   }
 
@@ -542,11 +555,23 @@ function drawGrid(grid) {
   // nur, wenn es tatsächlich beide Gruppen gibt.
   const pinned = visible.filter((n) => n.pinned);
   const rest   = visible.filter((n) => !n.pinned);
-  const heading = (label) => `<h2 class="notes-group__title u-section-title">${label}</h2>`;
+  // EIN LISTEN-GRUPPENKOPF (D8, Critique 2026-10-16): „Angepinnt" stand als
+  // 20px-Abschnittstitel ueber den Karten - eine Stufe, die DESIGN.md dem
+  // Titel einer Flaeche gibt, nicht der Gruppe in einer Liste. Jetzt das
+  // Versal-Mikro-Label aus list-row.css wie in Aufgaben und Kontakten.
+  const heading = (label) => `<h2 class="notes-group__title list-group__title">${label}</h2>`;
 
   // Der Notiztitel ist eine echte Ueberschrift (R8 H15), eine Ebene unter
   // dem, was darueber steht: unter den Gruppenkoepfen (h2) ein h3, sonst
   // direkt unter dem Seitentitel (h1) ein h2 - keine uebersprungene Ebene.
+  //
+  // JEDE GRUPPE BEGINNT EINE EIGENE ZEILE (R19, Critique 2026-10-16). Seit
+  // R17 reihte sich der Kopf "Weitere Notizen" in die angebrochene letzte
+  // Zeile der angepinnten ein, und seine Karten liefen darunter ab Spalte 1
+  // weiter - bei 1440 stand "Buchempfehlungen" unter "WLAN & Smart Home", als
+  // gehoerte sie dazu. Die Koepfe spannen wieder ueber alle Spalten; die
+  // Luecke daneben ist der Preis der eindeutigen Gruppe (Apple Notizen
+  // trennt "Angepinnt" ebenso). Mit grid-lanes (notes.css) entfaellt sie.
   const grouped = Boolean(pinned.length && rest.length);
   const card = (n) => renderNoteCard(n, { headingLevel: grouped ? 3 : 2 });
   const html = grouped
@@ -557,59 +582,6 @@ function drawGrid(grid) {
   grid.replaceChildren();
   grid.insertAdjacentHTML('beforeend', html);
   if (window.lucide) lucide.createIcons({ el: grid });
-  // In der Zeichenfunktion, nicht danach: die Listenbewegung (FLIP) misst die
-  // Karten direkt nach ihr - sie sollen dort stehen, wo sie bleiben.
-  syncGroupFlow(grid);
-}
-
-/**
- * KEINE ERZWUNGENE LEERZEILE ZWISCHEN DEN GRUPPEN (Critique R17).
- *
- * Der Kopf „Weitere Notizen" spannte ueber alle Spalten und begann damit immer
- * eine neue Zeile. Fuellen die angepinnten Notizen ihre letzte Zeile nicht -
- * fuenf Notizen in vier Spalten -, blieb der Rest dieser Zeile leer: bei 1280
- * stand die fuenfte allein (240 von 996px, 432px hoch), und „Weitere Notizen"
- * begann erst bei y=988.
- *
- * Jetzt fliessen die weiteren Notizen in diese Zeile: der Kopf beginnt in der
- * ersten freien Spalte und reicht bis zum Rand, die angepinnten Nachzuegler
- * daneben nehmen zwei Zeilen (Kopf + erste Kartenzeile) ein. Beide Koepfe
- * bleiben, jeder steht ueber seinen Karten. Mit einer Spalte (Telefon) gibt es
- * keine Nachzuegler und es bleibt alles, wie es war.
- *
- * Das Raster bleibt das Raster (`display: grid`, die Spalten aus den
- * Container-Abfragen in notes.css; Guard in test-frontend-audit.js). Hier wird
- * nur GELESEN, wie viele Spalten gerade gelten - eine Container-Abfrage kann
- * `Anzahl mod Spalten` nicht rechnen.
- *
- * @param {HTMLElement|null} grid `#notes-grid`
- */
-function syncGroupFlow(grid) {
-  if (!grid?.querySelectorAll) return;
-  const label = grid.querySelectorAll('.notes-group__title')[1] ?? null;
-  for (const card of grid.querySelectorAll('.note-card--trailing')) card.classList.remove('note-card--trailing');
-  label?.classList.remove('notes-group__title--inline');
-  label?.style.removeProperty('--notes-label-start');
-  if (!label) return;
-  const pinned = [...grid.querySelectorAll('.note-card--pinned')];
-  const columns = typeof getComputedStyle === 'function'
-    ? getComputedStyle(grid).gridTemplateColumns.split(' ').filter((track) => /\d/.test(track)).length
-    : 1;
-  const { trailing, labelStart } = groupFlow(pinned.length, columns);
-  if (!trailing) return;
-  for (const card of pinned.slice(-trailing)) card.classList.add('note-card--trailing');
-  label.classList.add('notes-group__title--inline');
-  label.style.setProperty('--notes-label-start', String(labelStart));
-}
-
-/**
- * Wie viele angepinnte Notizen stehen in einer angebrochenen letzten Zeile,
- * und in welcher Spaltenlinie beginnt der Kopf der naechsten Gruppe?
- * @returns {{trailing: number, labelStart: number}} `trailing: 0` = die Zeile ist voll
- */
-function groupFlow(pinnedCount, columns) {
-  const trailing = columns > 1 && pinnedCount > 0 ? pinnedCount % columns : 0;
-  return { trailing, labelStart: trailing + 1 };
 }
 
 /**
@@ -632,15 +604,16 @@ function groupFlow(pinnedCount, columns) {
  */
 function notesEmptyStateHtml(isFiltered) {
   const q = state.filterQuery.trim().toLowerCase();
+  // Der EINE Leerzustand einer leeren Suche (R19): Begriff, Person und
+  // Kategorien als Chips, „Suche zuruecksetzen" hebt alles auf.
   if (isFiltered) {
-    return emptyStateHTML({
-      variant: 'no-results',
-      title: t('notes.noResultsTitle'),
-      description: q
-        ? t('notes.noResultsDescription', { query: state.filterQuery })
-        : state.filterCategoryIds.length
-          ? t('noteCategories.noResults')
-          : t('notes.noResultsCreatorDescription', { name: state.filterCreator }),
+    const categories = state.filterCategoryIds
+      .map((id) => state.categories.find((category) => category.id === id)?.name)
+      .filter(Boolean);
+    return searchEmptyHTML({
+      query: q ? state.filterQuery : '',
+      filters: [state.filterCreator, ...categories].filter(Boolean),
+      resetAttrs: { id: 'notes-reset-search' },
     });
   }
   const ro = readOnly();
@@ -716,7 +689,15 @@ function renderNoteCard(note, { headingLevel = 2 } = {}) {
           <span>${esc(note.creator_name || '')}</span>
         </div>
         <div class="note-card__actions">
-          ${readOnly() ? '' : rowActionHtml({ icon: 'trash-2', tone: 'danger', action: 'delete', className: 'note-card__delete', label: t('common.deleteNamed', { name: noteName(note) }), attrs: { 'data-id': note.id } })}
+          ${/* LOESCHEN IM MEHR-KNOPF (R18, D6, Critique 2026-10-16): der
+              * Papierkorb stand offen auf jeder Karte - die lauteste Farbe
+              * der Wand gehoerte der seltensten Handlung. */ ''}
+          ${readOnly() ? '' : rowMenuHtml({
+    id: `note-menu-${note.id}`,
+    label: t('common.moreActionsNamed', { name: noteName(note) }),
+    className: 'note-card__more',
+    items: [{ action: 'delete', id: note.id, icon: 'trash-2', label: t('common.delete'), danger: true }],
+  })}
         </div>
       </div>
     </div>
@@ -1322,7 +1303,7 @@ function openNoteModal({ mode, note = null }) {
             direction,
           });
           activeCategoryOption = movement.activeIndex;
-        } else if (event.key === 'Enter') {
+        } else if (event.key === 'Enter' && !isImeComposing(event)) {
           event.preventDefault();
           const options = [...categoryList.querySelectorAll('[role="option"]')];
           const active = options[activeCategoryOption];
@@ -1587,8 +1568,6 @@ async function deleteNote(id) {
  */
 export const __test = {
   renderNoteCard, notesEmptyStateHtml, renderNoteReadHtml, pinMarkup,
-  // R17: die weiteren Notizen fliessen in die angebrochene Zeile der angepinnten.
-  groupFlow, syncGroupFlow,
   CHECKLIST_OPTS, readOnly, state,
   // Der Dialog kommt mit, weil seine Aussage KEIN Markup dieser Seite ist:
   // welchen Inhalt der Zettel bekommt, sieht nur der, der `openModal` die

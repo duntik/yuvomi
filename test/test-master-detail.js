@@ -951,6 +951,28 @@ test('Detailfuss: klebt unten in der Spalte, einreihig, und steht bei kurzem Inh
   assert.match(js, /if \(action\.icon\) btn\.title = action\.label;/, 'als Tooltip bleibt sie lesbar');
 });
 
+// Re-Kritik 2026-10-17 (P1, R19-Regression): mit Erledigen als vollem
+// Primaerknopf brauchte der Fuss einer offenen Aufgabe 756px, die Spalte hat
+// bei 1440 670px und hoechstens 744px - "Erledigen" abgeschnitten, "Wer hat
+// erledigt?" ausserhalb. Eine Breitenschwelle haelt nur fuer eine Sprache;
+// deshalb gilt das Mehr-Menue des Telefons in jeder Breite, auch in der
+// Spalte - ohne Medien- oder Container-Bedingung.
+test('Re-Kritik P1: Starten, Archivieren und Loeschen einer Aufgabe stehen in jeder Breite im Mehr-Menue - auch in der Spalte', () => {
+  const dv = readFileSync(new URL('../public/styles/detail-view.css', import.meta.url), 'utf8');
+  const all = [...eachRule(dv)];
+  const hide = all.find((r) => r.selector.trim() === '.detail-view__footer:has(> .task-detail__more) > .task-detail__overflow');
+  assert.ok(hide && !hide.at.length, 'die Ueberlauf-Knoepfe treten ohne Bedingung zurueck');
+  assert.match(hide.body, /display:\s*none/);
+  const show = all.filter((r) => r.selector.trim() === '.detail-view__footer > .task-detail__more');
+  assert.equal(show.length, 1, 'eine Regel fuer den Mehr-Knopf, keine Ausblendung am Desktop daneben');
+  assert.ok(!show[0].at.length && /display:\s*inline-flex/.test(show[0].body), 'der Mehr-Knopf steht in jeder Breite');
+  // Die Spalte traegt `detail-view__footer` (detail-view.js) - die Regel trifft sie.
+  const js = readFileSync(new URL('../public/components/detail-view.js', import.meta.url), 'utf8');
+  assert.match(js, /footer\.className = 'detail-view__footer split-view__detail-footer'/);
+  const src = readFileSync(new URL('../public/components/task-detail.js', import.meta.url), 'utf8');
+  assert.match(src, /wireDetailMoreMenu\(task, overflowIds, pane\)/, 'das Menue wird auch in der Spalte verdrahtet');
+});
+
 test('splitViewDetailHtml: benannte Spalte mit Leerzustand und leerem Koerper, Nutzertext escaped', () => {
   const saved = global.document;
   installMiniDom();
@@ -987,4 +1009,219 @@ test('A6 P1-1: kein Inhalt mit z-index malt ueber den klebenden Detailkopf - in 
   // Und niemand nimmt sie einem Geschwister wieder weg.
   const undo = [...eachRule(layout)].filter((r) => /isolation:\s*auto/.test(r.body));
   assert.deepEqual(undo.map((r) => r.selector), [], 'isolation: auto hebt die Ebene wieder auf');
+});
+
+// ── Mehrfachauswahl: in der Spalte „N ausgewaehlt", darunter die Pille (R19) ──
+//
+// Am Desktop schwebte die Sammel-Pille ueber dem Detail einer ANDEREN Aufgabe,
+// und zwei Loeschen mit verschiedener Reichweite standen gleichzeitig da
+// (Critique 2026-10-16). Festgelegt: ab der Schwelle zeigt die Detailspalte die
+// Auswahl samt Sammelaktionen (Muster Mail), die Pille entfaellt dort.
+
+/** Elemente, wie bulk-pill.js sie baut, auf dem kleinsten DOM dieser Suite. */
+class El extends Node {
+  constructor(tag) { super(); this.tagName = String(tag).toUpperCase(); this._text = ''; }
+  set className(v) { for (const c of String(v).split(/\s+/).filter(Boolean)) this.classList.add(c); }
+  appendChild(kid) { this.append(kid); return kid; }
+  set textContent(v) { this._text = String(v); }
+  get textContent() { return this._text + this.children.map((c) => c.textContent ?? '').join(''); }
+}
+
+// Re-Kritik 2026-10-17: die automatisch geoeffnete erste Zeile blieb im
+// Auswahlmodus violett markiert - bei "0 ausgewaehlt" sah sie ausgewaehlt aus.
+test('Auswahlmodus in der Spalte: keine Zeile ist "aktuell", nach der Auswahl kehrt die Markierung zurueck', () => {
+  const layer = new El('div');
+  const vorher = { createElement: document.createElement, getElementById: document.getElementById };
+  document.createElement = (tag) => new El(tag);
+  document.getElementById = (id) => (id === 'bulk-pill-layer' ? layer : null);
+  try {
+    const p = makePage();
+    const handle = p.mount();
+    handle.open('2');
+    assert.equal(p.rows[1].classList.contains('is-selected'), true, 'Vorbedingung: die offene Zeile ist markiert');
+    md.setSelectionBulk(handle, { label: '0 ausgewaehlt', actions: [] });
+    assert.equal(p.rows[1].classList.contains('is-selected'), false, 'im Auswahlmodus nicht mehr markiert');
+    assert.equal(p.focusOf(1).getAttribute('aria-current'), null, 'und nicht mehr "aktuell" angesagt');
+    handle.refresh();
+    assert.equal(p.rows[1].classList.contains('is-selected'), false, 'ein Neuaufbau der Liste setzt sie nicht zurueck');
+    md.setSelectionBulk(handle, { label: '1 ausgewaehlt', actions: [] });
+    assert.equal(p.rows[1].classList.contains('is-selected'), false);
+    md.setSelectionBulk(handle, null);
+    assert.equal(p.rows[1].classList.contains('is-selected'), true, 'das Detail steht wieder da - die Zeile auch markiert');
+    assert.equal(p.focusOf(1).getAttribute('aria-current'), 'true');
+    handle.destroy();
+  } finally {
+    Object.assign(document, vorher);
+  }
+});
+
+test('setSelectionBulk: in der Spalte zeigt das Detail die Auswahl, die Pille bleibt leer - darunter umgekehrt', () => {
+  const layer = new El('div');
+  const vorher = { createElement: document.createElement, getElementById: document.getElementById };
+  document.createElement = (tag) => new El(tag);
+  document.getElementById = (id) => (id === 'bulk-pill-layer' ? layer : null);
+  try {
+    const p = makePage();
+    const handle = p.mount();
+    handle.open('2');
+    const done = [];
+    const spec = { label: '2 ausgewaehlt', actions: [{ label: 'Fertig', onClick: () => done.push('fertig') }] };
+    md.setSelectionBulk(handle, spec);
+    const host = p.detail.querySelector('.split-view__selection');
+    assert.ok(host && !host.hidden, 'die Spalte traegt die Auswahl');
+    assert.equal(p.detail.classList.contains('is-selecting'), true, 'Detail und Leerzustand treten zurueck (CSS), ohne geleert zu werden');
+    assert.match(host.querySelector('.selection-pane__title')?.textContent ?? '', /2 ausgewaehlt/);
+    assert.equal(host.querySelector('.selection-pane__title').tagName, 'H2', 'die Auswahl ist die Ueberschrift der Spalte');
+    const action = host.querySelector('.selection-pane__action');
+    assert.ok(action, 'die Sammelaktion steht als Knopf in der Spalte');
+    action.listeners.find((l) => l.type === 'click').handler();
+    assert.deepEqual(done, ['fertig']);
+    assert.equal(layer.children.length, 0, 'keine schwebende Pille ueber dem Detail');
+    assert.deepEqual(p.body.content, ['detail:2'], 'das Detail der gewaehlten Zeile bleibt im Baum');
+
+    // Unter der Schwelle: dieselbe Spezifikation wird zur Pille.
+    p.setSplit(false);
+    md.setSelectionBulk(handle, spec);
+    assert.equal(p.detail.classList.contains('is-selecting'), false);
+    assert.equal(host.hidden, true);
+    assert.ok(layer.querySelector('.list-bulkbar'), 'mobil bleibt die Pille');
+
+    // Auswahl beendet: weder Pille noch Spalte.
+    p.setSplit(true);
+    md.setSelectionBulk(handle, spec);
+    md.setSelectionBulk(handle, null);
+    assert.equal(p.detail.classList.contains('is-selecting'), false, 'nach der Auswahl steht wieder das Detail');
+    assert.equal(layer.children.length, 0);
+    handle.destroy();
+
+    // Ohne Baustein (Aufgaben-Brett): die Pille.
+    md.setSelectionBulk(null, spec);
+    assert.ok(layer.querySelector('.list-bulkbar'));
+    md.setSelectionBulk(null, null);
+    assert.equal(layer.children.length, 0);
+  } finally {
+    Object.assign(document, vorher);
+  }
+});
+
+test('Aufgaben und Kontakte setzen ihre Auswahl ueber den Baustein, nicht an ihm vorbei', () => {
+  for (const file of ['tasks.js', 'contacts.js']) {
+    const src = readFileSync(new URL(`../public/pages/${file}`, import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+    assert.doesNotMatch(src, /\b(setBulkPill|clearBulkPill)\(/, `${file} setzt die Pille selbst - am Desktop schwebte sie dann ueber dem Detail`);
+    assert.match(src, /setSelectionBulk\((taskMd|md), \{ label:/, `${file} reicht die Sammelaktionen an den Baustein`);
+  }
+  const css = readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8');
+  const hide = [...eachRule(css)].find((r) => /^\.split-view__detail\.is-selecting > :not\(\.split-view__selection\)/.test(r.selector.trim()));
+  assert.match(hide?.body ?? '', /display:\s*none/, 'waehrend der Auswahl tritt das Detail zurueck');
+});
+
+// ── Bearbeiten in der Spalte (R19): Kopf-Aktion und Enter melden die Spalte an ──
+test('„Bearbeiten" im Kopf der Spalte und Enter auf der Zeile legen das Formular in die Spalte', () => {
+  const docked = [];
+  globalThis.__dockNextModal = (el) => docked.push(el);
+  const vorher = { createElement: document.createElement, createTextNode: document.createTextNode };
+  document.createElement = (tag) => new El(tag);
+  document.createTextNode = (text) => { const n = new El('#text'); n.textContent = text; return n; };
+  try {
+    const p = makePage();
+    const opened = [];
+    const head = md.detailPaneHeaderEl({
+      title: 'Kuchen',
+      actions: [
+        { label: 'Bearbeiten', id: 'edit', dock: true, onClick: () => opened.push(docked.length) },
+        { label: 'Loeschen', id: 'del', onClick: () => opened.push('del') },
+      ],
+    });
+    p.body.append(head);
+    const [edit, del] = head.querySelectorAll('.btn');
+    edit.listeners.find((l) => l.type === 'click').handler();
+    assert.deepEqual(docked, [p.detail], 'die Spalte, in der der Knopf steht, ist angemeldet');
+    assert.deepEqual(opened, [1], 'VOR dem Oeffnen - sonst kaeme der Dialog als Fenster');
+    del.listeners.find((l) => l.type === 'click').handler();
+    assert.equal(docked.length, 1, 'eine Aktion ohne `dock` meldet nichts an');
+
+    // Enter auf der gewaehlten Zeile ruft onEnter (Bearbeiten) - angedockt.
+    const handle = p.mount();
+    handle.open('2');
+    docked.length = 0;
+    key(p.focusOf(1), 'Enter');
+    assert.deepEqual(p.calls.enter, ['2']);
+    assert.deepEqual(docked, [p.detail], 'Enter oeffnet das Formular in der Spalte wie der Knopf');
+    handle.destroy();
+  } finally {
+    delete globalThis.__dockNextModal;
+    Object.assign(document, vorher);
+  }
+});
+
+test('Detailansicht und Rezepte geben „Bearbeiten" den Weg in die Spalte', () => {
+  const view = readFileSync(new URL('../public/components/detail-view.js', import.meta.url), 'utf8');
+  assert.match(view, /id: 'detail-pane-edit',[\s\S]{0,200}?dock: true,/, 'detail-view (Aufgaben, Kontakte, Inventar, Geburtstage)');
+  const recipes = readFileSync(new URL('../public/pages/recipes.js', import.meta.url), 'utf8');
+  assert.match(recipes, /id: 'recipes-detail-edit',[\s\S]{0,200}?dock: true,/, 'Rezepte bauen ihren Kopf selbst');
+});
+
+// ── R19-Nachlese (modern-web-guidance „accessibility", Live Regions) ──
+test('die Zahl der Auswahl in der Spalte wird hoeflich angesagt, entprellt und nur als letzter Stand', async () => {
+  const layer = new El('div');
+  const vorher = { createElement: document.createElement, getElementById: document.getElementById };
+  document.createElement = (tag) => new El(tag);
+  document.getElementById = (id) => (id === 'bulk-pill-layer' ? layer : null);
+  try {
+    const p = makePage();
+    const handle = p.mount();
+    md.setSelectionBulk(handle, { label: '1 ausgewaehlt', actions: [] });
+    md.setSelectionBulk(handle, { label: '2 ausgewaehlt', actions: [] });
+    const live = p.detail.querySelector('.split-view__selection-live');
+    assert.ok(live, 'eine dauerhafte Region in der Spalte');
+    assert.equal(live.getAttribute('aria-live'), 'polite', 'hoeflich, nie dazwischen');
+    assert.equal(live.getAttribute('aria-atomic'), 'true');
+    assert.equal(live.textContent, '', 'nicht sofort - schnelles Tippen sagt keine Zwischenzahl');
+    await new Promise((r) => setTimeout(r, 450));
+    assert.equal(live.textContent, '2 ausgewaehlt', 'nur der letzte Stand');
+    md.setSelectionBulk(handle, { label: '2 ausgewaehlt', actions: [] });
+    await new Promise((r) => setTimeout(r, 450));
+    assert.equal(live.textContent, '2 ausgewaehlt', 'derselbe Satz wird nicht wiederholt');
+    md.setSelectionBulk(handle, null);
+    assert.equal(live.textContent, '', 'nach der Auswahl schweigt die Region');
+    handle.destroy();
+  } finally {
+    Object.assign(document, vorher);
+  }
+  const css = readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8');
+  const hide = [...eachRule(css)].find((r) => /\.split-view__detail\.is-selecting > :not\(/.test(r.selector));
+  assert.match(hide?.selector ?? '', /:not\(\.split-view__selection-live\)/, 'die Region tritt waehrend der Auswahl nicht mit zurueck - display:none sagte nichts an');
+});
+
+// R20 (Re-Critique 2026-10-17, Alex): „Archivieren" fuer offene Aufgaben stand
+// nur im Werkzeugmenue. Die Spalte hat den Platz dafuer, die einzeilige Pille
+// nicht (Ungarisch bei 390px) - eine Aktion mit `paneOnly` steht nur in der
+// Spalte, und die Rueckfrage findet ihren Ausloeser in beiden Formen wieder.
+test('setSelectionBulk: eine Aktion mit paneOnly steht in der Spalte, nicht in der Pille', () => {
+  const layer = new El('div');
+  const vorher = { createElement: document.createElement, getElementById: document.getElementById };
+  document.createElement = (tag) => new El(tag);
+  document.getElementById = (id) => (id === 'bulk-pill-layer' ? layer : null);
+  try {
+    const p = makePage();
+    const handle = p.mount();
+    const spec = { label: '2 ausgewaehlt', actions: [
+      { label: 'Erledigt', onClick: () => {} },
+      { label: 'Archivieren', paneOnly: true, onClick: () => {} },
+      { label: 'Fertig', onClick: () => {} },
+    ] };
+    md.setSelectionBulk(handle, spec);
+    const host = p.detail.querySelector('.split-view__selection');
+    const paneLabels = host.querySelectorAll('.selection-pane__action').map((b) => b.textContent);
+    assert.ok(paneLabels.includes('Archivieren'), `die Spalte zeigt sie (${paneLabels.join(', ')})`);
+    p.setSplit(false);
+    md.setSelectionBulk(handle, spec);
+    const pillLabels = layer.querySelectorAll('.list-bulkbar__action').map((b) => b.textContent);
+    assert.deepEqual(pillLabels.filter((l) => l === 'Archivieren'), [], `die Pille laesst sie weg (${pillLabels.join(', ')})`);
+    assert.ok(pillLabels.includes('Fertig'));
+    md.setSelectionBulk(handle, null);
+    handle.destroy();
+  } finally {
+    Object.assign(document, vorher);
+  }
 });

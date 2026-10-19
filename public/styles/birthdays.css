@@ -65,6 +65,21 @@
   border-top: 1px solid var(--color-border-subtle);
 }
 
+/* MONATSKOEPFE IN DER LISTE (R19): Gruppentitel IN einer Liste ist
+ * `.list-group__title` (DESIGN.md "Ueberschrift ueber Inhalt"); hier steht nur
+ * die Einrueckung auf der Zeilenkante und die Luft ueber und unter ihm. */
+.birthdays-month {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+}
+
+/* DER NAECHSTE GEBURTSTAG (R19): sein Countdown traegt die Modulton-Tinte und
+ * fuehrt - auch wenn er weiter als eine Woche weg ist. Heute behaelt seine
+ * eigene, lautere Form (`--today`). */
+.birthday-item--next .birthday-chip {
+  color: color-mix(in srgb, var(--module-accent) var(--tint-ink), var(--color-text-primary));
+  font-weight: var(--font-weight-semibold);
+}
+
 /* Dass der Wischwrapper weder Radius noch Abstand traegt, steht jetzt in seiner
  * Basisregel (layout.css) - hier war es der Modul-Reset, den die Aufgaben und
  * der Einkauf nicht hatten. */
@@ -76,23 +91,13 @@
   background: color-mix(in srgb, var(--module-accent) var(--tint-surface), var(--color-surface));
 }
 
-/* DER NAME WIRD GEKAPPT, NICHT UMGEBROCHEN - und das ist die Antwort, die das
- * Personen-Vokabular der App schon gibt: `.contact-item__name` steht seit
- * jeher auf `nowrap` plus Ellipse. Ein umbrechender Name macht die Zeile
- * zweizeilig und nimmt der Liste ihren Takt; ein gekappter Personenname bleibt
- * erkennbar („Tante Claire Beck…"), anders als ein gekappter Artikelname im
- * Einkauf, wo `.list-row__name` aus genau diesem Grund umbricht.
- *
- * `unicode-bidi: plaintext` bleibt: ein arabischer Name in einer sonst
- * lateinischen Liste muss seine eigene Leserichtung behalten. */
+/* `unicode-bidi: plaintext`: ein arabischer Name in einer sonst lateinischen
+ * Liste muss seine eigene Leserichtung behalten. */
 .birthday-item__name {
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Hoechstens zwei Zeilen, dann Ellipse: die Titelregel (typography.css,
+   * R19) - hier stand eine eigene einzeilige Fassung. Die Torte steht als
+   * Zeichen im Textfluss hinter dem Namen. */
   unicode-bidi: plaintext;
 }
 
@@ -100,6 +105,8 @@
   width: 18px;
   height: 18px;
   flex-shrink: 0;
+  margin-inline-start: var(--space-1h);
+  vertical-align: text-bottom;
   color: var(--module-accent);
 }
 
@@ -169,9 +176,8 @@
  * Zeile, die nicht umbricht, und wird dort gekappt statt gebrochen.
  *
  * WARUM 560px UND NICHT 400: die Schwelle muss in BEIDEN Gerätewelten halten.
- * Am Finger sind die zwei Zeilenknöpfe weggeklappt (siehe die `hover: none`-
- * Regel oben) und die Metazeile hätte schon ab rund 400px Trägerbreite Platz;
- * am Zeiger stehen sie da und kosten 100px. Ein Container weiss nicht, welche
+ * Bis R18 waren am Finger die Zeilenknöpfe weggeklappt; seit dem steht in
+ * beiden Welten derselbe eine Mehr-Knopf. Ein Container weiss nicht, welche
  * Welt er bedient - 560px ist der Wert, ab dem die Notiz in beiden steht, ohne
  * dem Datum vor ihr Platz zu nehmen (gemessen: 128px freie Breite am Zeiger,
  * 240px am Finger). */
@@ -221,44 +227,16 @@
   flex-shrink: 0;
 }
 
-/* Auf Touch tragen die Wischrichtungen die beiden Zeilenaktionen, und die
- * Knoepfe verschwinden - in einer Grouped-Liste waren sie die lauteste Stelle
- * des Bildschirms. Auf Zeigergeraeten bleiben sie: dort gibt es keine Geste.
- * Die Reserve am Zeilenende gehoert dann dem Wisch-Chevron (.swipe-row::after,
- * layout.css), genau wie im Einkauf.
+/* DER MEHR-KNOPF STEHT AUCH AUF TOUCH (R18, D6, Critique 2026-10-16).
  *
- * STEHT BEWUSST HIER UNTEN, nicht oben beim Traeger: die Basisregel darueber
- * setzt `display: flex` mit derselben Spezifitaet, und eine Media-Query davor
- * verliert gegen sie allein durch die Reihenfolge (gemessen: die Knoepfe
- * blieben sichtbar, obwohl `(hover: none)` griff). */
-@media (hover: none) {
-  /* VERSTECKT, NICHT ENTFERNT: `display: none` nahm die beiden Knoepfe auch aus
-   * dem Fokus- und Screenreader-Baum. Die Gesten haengen ausschliesslich an
-   * `touchstart`/`touchmove`, die Reveal-Panels sind `aria-hidden`, und die
-   * Zeile selbst traegt keine Aktion - wer sein Telefon per Tastatur,
-   * Schaltersteuerung oder VoiceOver bedient, kam damit an keinen Geburtstag
-   * mehr heran. Optisch bleibt es dasselbe: aus dem Fluss genommen gibt die
-   * Zeile den Platz genauso frei. Beim Fokus kommen sie zurueck. */
-  .birthday-item__actions {
-    position: absolute;
-    width: var(--space-px);
-    height: var(--space-px);
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-
-  .birthday-item__actions:focus-within {
-    position: static;
-    width: auto;
-    height: auto;
-    overflow: visible;
-    clip-path: none;
-  }
-
-  .birthday-item {
-    padding-inline-end: calc(var(--space-2) + var(--space-3) + var(--space-2));
-  }
-}
+ * Bis hierher klappte eine `(hover: none)`-Regel den Traeger per `clip-path`
+ * weg: die Wischrichtungen sollten die beiden Zeilenaktionen tragen, und zwei
+ * Knoepfe waren in der Grouped-Liste die lauteste Stelle. Seit R18 sind es
+ * nicht mehr zwei Knoepfe, sondern EIN ruhiger Mehr-Knopf - und "nur per
+ * Geste" ist genau der versteckte Weg, den D6 ausschliesst (Casey, einhaendig:
+ * "Geburtstag bearbeiten mobil nur per Wischgeste"). Wischen bleibt
+ * Zusatzweg; den Wisch-Chevron nimmt layout.css der Zeile mit Mehr-Knopf ab,
+ * deshalb gibt es hier auch keine Reserve mehr am Zeilenende. */
 
 /* --------------------------------------------------------
  * Countdown-Chip — einheitliches Wort-Register, kontrastgeprüft (AA).

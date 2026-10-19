@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { eachRule } from './css-rules.js';
 
 // Minimales Window/Navigator-Mock für Node
-const { stagger, vibrate, withBusy, scheduleUndoableDelete, wireSwipeToDismiss, wireCollapsingHeader, collapseOut, expandIn, watchNavCapsuleHeight, wireScrollFade } = await (async () => {
+const { stagger, vibrate, withBusy, scheduleUndoableDelete, wireSwipeToDismiss, wireCollapsingHeader, collapseOut, expandIn, watchNavCapsuleHeight, wireScrollFade, nextNavMinimized, NAV_MINIMIZE_DOWN, NAV_MINIMIZE_UP, bindNavMinimize, navPillGeometry, NAV_PILL_MAX_INNER, STAGGER_ROWS, durationToken, isImeComposing } = await (async () => {
   global.window = {
     matchMedia: () => ({ matches: false }),
     addEventListener: () => {},
@@ -33,12 +33,34 @@ global.localStorage = {
 
 const { parseDateInput, isDateInputValid, parseTimeInput, formatTimeInput } = await import('../public/i18n.js');
 
-test('stagger: setzt opacity:0 auf alle Elemente', () => {
-  const els = [{ style: {} }, { style: {} }, { style: {} }];
-  stagger(els, { delay: 0, duration: 0 });
-  assert.equal(els[0].style.opacity, '0');
-  assert.equal(els[1].style.opacity, '0');
-  assert.equal(els[2].style.opacity, '0');
+/** Eine Zeile, die ihre Animationen mitschreibt (stagger laeuft seit R19 ueber WAAPI). */
+const animRow = (extra = {}) => {
+  const el = { style: {}, calls: [], ...extra };
+  el.animate = (keyframes, timing) => { el.calls.push({ keyframes, timing }); return { finished: Promise.resolve() }; };
+  return el;
+};
+
+/*
+ * WEB ANIMATIONS STATT TIMER-KETTE (Critique R19): je Zeile EINE Animation,
+ * der Versatz ist ihr `delay`, `fill: 'backwards'` haelt sie bis zum Einsatz
+ * unsichtbar. Nur der Startpunkt steht da - das Ziel ist das Stylesheet.
+ * Kein Inline-Wert, kein Timer (vorher zwei setTimeout je Zeile).
+ */
+test('stagger: je Zeile eine Animation von opacity 0, mit Versatz als delay und ohne Inline-Wert', () => {
+  const els = [animRow(), animRow(), animRow()];
+  stagger(els, { delay: 30, duration: 200 });
+  els.forEach((el, i) => {
+    assert.equal(el.calls.length, 1, `Zeile ${i}: keine Animation`);
+    const [{ keyframes, timing }] = el.calls;
+    assert.deepEqual(keyframes, [{ opacity: 0, transform: 'translateY(8px)', offset: 0 }], 'nur der Start, das Ziel ist das Stylesheet');
+    assert.equal(timing.delay, i * 30);
+    assert.equal(timing.fill, 'backwards');
+    assert.equal(timing.duration, 200);
+    assert.equal(el.style.opacity, undefined, 'kein Inline-Wert');
+  });
+  const src = readFileSync(new URL('../public/utils/ux.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export function stagger('), src.indexOf('export function vibrate('));
+  assert.doesNotMatch(body, /setTimeout\(/, 'stagger ist wieder eine Timer-Kette');
 });
 
 test('date inputs: accept slash, dot, and hyphen separators for DMY dates', () => {
@@ -117,17 +139,17 @@ test('stagger: tut nichts bei prefers-reduced-motion', () => {
  * Traeger. Deshalb die Zeilen hier FRISCH je Aufruf, der Traeger derselbe.
  */
 function fakeRows(host, n = 3) {
-  return Array.from({ length: n }, () => ({ style: {}, parentElement: host }));
+  return Array.from({ length: n }, () => animRow({ parentElement: host }));
 }
 
 test('stagger: blendet je Listentraeger nur beim ersten Aufbau ein, nicht bei jedem Neuzeichnen', () => {
   const host = { contains: () => true, parentElement: null };
   const first = fakeRows(host);
   stagger(first, { host, delay: 0, duration: 0 });
-  assert.equal(first[0].style.opacity, '0', 'Vorbedingung: der erste Aufbau blendet ein');
+  assert.equal(first[0].calls.length, 1, 'Vorbedingung: der erste Aufbau blendet ein');
   const again = fakeRows(host);
   stagger(again, { host, delay: 0, duration: 0 });
-  assert.equal(again[0].style.opacity, undefined,
+  assert.equal(again[0].calls.length, 0,
     'das Neuzeichnen derselben Liste hat wieder eingeblendet - die Liste faehrt nach jedem Abhaken neu ein');
 });
 
@@ -136,7 +158,7 @@ test('stagger: ohne host gilt der gemeinsame Vorfahr der Zeilen als Traeger', ()
   stagger(fakeRows(host), { delay: 0, duration: 0 });
   const again = fakeRows(host);
   stagger(again, { delay: 0, duration: 0 });
-  assert.equal(again[0].style.opacity, undefined, 'zweiter Aufruf am selben Vorfahr hat wieder eingeblendet');
+  assert.equal(again[0].calls.length, 0, 'zweiter Aufruf am selben Vorfahr hat wieder eingeblendet');
 });
 
 test('stagger: ein Aufruf ohne Zeilen verbraucht den ersten Aufbau nicht (Skelett, Leerzustand)', () => {
@@ -144,7 +166,7 @@ test('stagger: ein Aufruf ohne Zeilen verbraucht den ersten Aufbau nicht (Skelet
   stagger([], { host });
   const rows = fakeRows(host);
   stagger(rows, { host, delay: 0, duration: 0 });
-  assert.equal(rows[0].style.opacity, '0', 'die erste echte Liste nach einem leeren Aufruf blendet nicht mehr ein');
+  assert.equal(rows[0].calls.length, 1, 'die erste echte Liste nach einem leeren Aufruf blendet nicht mehr ein');
 });
 
 test('stagger: ein neuer Traeger (Seite neu aufgebaut) blendet wieder ein', () => {
@@ -153,7 +175,7 @@ test('stagger: ein neuer Traeger (Seite neu aufgebaut) blendet wieder ein', () =
   stagger(fakeRows(a), { host: a, delay: 0, duration: 0 });
   const rows = fakeRows(b);
   stagger(rows, { host: b, delay: 0, duration: 0 });
-  assert.equal(rows[0].style.opacity, '0');
+  assert.equal(rows[0].calls.length, 1);
 });
 
 /*
@@ -182,16 +204,29 @@ test('stagger: jeder Aufruf in public/ nennt seinen Listentraeger (host)', () =>
   assert.deepEqual(offenders, [], `stagger() ohne host:\n${offenders.join('\n')}`);
 });
 
-test('collapseOut/expandIn: loesen ohne Animation sofort auf (reduzierte Bewegung, kein animate)', async () => {
+test('collapseOut/expandIn: loesen ohne Animation sofort auf; unter reduzierter Bewegung wird nur geblendet', async () => {
   await collapseOut(null);
   await expandIn({ style: {} });
+  const prevGcs = global.getComputedStyle;
+  global.getComputedStyle = () => ({ getPropertyValue: () => '', opacity: '1' });
   global.window.matchMedia = () => ({ matches: true });
-  let animated = false;
-  const el = { style: {}, animate: () => { animated = true; } };
-  await collapseOut(el);
-  await expandIn(el);
-  global.window.matchMedia = () => ({ matches: false });
-  assert.equal(animated, false, 'unter prefers-reduced-motion darf keine Hoehe animieren');
+  const frames = [];
+  const el = { style: {}, animate: (k) => { frames.push(...k); return { finished: Promise.resolve() }; } };
+  try {
+    await expandIn(el);
+    // R20: nicht mehr hart, sondern eine Blende - weiter ohne Hoehe und Skalierung.
+    assert.ok(frames.length > 0, 'unter prefers-reduced-motion erscheint die Zeile ohne Blende');
+    assert.ok(frames.every((f) => Object.keys(f).every((k) => k === 'opacity')), 'unter prefers-reduced-motion zieht etwas auf oder skaliert');
+    await collapseOut(el);
+  } finally {
+    global.window.matchMedia = () => ({ matches: false });
+    global.getComputedStyle = prevGcs;
+  }
+  // R19: blenden statt springen - die Zeile geht per opacity, und was danach
+  // gilt, ist die gehaltene geschlossene Form (ein Frame, keine Bewegung).
+  const moving = frames.filter((f) => !('height' in f));
+  assert.ok(moving.length > 0, 'unter reduzierter Bewegung blendet die Zeile nicht einmal aus');
+  assert.ok(moving.every((f) => Object.keys(f).every((k) => k === 'opacity')), 'unter reduzierter Bewegung bewegt sich etwas');
 });
 
 /**
@@ -201,7 +236,7 @@ test('collapseOut/expandIn: loesen ohne Animation sofort auf (reduzierte Bewegun
  * Gemessen wird ueber den AUFRUF (collapseOut/expandIn mit gestubtem
  * `animate`), die Kurve selbst aus tokens.css (x1 + x2 = 1, y1 + y2 = 1).
  */
-test('collapseOut/expandIn: Hoehe laeuft auf der symmetrischen Kurve --ease-in-out', async () => {
+test('collapseOut/expandIn: Blende, Nachruecken und Aufziehen laufen auf der symmetrischen Kurve --ease-in-out', async () => {
   const tokens = { '--ease-out': 'cubic-bezier(0.16, 1, 0.3, 1)', '--ease-in-out': 'cubic-bezier(0.42, 0, 0.58, 1)', '--duration-lg': '250ms' };
   const docEl = {};
   const prevDoc = global.document;
@@ -214,15 +249,17 @@ test('collapseOut/expandIn: Hoehe laeuft auf der symmetrischen Kurve --ease-in-o
   const el = {
     style: {},
     getBoundingClientRect: () => ({ height: 40 }),
-    animate: (_frames, opts) => { easings.push(opts.easing); return { finished: Promise.resolve() }; },
+    animate: (frames, opts) => { if (frames.length > 1 && !('height' in frames[1] && frames[0].height === frames[1].height)) easings.push(opts.easing); return { finished: Promise.resolve() }; },
   };
   try {
-    await collapseOut(el);
+    await collapseOut(el, { duration: 10 });
     await expandIn(el);
   } finally {
     global.document = prevDoc;
     global.getComputedStyle = prevGcs;
   }
+  // Blende (collapseOut, Schritt 1) und Aufziehen; die gehaltene geschlossene
+  // Form ist keine Bewegung und hat keine Kurve.
   assert.deepEqual(easings, [tokens['--ease-in-out'], tokens['--ease-in-out']]);
 
   const css = readFileSync(new URL('../public/styles/tokens.css', import.meta.url), 'utf8');
@@ -231,6 +268,50 @@ test('collapseOut/expandIn: Hoehe laeuft auf der symmetrischen Kurve --ease-in-o
   const [x1, y1, x2, y2] = m[1].split(',').map(Number);
   assert.ok(Math.abs(x1 + x2 - 1) < 1e-9 && Math.abs(y1 + y2 - 1) < 1e-9,
     `--ease-in-out ist nicht symmetrisch: ${m[1]}`);
+});
+
+// R19 (Critique 2026-10-16, "expandIn ohne Hoehenanimation"): das Element
+// steht sofort in voller Hoehe und blendet per opacity/transform ein; die
+// Nachbarn gleiten per FLIP nur mit transform. Gemessen am Aufruf: kein
+// Keyframe mit Hoehe oder Abstand, und die Nachbarn bekommen eine
+// translate-Animation aus der Lage OHNE das Element (display: none).
+test('expandIn R19: keine Hoehenanimation - Blende am Element, FLIP an den Nachbarn', async () => {
+  const prevGcs = global.getComputedStyle;
+  const prevDoc = global.document;
+  global.document = { documentElement: {}, body: {} };
+  global.getComputedStyle = () => ({ getPropertyValue: () => '', opacity: '1', overflowY: 'visible' });
+  const calls = [];
+  const parent = { nextElementSibling: null, parentElement: null };
+  const el = { style: {}, isConnected: true, parentElement: parent, animate: (k, o) => { calls.push({ who: 'el', k, o }); return { finished: Promise.resolve() }; } };
+  let hiddenWhileMeasured = null;
+  const neighbour = {
+    style: {},
+    nextElementSibling: null,
+    getBoundingClientRect: () => {
+      if (hiddenWhileMeasured === null) hiddenWhileMeasured = el.style.display === 'none';
+      return { left: 0, top: el.style.display === 'none' ? 100 : 140, width: 300, height: 40 };
+    },
+    animate: (k, o) => { calls.push({ who: 'n', k, o }); return { finished: Promise.resolve(), cancel() {} }; },
+    getAnimations: () => [],
+  };
+  el.nextElementSibling = neighbour;
+  try {
+    await expandIn(el, { duration: 10 });
+  } finally {
+    global.getComputedStyle = prevGcs;
+    global.document = prevDoc;
+  }
+  const layoutKeys = ['height', 'paddingTop', 'paddingBottom', 'marginTop', 'marginBottom', 'borderTopWidth', 'borderBottomWidth'];
+  const own = calls.filter((c) => c.who === 'el');
+  assert.equal(own.length, 1, 'eine Animation am Element');
+  assert.ok(own[0].k.every((f) => Object.keys(f).every((key) => !layoutKeys.includes(key))), `keine Hoehe/Abstaende: ${JSON.stringify(own[0].k)}`);
+  assert.equal(own[0].k[0].opacity, 0, 'blendet von 0 ein');
+  assert.equal(hiddenWhileMeasured, true, 'die alte Lage der Nachbarn ist die ohne das Element');
+  assert.equal(el.style.display, undefined, 'das Element steht danach wie vorher (kein display-Rest)');
+  const glide = calls.filter((c) => c.who === 'n');
+  assert.ok(glide.length >= 1, 'die Nachbarn gleiten');
+  assert.ok(glide.every((c) => c.k.every((f) => Object.keys(f).every((key) => key === 'transform' || key === 'offset' || key === 'composite'))),
+    `Nachbarn nur per transform: ${JSON.stringify(glide.map((c) => c.k))}`);
 });
 
 test('vibrate: tut nichts wenn API nicht vorhanden', () => {
@@ -733,11 +814,14 @@ function collapsingStub() {
     getBoundingClientRect() { const r = this.rect ?? { top: 0, bottom: 0 }; return { ...r, height: r.bottom - r.top, width: 100 }; }
     getClientRects() { return this.rect ? [this.rect] : []; }
     get offsetParent() { return this.rect ? this.parentElement : null; }
+    get nextElementSibling() { const sib = this.parentElement?.children ?? []; return sib[sib.indexOf(this) + 1] ?? null; }
+    get isConnected() { return true; }
   }
   const saved = {};
   for (const k of ['Element', 'getComputedStyle', 'ResizeObserver', 'MutationObserver', 'IntersectionObserver']) saved[k] = global[k];
   global.Element = FakeEl;
-  global.getComputedStyle = (el) => el.cs;
+  // Ohne Element (die Wurzel fuer Tokens wie --duration-md): keine Werte, die Rueckfaelle gelten.
+  global.getComputedStyle = (el) => el?.cs ?? { getPropertyValue: () => '' };
   global.ResizeObserver = class { observe() {} disconnect() {} };
   global.MutationObserver = class { observe() {} disconnect() {} };
   global.IntersectionObserver = class { observe() {} disconnect() {} };
@@ -790,6 +874,38 @@ test('wireCollapsingHeader: der Nutzer-Scroll klappt weiter ein und aus', () => 
     s.scrollTo(s.port, 200);
     assert.equal(s.toolbar.classList.contains('is-collapsed'), true, 'Mausrad/Scrollbalken im Port klappt ein');
   } finally { s.restore(); }
+});
+
+// R20 (Re-Critique 2026-10-17 a6 P2): der Kopf klappte in EINEM Frame um, der
+// Inhalt darunter sprang (CLS 0,06 in Kalender und Budget). Jetzt haelt ein
+// Inline-transform den Port im Umschalt-Frame an seiner alten Lage, und zwei
+// Frames spaeter gleitet er per Animation an die neue.
+test('wireCollapsingHeader R20: der Inhalt unter dem Kopf springt nicht, er gleitet', () => {
+  const s = collapsingStub();
+  const frames = [];
+  const savedRaf = global.requestAnimationFrame;
+  global.requestAnimationFrame = (cb) => { frames.push(cb); return frames.length; };
+  try {
+    // Eingeklappt ist der Kopf 50px kuerzer, der Port steht entsprechend hoeher.
+    Object.defineProperty(s.port, 'rect', {
+      get: () => (s.toolbar.classList.contains('is-collapsed') ? { top: 40, bottom: 540, left: 0 } : { top: 90, bottom: 590, left: 0 }),
+      set: () => {},
+    });
+    const calls = [];
+    s.port.animate = (keyframes) => { calls.push(keyframes); return { ready: Promise.resolve() }; };
+    wireCollapsingHeader(s.toolbar);
+    s.fire('touchstart', s.cell);
+    s.scrollTo(s.port, 120);
+    assert.equal(s.toolbar.classList.contains('is-collapsed'), true);
+    assert.equal(s.port.style.transform, 'translate(0px, 50px)', 'der Port steht im Umschalt-Frame nicht an seiner alten Lage - der Inhalt springt');
+    assert.equal(calls.length, 0, 'die Animation startet nicht vor dem gemalten Halt (die Messung zaehlte den Sprung)');
+    frames.shift()();
+    frames.shift()();
+    assert.deepEqual(calls[0], [{ transform: 'translate(0px, 50px)' }, { transform: 'none' }], 'der Port gleitet nicht von der alten an die neue Lage');
+  } finally {
+    global.requestAnimationFrame = savedRaf;
+    s.restore();
+  }
 });
 
 test('wireCollapsingHeader: ein Ansichtswechsel haelt den eingeklappten Kopf, wo der neue Port ihn tragen kann', () => {
@@ -1127,33 +1243,20 @@ test('M9: ohne Werkzeugmenue faltet nichts (eine Kontrolle verschwindet nie ersa
   } finally { s.restore(); }
 });
 
-/**
- * NIE EIN KOPF OHNE ORTSANGABE, AUCH OHNE „..." (Re-Critique 2026-09-27, R11 H1).
- *
- * Schichtplan, Haushaltshilfe und Belohnungen: die Bar-Zeile ist eine
- * Tab-Leiste ueber die ganze Breite, es gibt kein Werkzeugmenue, in das etwas
- * falten koennte. Vorher stand angedockt nur die Leiste da - kein Titel, kein
- * Wort, in welchem Modul. Jetzt klebt der Kopf um die Hoehe des Titels tiefer
- * (Band), der Titel steht in diesem Streifen, und die Andock-Schwelle rueckt
- * um denselben Streifen.
- */
-test('H1: eine Tab-Leiste als Bar-Zeile bekommt angedockt trotzdem ihren Titel (Band)', () => {
+// R20 (Aufraeumen, Ulas 2026-10-17): die Bauart "Band" ist entfallen. Seit R19
+// stehen die Reiter von Schichtplan, Haushaltshilfe und Belohnungen unter
+// 1024px in der Titelzeile; gemessen 2026-10-17 erreichte keine Route sie mehr.
+test('R20: eine Tab-Leiste ohne Platz und ohne Menue bekommt keinen Band-Modus mehr', () => {
   const s = dockStub({ tabBar: true });
   try {
     const header = wireCollapsingHeader(s.toolbar);
     assert.ok(s.toolbar.classList.contains('page-toolbar--stacked'), 'Attrappe muss einen gestapelten Kopf ergeben');
     assert.equal(s.toolbar.classList.contains('page-toolbar--dock-fold'), false, 'ohne Menue faltet nichts');
-    assert.equal(s.dockTitle()?.textContent, 'Schichtplan', 'angedockt steht der Ortsname - nie nur die Leiste');
-    assert.ok(s.toolbar.classList.contains('page-toolbar--dock-band'), 'der Titel bekommt den Streifen, keine eigene Zeile');
-    assert.equal(s.toolbar.props.get('--dock-band-h'), '27px', 'der Streifen ist so hoch wie der gemessene Titel');
-    assert.ok(s.title.hasAttribute('data-dock-lead'), 'der Large Title gehoert zur Lead-Zone und blendet angedockt aus');
-    assert.equal(s.tabs.hasAttribute('data-dock-lead'), false, 'die Leiste bleibt');
-    assert.equal(s.ioOptions.at(-1)?.rootMargin, '-28px 0px 0px 0px',
-      'die Schwelle rueckt um den Streifen, sonst dockte der tiefer klebende Kopf nie an');
-    header.destroy();
-    assert.equal(s.title.hasAttribute('data-dock-lead'), false, 'destroy raeumt die Markierung ab');
-    assert.equal(s.toolbar.props.has('--dock-band-h'), false);
     assert.equal(s.toolbar.classList.contains('page-toolbar--dock-band'), false);
+    assert.equal(s.toolbar.props.has('--dock-band-h'), false);
+    assert.equal(s.title.hasAttribute('data-dock-lead'), false);
+    assert.equal(s.ioOptions.at(-1)?.rootMargin, '-1px 0px 0px 0px', 'die Schwelle rueckt um keinen Streifen');
+    header.destroy();
   } finally { s.restore(); }
 });
 
@@ -1180,39 +1283,9 @@ test('H1: ragt die erste Zeile unter die Lead-Zone, rueckt die Andock-Schwelle m
   try {
     wireCollapsingHeader(s.toolbar);
     assert.equal(s.toolbar.props.get('--page-toolbar-lead'), '45px', 'Attrappe muss die gemessene Lead-Zone ergeben');
-    assert.ok(s.toolbar.classList.contains('page-toolbar--dock-band'), 'Attrappe muss den Band-Modus ergeben');
-    assert.equal(s.ioOptions.at(-1)?.rootMargin, '-32px 0px 0px 0px',
-      'Streifen (27) + Ueberhang des Titels (49 - 45) + 1: erst dann hat die erste Zeile den Port verlassen');
-  } finally { s.restore(); }
-});
-
-/**
- * DER UEBERHANG WIRD AN DER KANTE GEMESSEN, AUF DER DER KOPF JETZT STEHT.
- * Der Kopf klebt mit einem `top` aus `--page-toolbar-lead` und `--dock-band-h`,
- * und `update` schreibt beide, bevor es den Ueberhang misst. Aendert sich der
- * Streifen, waehrend der Kopf klebt (Neuaufbau, andere Schrift), rueckt der
- * ganze Kopf mit - eine Oberkante von VOR dem Schreiben verschiebt den
- * Ueberhang um genau diesen Weg (claude-review an #1491).
- */
-test('H1: rueckt der klebende Kopf beim Schreiben des Streifens, misst der Ueberhang die neue Kante', () => {
-  const s = dockStub({ tabBar: true, padTop: 8, barTop: 53 });
-  try {
-    // Geklebt mit einem alten Streifen von 22px; die Messung ergibt 27px, und
-    // mit dem Schreiben rueckt der Kopf samt Inhalt um 5px tiefer.
-    const moved = [s.toolbar, ...s.toolbar.children];
-    s.toolbar.props.set('--dock-band-h', '22px');
-    const set = s.toolbar.style.setProperty;
-    s.toolbar.style.setProperty = (k, v) => {
-      if (k === '--dock-band-h') {
-        const delta = parseFloat(v) - parseFloat(s.toolbar.props.get(k) ?? '0');
-        for (const el of moved) el.rect = { ...el.rect, top: el.rect.top + delta, bottom: el.rect.bottom + delta };
-      }
-      set(k, v);
-    };
-    wireCollapsingHeader(s.toolbar);
-    assert.equal(s.toolbar.props.get('--dock-band-h'), '27px', 'Attrappe muss den neuen Streifen ergeben');
-    assert.equal(s.ioOptions.at(-1)?.rootMargin, '-32px 0px 0px 0px',
-      'dieselbe Schwelle wie ohne Verschiebung: der Kopf ist mitgerueckt, der Titel ragt weiter 4px unter die Lead-Zone');
+    // Seit R20 ohne Band-Streifen: nur der Ueberhang zaehlt.
+    assert.equal(s.ioOptions.at(-1)?.rootMargin, '-5px 0px 0px 0px',
+      'Ueberhang des Titels (49 - 45) + 1: erst dann hat die erste Zeile den Port verlassen');
   } finally { s.restore(); }
 });
 
@@ -1238,19 +1311,12 @@ test('wireCollapsingHeader: ein einzeiliger Kopf mit mittig versetztem Inhalt be
   } finally { s.restore(); }
 });
 
-test('H1: das CSS klebt den Band-Kopf um den Streifen tiefer und blendet nur angedockt um', () => {
-  const css = readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8');
-  const compact = [...eachRule(css)].filter((r) => r.at.some((a) => /max-width:\s*1023px/.test(a)));
-  const body = (sel) => compact.find((r) => r.selector.trim() === sel)?.body ?? '';
-  assert.match(body('.page-toolbar--stacked.page-toolbar--dock-band'),
-    /top:\s*calc\(-1 \* \(var\(--page-toolbar-lead, 0px\) - var\(--dock-band-h, 0px\)\)\)/);
-  const title = body('.page-toolbar--stacked.page-toolbar--dock-band > .page-toolbar__dock-title');
-  assert.match(title, /position:\s*absolute/, 'der Titel macht keine eigene Zeile auf');
-  assert.match(title, /visibility:\s*hidden/, 'ausgeklappt gerendert, aber unsichtbar');
-  assert.match(body('.page-toolbar--stacked.page-toolbar--dock-band.is-docked > .page-toolbar__dock-title'), /visibility:\s*visible/);
-  const lead = body('.page-toolbar--stacked.page-toolbar--dock-band.is-docked > [data-dock-lead]');
-  assert.match(lead, /opacity:\s*0/);
-  assert.doesNotMatch(lead, /visibility|display/, 'der Large Title bleibt die Ueberschrift im Baum');
+test('R20: weder Shell noch CSS kennen den Band-Modus noch', () => {
+  const css = readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(css, /dock-band|data-dock-lead/);
+  const ux = readFileSync(new URL('../public/utils/ux.js', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(ux, /dock-band|data-dock-lead/);
 });
 
 test('M9: das CSS blendet nur angedockt und gefaltet aus und haelt die Zeilenhoehe', () => {
@@ -1310,7 +1376,7 @@ function kitchenFoldStub({ centerCls = ['page-search', 'page-toolbar__center'] }
   const saved = {};
   for (const k of ['Element', 'getComputedStyle', 'ResizeObserver', 'MutationObserver', 'IntersectionObserver']) saved[k] = global[k];
   global.Element = FakeEl;
-  global.getComputedStyle = (el) => el.cs;
+  global.getComputedStyle = (el) => el?.cs ?? { getPropertyValue: () => '' };
   global.ResizeObserver = class { observe() {} disconnect() {} };
   global.MutationObserver = class { observe() {} disconnect() {} };
   global.IntersectionObserver = class { observe() {} disconnect() {} };
@@ -1402,7 +1468,10 @@ test('K1: das CSS faltet die Zeile nur eingeklappt, nie mit Fokus, Suchbegriff o
   assert.doesNotMatch(folded.filter((r) => !/>\s*\*\s*$/.test(r.selector)).map((r) => r.body).join(';'), /opacity/,
     'die Zeile selbst blendet nicht aus - ihre Linie bleibt die Kante unter der Leiste');
   const base = compact.find((r) => r.selector.trim() === '.page-toolbar--fold-row');
-  assert.ok(base && /transition:[^;]*margin-block-end/.test(base.body) && /translate/.test(base.body), 'die freiwerdende Hoehe gleitet');
+  // Seit R20 gleitet nicht mehr der Rand (Layout je Frame, CLS 0,06), sondern die
+  // Zeile per translate und die Liste darunter per FLIP (wireCollapsingHeader).
+  assert.ok(base && /transition:[^;]*translate/.test(base.body), 'die Zeile gleitet hinter die Leiste');
+  assert.doesNotMatch(base.body, /margin-block-end/, 'der Rand laeuft als Transition - die Liste wird in jedem Frame neu gelegt');
   const kids = compact.find((r) => r.selector.trim() === '.page-toolbar--fold-row > *');
   assert.ok(kids && /transition:\s*opacity/.test(kids.body), 'der Inhalt blendet');
   const reduced = rules.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a))
@@ -1517,14 +1586,38 @@ test('drawChartOnce: Linie per clip-path, Ring per stroke-dasharray - aus Tokens
   });
 });
 
-test('drawChartOnce: reduzierte Bewegung, verdeckter Tab und ein leeres Diagramm verbrauchen den Merker nicht', async () => {
-  for (const env of [{ reduced: true }, { visibility: 'hidden' }]) {
-    await withChartEnv(env, async (drawChartOnce) => {
-      const lines = chartMark();
-      assert.equal(drawChartOnce('test-held', { lines }), 0, JSON.stringify(env));
-      assert.equal(lines.calls.length, 0);
-    });
-  }
+test('drawChartOnce: Balken wachsen aus der Grundlinie (scaleY), aus Tokens und ohne fill', async () => {
+  await withChartEnv({}, async (drawChartOnce) => {
+    const bars = [chartMark(), chartMark()];
+    assert.equal(drawChartOnce('test-bars', { bars }), 2);
+    for (const bar of bars) {
+      assert.deepEqual(bar.calls[0].keyframes, [{ transform: 'scaleY(0)' }, { transform: 'scaleY(1)' }]);
+      assert.deepEqual(bar.calls[0].timing, { duration: 300, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+    }
+    assert.equal(drawChartOnce('test-bars', { bars: [chartMark()] }), 0, 'einmal je Sitzung');
+  });
+});
+
+test('drawChartOnce: reduzierte Bewegung blendet die Marken nur kurz ein - keine Bewegung (Critique 2026-10-16, A5)', async () => {
+  await withChartEnv({ reduced: true }, async (drawChartOnce) => {
+    const lines = chartMark();
+    const bar = chartMark();
+    const arc = chartMark({ 'stroke-dasharray': '94.25 376.99' });
+    assert.equal(drawChartOnce('test-reduced', { lines, arcs: [arc], bars: [bar] }), 3);
+    for (const mark of [lines, arc, bar]) {
+      assert.equal(mark.calls.length, 1);
+      assert.deepEqual(mark.calls[0].keyframes, [{ opacity: 0 }, { opacity: 1 }], 'nur Deckkraft - kein clip-path, kein scale, kein Strich');
+      assert.equal(mark.calls[0].timing.duration, 150, '--duration-sm (Rueckfall)');
+    }
+  });
+});
+
+test('drawChartOnce: verdeckter Tab und ein leeres Diagramm verbrauchen den Merker nicht', async () => {
+  await withChartEnv({ visibility: 'hidden' }, async (drawChartOnce) => {
+    const lines = chartMark();
+    assert.equal(drawChartOnce('test-held', { lines }), 0);
+    assert.equal(lines.calls.length, 0);
+  });
   await withChartEnv({}, async (drawChartOnce) => {
     assert.equal(drawChartOnce('test-held', { lines: null, arcs: [] }), 0, 'ohne Marken kein Lauf');
     assert.equal(drawChartOnce('test-held', { lines: {} }), 0, 'ohne animate kein Lauf');
@@ -1650,4 +1743,245 @@ test('toggleRegion: auf faellt hidden sofort, zu erst nach dem Einklappen - auch
     if (savedGcs === undefined) delete global.getComputedStyle; else global.getComputedStyle = savedGcs;
     if (savedDoc === undefined) delete global.document; else global.document = savedDoc;
   }
+});
+
+/*
+ * R19 (Entscheidung Ulas 2026-10-16): DIE KAPSEL MINIMIERT BEIM LESEN.
+ * Die Entscheidung ist eine reine Funktion - Schwellen, Richtung und die
+ * Ausnahmen oben/Ende/ohne Geste stehen hier ohne DOM.
+ */
+test('nextNavMinimized: abwaerts aus einer Geste minimiert, aufwaerts, oben und am Ende faehrt sie aus', () => {
+  const open = { minimized: false, travel: 0 };
+  const step = (s, top, delta, { max = 2000, gesture = true } = {}) => nextNavMinimized(s, { top, max, delta, gesture });
+  // Kleine Strecken summieren sich in einer Richtung.
+  let s = step(open, 100, 10);
+  assert.equal(s.minimized, false);
+  s = step(s, 120, NAV_MINIMIZE_DOWN - 10);
+  assert.equal(s.minimized, true, `ab ${NAV_MINIMIZE_DOWN}px abwaerts`);
+  // Ein Zittern gegen die Richtung setzt die Strecke zurueck, faehrt aber nicht aus.
+  s = step(s, 117, -3);
+  assert.equal(s.minimized, true, 'drei Pixel zurueck sind kein Aufwaertsscrollen');
+  s = step(s, 100, -(NAV_MINIMIZE_UP - 3));
+  assert.equal(s.minimized, false, `ab ${NAV_MINIMIZE_UP}px aufwaerts`);
+  // Ohne Geste (Scroll-Restore, scrollIntoView) minimiert nichts ...
+  assert.equal(step(open, 500, 400, { gesture: false }).minimized, false, 'ein Restore liest nicht');
+  // ... aber zurueck geht es immer, auch im Nachschwung ohne Finger.
+  assert.equal(step({ minimized: true, travel: 40 }, 300, -40, { gesture: false }).minimized, false);
+  // Oben und am Seitenende ist sie ganz da.
+  assert.deepEqual(step({ minimized: true, travel: 80 }, 4, 0), open, 'oben');
+  assert.deepEqual(step({ minimized: true, travel: 80 }, 1999, 30), open, 'am Ende');
+  // Ohne Bewegung (waagerechte Leiste) aendert sich nichts.
+  const held = { minimized: true, travel: 30 };
+  assert.equal(step(held, 300, 0), held);
+});
+
+// Review #2049: renderAppShell() baut die Shell bei Logout/Login neu, mit einer
+// NEUEN Kapsel. Der Router hielt den alten Minimierer (`!navMinimizer`), der an
+// der abgehaengten Kapsel hing - die neue minimierte nie. bindNavMinimize haengt
+// den alten ab und legt fuer die neue Kapsel einen neuen an.
+test('bindNavMinimize: eine neue Kapsel bekommt einen neuen Minimierer, der alte haengt ab', () => {
+  const savedElement = globalThis.Element;
+  globalThis.Element = class {};
+  const listeners = new Map();
+  const classes = (set = new Set()) => ({
+    set,
+    contains: (c) => set.has(c),
+    toggle: (c, on) => { if (on) set.add(c); else set.delete(c); return on; },
+    remove: (c) => set.delete(c),
+  });
+  const doc = {
+    documentElement: { classList: classes() },
+    addEventListener: (type, fn) => listeners.set(`${type}`, [...(listeners.get(type) ?? []), fn]),
+    removeEventListener: (type, fn) => listeners.set(type, (listeners.get(type) ?? []).filter((f) => f !== fn)),
+  };
+  const makeNav = () => ({ classList: classes(), getClientRects: () => [{}] });
+  const port = Object.assign(new globalThis.Element(), {
+    scrollTop: 100, scrollHeight: 3000, clientHeight: 800,
+    closest: (sel) => (sel === '.app-content' ? {} : null),
+  });
+  const fire = (type, target) => (listeners.get(type) ?? []).forEach((fn) => fn({ target }));
+  const readDown = () => {
+    fire('wheel', port);
+    fire('scroll', port);
+    port.scrollTop += NAV_MINIMIZE_DOWN + 6;
+    fire('scroll', port);
+  };
+  try {
+    const oldNav = makeNav();
+    const first = bindNavMinimize(null, oldNav, { doc });
+    readDown();
+    assert.equal(oldNav.classList.contains('nav-bottom--minimized'), true, 'die erste Kapsel minimiert beim Lesen');
+    assert.equal(doc.documentElement.classList.contains('nav-minimized'), true);
+    assert.equal(bindNavMinimize(first, oldNav, { doc }), first, 'dieselbe Kapsel behaelt ihren Minimierer');
+
+    // Logout/Login: renderAppShell() setzt eine neue Kapsel ein.
+    const newNav = makeNav();
+    const second = bindNavMinimize(first, newNav, { doc });
+    assert.notEqual(second, first, 'die neue Kapsel bekommt einen eigenen Minimierer');
+    assert.equal(listeners.get('scroll').length, 1, 'der alte hoert nicht mehr zu');
+    assert.equal(doc.documentElement.classList.contains('nav-minimized'), false,
+      'der Zustand der alten Kapsel bleibt nicht am Root haengen');
+    port.scrollTop = 100;
+    readDown();
+    assert.equal(newNav.classList.contains('nav-bottom--minimized'), true, 'die neue Kapsel minimiert');
+    second.expand();
+    assert.equal(newNav.classList.contains('nav-bottom--minimized'), false, 'expand() trifft die neue Kapsel');
+    second.destroy();
+  } finally {
+    globalThis.Element = savedElement;
+  }
+});
+
+// R20 (Re-Critique 2026-10-17 a6 P2, 200+ Aufgaben bei 4x CPU): stagger las
+// seinen Dauer-Default per getComputedStyle direkt nach dem Einsetzen der Liste
+// (erzwungene Stilrechnung, 210 ms) und animierte jede der 200 Zeilen.
+test('R20: Bewegungs-Tokens werden einmal gelesen, stagger animiert nur den Anfang der Liste', () => {
+  const savedGcs = globalThis.getComputedStyle; const savedDoc = globalThis.document;
+  let reads = 0;
+  globalThis.document = { documentElement: { classList: { contains: () => false } } };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: (name) => { reads += 1; return name === '--duration-md' ? '200ms' : ''; } });
+  try {
+    assert.equal(durationToken('--duration-md', 1), 200);
+    assert.equal(durationToken('--duration-md', 1), 200);
+    assert.equal(reads, 1, 'jeder Aufruf liest die Wurzel erneut - nach einem Neuzeichnen eine Stilrechnung des ganzen Dokuments');
+    const rows = Array.from({ length: 200 }, () => animRow());
+    stagger(rows, { host: {} });
+    assert.equal(rows.filter((r) => r.calls.length).length, STAGGER_ROWS, 'alle 200 Zeilen bekommen eine Animation');
+    assert.ok(STAGGER_ROWS >= 16 && STAGGER_ROWS <= 40, 'ein hoher Bildschirm voll, nicht mehr');
+  } finally {
+    globalThis.getComputedStyle = savedGcs; globalThis.document = savedDoc;
+  }
+});
+
+// R20 (Entscheidung Ulas 2026-10-17): DIE MINIMIERTE KAPSEL IST EINE PILLE.
+test('navPillGeometry: die Pille ist das aktive Ziel plus Polster, das Ziel wandert an den Anfang', () => {
+  // 390px: fuenf Slots zu 62px ab x=17 (Kapsel 8 + Rand 1 + Polster 8), aktiv der dritte.
+  const slot = (i) => ({ left: 17 + i * 62, right: 79 + i * 62, width: 62 });
+  assert.deepEqual(navPillGeometry({ first: slot(0), active: slot(2), padStart: 8, border: 1 }),
+    { width: 80, shift: -124, itemWidth: 62 });
+  assert.deepEqual(navPillGeometry({ first: slot(0), active: slot(0), padStart: 8, border: 1 }).shift, 0,
+    'ist das erste aktiv, bewegt sich nichts');
+  // RTL: das erste Ziel steht rechts, das aktive wandert nach rechts.
+  const rtl = (i) => ({ left: 311 - i * 62, right: 373 - i * 62, width: 62 });
+  assert.equal(navPillGeometry({ first: rtl(0), active: rtl(3), padStart: 8, border: 1, rtl: true }).shift, 186);
+  // Tablet: Slots ~99px - die Pille bleibt hoechstens 64px Inhalt breit, das Ziel mittig darin.
+  const wide = (i) => ({ left: 146 + i * 99, right: 245 + i * 99, width: 99 });
+  const g = navPillGeometry({ first: wide(0), active: wide(2), padStart: 8, border: 1 });
+  assert.equal(g.width, 8 * 2 + NAV_PILL_MAX_INNER + 2);
+  assert.equal(g.shift, -198 - (99 - NAV_PILL_MAX_INNER) / 2, 'das Ziel steht in der Mitte der Pille');
+  assert.ok(NAV_PILL_MAX_INNER >= 48, 'sichtbar und tippbar bleibt mindestens ein 48px-Ziel');
+});
+
+test('watchNavMinimize R20: ein Tipp auf die Pille faehrt sie aus, statt zu navigieren', () => {
+  const savedElement = globalThis.Element;
+  globalThis.Element = class {};
+  const docListeners = new Map();
+  const navListeners = new Map();
+  const classes = (set = new Set()) => ({
+    set, contains: (c) => set.has(c),
+    toggle: (c, on) => { if (on) set.add(c); else set.delete(c); return on; },
+    remove: (c) => set.delete(c),
+  });
+  const add = (map) => (type, fn) => map.set(type, [...(map.get(type) ?? []), fn]);
+  const doc = {
+    documentElement: { classList: classes() },
+    addEventListener: add(docListeners),
+    removeEventListener: (type, fn) => docListeners.set(type, (docListeners.get(type) ?? []).filter((f) => f !== fn)),
+  };
+  const nav = {
+    classList: classes(), getClientRects: () => [{}],
+    addEventListener: add(navListeners),
+    removeEventListener: (type, fn) => navListeners.set(type, (navListeners.get(type) ?? []).filter((f) => f !== fn)),
+  };
+  const port = Object.assign(new globalThis.Element(), {
+    scrollTop: 100, scrollHeight: 3000, clientHeight: 800,
+    closest: (sel) => (sel === '.app-content' ? {} : null),
+  });
+  const fire = (map, type, event) => (map.get(type) ?? []).forEach((fn) => fn(event));
+  try {
+    const m = bindNavMinimize(null, nav, { doc });
+    fire(docListeners, 'wheel', { target: port });
+    fire(docListeners, 'scroll', { target: port });
+    port.scrollTop += NAV_MINIMIZE_DOWN + 6;
+    fire(docListeners, 'scroll', { target: port });
+    assert.equal(nav.classList.contains('nav-bottom--minimized'), true);
+    let prevented = false; let stopped = false;
+    fire(navListeners, 'pointerdown', {});
+    fire(navListeners, 'click', { detail: 1, target: null, preventDefault: () => { prevented = true; }, stopPropagation: () => { stopped = true; } });
+    assert.equal(nav.classList.contains('nav-bottom--minimized'), false, 'die Pille faehrt nicht aus');
+    assert.ok(prevented && stopped, 'der Tipp auf die Pille navigiert noch (oder fuehrt nach oben)');
+    // Ausgefahren ist ein Tipp ein Tipp.
+    prevented = false;
+    fire(navListeners, 'pointerdown', {});
+    fire(navListeners, 'click', { detail: 1, target: null, preventDefault: () => { prevented = true; }, stopPropagation: () => {} });
+    assert.equal(prevented, false, 'ausgefahren wird ein Tipp abgefangen');
+    m.destroy();
+    assert.equal((navListeners.get('click') ?? []).length, 0, 'der Zuhoerer bleibt nach destroy()');
+  } finally {
+    globalThis.Element = savedElement;
+  }
+});
+
+test('watchNavCapsuleHeight: minimiert oder auf dem Rueckweg misst die Kapsel nicht - die Zone steht still (R19)', () => {
+  const saved = globalThis.ResizeObserver;
+  const observers = [];
+  globalThis.ResizeObserver = class {
+    constructor(cb) { this.cb = cb; observers.push(this); }
+    observe() {}
+    disconnect() {}
+  };
+  const props = new Map();
+  const root = { style: { setProperty: (k, v) => props.set(k, v), removeProperty: (k) => props.delete(k) } };
+  let state = '';
+  const items = { isConnected: true, closest: (sel) => (state && sel.includes(state) ? {} : null) };
+  try {
+    watchNavCapsuleHeight(items, root);
+    const fire = (blockSize) => observers[0].cb([{ target: items, borderBoxSize: [{ blockSize }] }]);
+    fire(64);
+    state = 'nav-bottom--minimized';
+    fire(56);
+    assert.equal(props.get('--nav-capsule-height'), '64px', 'minimiert gilt die ausgefahrene Hoehe weiter');
+    state = 'nav-bottom--settling';
+    fire(60);
+    assert.equal(props.get('--nav-capsule-height'), '64px', 'Zwischenhoehen auf dem Rueckweg zaehlen nicht');
+    state = '';
+    fire(72);
+    assert.equal(props.get('--nav-capsule-height'), '72px', 'ausgefahren misst sie wieder');
+  } finally {
+    globalThis.ResizeObserver = saved;
+  }
+});
+
+/* Enter bestaetigt bei japanischer, koreanischer oder chinesischer Eingabe
+ * (IME) erst die Umwandlung. Ein eigener keydown-Handler, der auf Enter
+ * absendet oder einen Vorschlag uebernimmt, speichert sonst einen halb
+ * geschriebenen Text. Safari meldet das bestaetigende Enter teils schon mit
+ * isComposing=false, aber keyCode 229 (WebKit-Bug 165004).
+ */
+test('isImeComposing erkennt das Enter einer laufenden IME-Umwandlung', () => {
+  assert.equal(typeof isImeComposing, 'function', 'utils/ux.js exportiert isImeComposing');
+  assert.equal(isImeComposing({ key: 'Enter', isComposing: true, keyCode: 13 }), true);
+  assert.equal(isImeComposing({ key: 'Enter', isComposing: false, keyCode: 229 }), true, 'Safari');
+  assert.equal(isImeComposing({ key: 'Enter', isComposing: false, keyCode: 13 }), false);
+  assert.equal(isImeComposing({}), false);
+});
+
+test('jeder Enter-Handler eines Textfelds fragt isImeComposing', () => {
+  // Ein Handler, der Enter OHNE Leertaste prueft, gehoert einem Textfeld;
+  // Enter-oder-Leertaste ist die Tastaturbedienung eines Knopfs. Die
+  // Listenzeile in master-detail.js ist kein Textfeld.
+  const allowed = new Set(['utils/master-detail.js']);
+  const root = fileURLToPath(new URL('../public/', import.meta.url));
+  const offenders = [];
+  for (const rel of globSync('**/*.js', { cwd: root })) {
+    if (rel.startsWith('vendor/') || allowed.has(rel)) continue;
+    const lines = readFileSync(root + rel, 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      if (!/\.key\s*[!=]==\s*'Enter'/.test(line) || /'\s'/.test(line)) return;
+      const handler = lines.slice(Math.max(0, i - 15), i + 1).join('\n');
+      // palette-combobox.js prueft inline (laedt ohne Browser-Loader, kein Import).
+      if (!/isImeComposing\(|keyCode === 229/.test(handler)) offenders.push(`${rel}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, [], 'Enter ohne IME-Pruefung');
 });

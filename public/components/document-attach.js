@@ -53,7 +53,28 @@ import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { isPreviewable } from '/utils/document-preview.js';
 import { maxUploadBytes, maxUploadMb } from '/utils/upload-limit.js';
 import { attachOverlay } from '/utils/overlay-history.js';
+import { inertOutside } from '/utils/background-inert.js';
 import { pathAccess, mayWritePath } from '/utils/module-access.js';
+import { holdUntilStyled, warmStyle } from '/utils/component-style.js';
+
+// Nicht in index.html (Critique R19): vorgeladen, sobald eine Seite das Feld
+// importiert; bind() haelt es unsichtbar, falls es doch vor dem Blatt kommt.
+const STYLE = '/styles/document-attach.css';
+warmStyle(STYLE);
+
+/**
+ * Die Ablageflaeche `.document-dropzone` rendern Kalender, Dokumente und
+ * Hauswirtschaft SELBST, ohne bindDocumentAttachField(); ihre Regeln stehen
+ * aber in diesem Blatt. Seit es nicht mehr in index.html steht, sah die
+ * Ablage auf /documents ohne vorher geoeffnetes Anhangsfeld aus wie Fliesstext
+ * (kein Rahmen, kein Polster). Wer sie rendert, haelt sie hiermit unsichtbar,
+ * bis das Blatt da ist - dieselbe Garantie wie im Feld selbst.
+ * @param {Element|null} el - die gerenderte `.document-dropzone`
+ * @returns {Promise<void>}
+ */
+export function holdDocumentAttachStyle(el) {
+  return holdUntilStyled(el, STYLE);
+}
 
 
 
@@ -212,6 +233,7 @@ export function bindDocumentAttachField(panel, {
 } = {}) {
   const field = panel?.querySelector('[data-doc-attach]');
   if (!field) return null;
+  holdUntilStyled(field, STYLE);
 
   const chipsEl = field.querySelector('[data-doc-attach-chips]');
   const emptyEl = field.querySelector('[data-doc-attach-empty]');
@@ -441,18 +463,24 @@ function openDocumentPicker(panel, { excludeIds = new Set(), single = false } = 
       </div>`);
     panel.append(overlay);
     if (window.lucide) window.lucide.createIcons({ el: overlay });
-
     const listEl = overlay.querySelector('[data-picker-list]');
     const searchEl = overlay.querySelector('#doc-attach-picker-search');
     const confirmEl = overlay.querySelector('[data-picker-confirm]');
     // Der Auslöser bekommt den Fokus zurück - das Overlay liegt über einem
     // offenen Modal, sonst fiele der Fokus auf <body>.
     const opener = document.activeElement;
+    // Das Formular darunter ist gesperrt, solange der Picker offen ist
+    // (utils/background-inert.js). ERST den Ausloeser merken: wird sein
+    // Vorfahr inert, gibt der Browser den Fokus ab, und `activeElement` waere
+    // danach body. Die Freigabe kommt VOR der Fokus-Rueckgabe, auf ein inertes
+    // Element ginge der Fokus nicht.
+    const releaseBackground = inertOutside(overlay);
     const selected = new Set();
     let documents = [];
 
     const close = (result) => {
       overlay.remove();
+      releaseBackground();
       if (opener?.isConnected) opener.focus();
       resolve(result);
     };

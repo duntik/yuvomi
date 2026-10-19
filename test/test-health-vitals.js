@@ -829,3 +829,170 @@ test('R18: die Kennzahlkarte hat vier feste Zeilen - Kopf, Wert, Trendlinie, Met
     assert.match(body(`.metric-card__${part}`), /font-variant-numeric:\s*tabular-nums/, `.metric-card__${part}`);
   }
 });
+
+// Critique 2026-10-16: (1) „Gemessen am" stand im Messwert-Dialog als nackter
+// Text in der Zeile - Datum und Uhrzeit sehen in beiden Formular-Dialekten wie
+// ein Feld aus (D4). (2) Die Kachel trennte bei 1280px „Sauerstoffsaetti-gung":
+// das deutsche Etikett traegt einen weichen Trennstrich an der Wortfuge, und
+// `hyphens: auto` haelt sich dann an ihn („Sauerstoff-saettigung", im Browser
+// gesehen). (3) Naehrwerte ohne Tagesziel: ein zentrierter Leerhinweis ueber
+// einer linksbuendigen Erklaerung - jetzt beide Saetze in einer Flucht.
+test('Messwert-Dialog, Vital-Kachel, Naehrwerte-Leerzustand (Critique 2026-10-16)', () => {
+  const layout = readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8');
+  const field = [...eachRule(layout)].find((r) => !r.at.length && r.selector.trim() === '.form-row__control > yuvomi-datepicker .ydp__input');
+  assert.ok(field, 'die Zeilenregel des Datumsfelds steht');
+  assert.doesNotMatch(field.body, /border-color:\s*transparent|background-color:\s*transparent/, 'das Datumsfeld behaelt Kante und Flaeche');
+
+  const de = JSON.parse(readFileSync(new URL('../public/locales/de.json', import.meta.url), 'utf8'));
+  assert.equal(de.health.vitals.metric.spo2, 'Sauerstoff­sättigung', 'Trennstelle an der Wortfuge, nicht in der Silbe');
+
+  const health = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  const today = health.slice(health.indexOf('function nutritionTodaySectionMarkup(own)'), health.indexOf('function nutritionProgressRowMarkup('));
+  assert.doesNotMatch(today, /emptyHintHTML\(t\('health\.nutrition\.targetNone'\)\)/, 'kein zentrierter Leerhinweis mehr');
+  assert.match(today, /<div class="health-nutrition-today__none">/);
+});
+
+// ── Plausibilitaet (Critique R19, 2026-10-16) ──────────────────────────────
+//
+// 650 kg, SpO2 ueber 100 % und ein systolischer Wert unter dem diastolischen
+// gingen durch. Unmoegliches haelt das Formular an (dieselben Grenzen wie der
+// Server), Ungewoehnliches fragt nur nach.
+test('vitalPlausibility: Unmoegliches ist hart, Ungewoehnliches weich, Normales still', async () => {
+  const { vitalPlausibility } = await import('../public/utils/health-vitals.js');
+  const p = (m) => vitalPlausibility(m);
+  assert.deepEqual(p({ type: 'weight', unit: 'kg', value_num: 650 }), { hard: [], soft: [{ channel: 'value', issue: 'high' }] });
+  assert.deepEqual(p({ type: 'weight', unit: 'kg', value_num: 6500 }).hard, [{ channel: 'value', issue: 'impossible' }]);
+  assert.deepEqual(p({ type: 'weight', unit: 'kg', value_num: 72 }), { hard: [], soft: [] });
+  assert.deepEqual(p({ type: 'spo2', unit: '%', value_num: 101 }).hard, [{ channel: 'value', issue: 'impossible' }]);
+  assert.deepEqual(p({ type: 'spo2', unit: '%', value_num: 84 }).soft, [{ channel: 'value', issue: 'low' }]);
+  assert.deepEqual(p({ type: 'temp', unit: '°C', value_num: 375 }).hard, [{ channel: 'value', issue: 'impossible' }]);
+  assert.deepEqual(p({ type: 'temp', unit: '°F', value_num: 98.6 }), { hard: [], soft: [] });
+  assert.deepEqual(p({ type: 'glucose', unit: 'mmol/L', value_num: 25 }).soft, [{ channel: 'value', issue: 'high' }]);
+  assert.deepEqual(p({ type: 'bp', unit: 'mmHg', value_num: 80, value_num2: 120 }).hard, [{ channel: 'dia', issue: 'bpOrder' }]);
+  assert.deepEqual(p({ type: 'bp', unit: 'mmHg', value_num: 120, value_num2: 80, value_num3: 190 }), { hard: [], soft: [{ channel: 'pulse', issue: 'high' }] });
+  // Halb ausgefuellt: nur, was dasteht.
+  assert.deepEqual(p({ type: 'bp', unit: 'mmHg', value_num: 120, value_num2: null }), { hard: [], soft: [] });
+  // Metriken ohne Grenzen (Schlaf, Stimmung, Groesse) bleiben unberuehrt.
+  assert.deepEqual(p({ type: 'height', unit: 'cm', value_num: 999 }), { hard: [], soft: [] });
+});
+
+// Review #2049: die Tabellen sind Objekte, `unit` und `type` kommen frei vom
+// Client. Ein Name wie "constructor" oder "toString" fand frueher eine geerbte
+// Eigenschaft - der Server warf 500, das Formular warf beim Tippen. Eine fremde
+// Einheit hat keine Zahlenraender, also wird die Messung geprueft wie jede
+// andere ohne Einheit.
+test('Einheit oder Typ mit dem Namen einer Objekt-Eigenschaft hat keine Raender und wirft nicht', async () => {
+  const client = await import('../public/utils/health-vitals.js');
+  const server = await import('../server/routes/health/vital-limits.js');
+  for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
+    for (const m of [
+      { type: 'weight', unit: name, value_num: 70 },
+      { type: 'bp', unit: name, value_num: 120, value_num2: 80 },
+      { type: name, unit: 'kg', value_num: 70 },
+      { type: 'glucose', unit: name, value_num: 5000 },
+    ]) {
+      assert.equal(server.vitalLimitError(m), null, JSON.stringify(m));
+      assert.deepEqual(client.vitalPlausibility(m), { hard: [], soft: [] }, JSON.stringify(m));
+    }
+  }
+  // Die Regeln ohne Einheit gelten weiter.
+  assert.equal(server.vitalLimitError({ type: 'bp', unit: 'toString', value_num: 80, value_num2: 120 }), 'bp_order');
+  assert.equal(server.vitalLimitError({ type: 'spo2', unit: 'constructor', value_num: 101 }), 'out_of_range');
+});
+
+// Review #2049: SpO2 ohne oder mit fremder Einheit pruefte nur den oberen Rand,
+// -10 und 0 gingen durch. Eine Saettigung liegt in jeder Schreibweise in
+// [1, 100] - Formular und Server sagen dasselbe.
+test('SpO2 ohne oder mit fremder Einheit haelt beide Raender, in Formular und Server', async () => {
+  const client = await import('../public/utils/health-vitals.js');
+  const server = await import('../server/routes/health/vital-limits.js');
+  for (const unit of [undefined, null, '', 'percent', 'constructor', '%']) {
+    for (const value of [-10, 0, 0.5, 101]) {
+      const m = { type: 'spo2', unit, value_num: value };
+      assert.equal(server.vitalLimitError(m), 'out_of_range', JSON.stringify(m));
+      assert.deepEqual(client.vitalPlausibility(m).hard, [{ channel: 'value', issue: 'impossible' }], JSON.stringify(m));
+    }
+    for (const value of [1, 97, 100]) {
+      const m = { type: 'spo2', unit, value_num: value };
+      assert.equal(server.vitalLimitError(m), null, JSON.stringify(m));
+      assert.deepEqual(client.vitalPlausibility(m).hard, [], JSON.stringify(m));
+    }
+  }
+});
+
+test('die harten Grenzen von Formular und Server sind dieselben, und weich liegt innerhalb von hart', async () => {
+  const client = await import('../public/utils/health-vitals.js');
+  const server = await import('../server/routes/health/vital-limits.js');
+  assert.deepEqual(client.VITAL_HARD_LIMITS, server.VITAL_HARD_LIMITS);
+  assert.deepEqual(client.PULSE_HARD_LIMITS, server.PULSE_HARD_LIMITS);
+  const inside = ([lo, hi], [hardLo, hardHi], label) => assert.ok(lo >= hardLo && hi <= hardHi, label);
+  for (const [type, units] of Object.entries(client.VITAL_SOFT_RANGES)) {
+    for (const [unit, range] of Object.entries(units)) {
+      const hard = client.VITAL_HARD_LIMITS[type][unit];
+      if (Array.isArray(range)) inside(range, hard, `${type} ${unit}`);
+      else for (const ch of Object.keys(range)) inside(range[ch], hard[ch], `${type} ${unit} ${ch}`);
+    }
+  }
+  inside(client.PULSE_SOFT_RANGE, client.PULSE_HARD_LIMITS, 'Puls');
+  // Was der Server ablehnt, haelt auch das Formular an - und umgekehrt.
+  for (const m of [
+    { type: 'weight', unit: 'kg', value_num: 701 }, { type: 'spo2', unit: '%', value_num: 100.5 },
+    { type: 'bp', unit: 'mmHg', value_num: 90, value_num2: 90 }, { type: 'bp', unit: 'mmHg', value_num: 120, value_num2: 80, value_num3: 10 },
+    { type: 'weight', unit: 'kg', value_num: 650 }, { type: 'temp', unit: '°C', value_num: 41.5 },
+  ]) {
+    assert.equal(client.vitalPlausibility(m).hard.length > 0, server.vitalLimitError(m) !== null, JSON.stringify(m));
+  }
+});
+
+test('der Vitalwerte-Dialog haelt Unmoegliches an und zeigt Ungewoehnliches als Hinweis', () => {
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(reportFieldErrors\(vitalPlausibility\(body\)\.hard\.map\(/, 'Speichern prueft die harten Grenzen nicht');
+  assert.match(src, /<p class="form-hint form-hint--warning" id="vital-plausibility" role="status" hidden><\/p>/);
+  // Seit der R19-Nachlese beim Abschluss des Feldes (change), siehe unten.
+  assert.match(src, /fieldsHost\.addEventListener\('change', updatePlausibility\)/, 'der Hinweis folgt der Eingabe nicht');
+});
+
+// Re-Kritik 2026-10-17: nach dem Speichern stand der harte Fehler rot am Feld
+// und derselbe Satz in Bernstein unter dem Puls. Im Browser gemessen (390px,
+// Blutdruck 80/120): vorher Hinweis + Feldfehler, nachher nur der Feldfehler;
+// ein ungewoehnlicher Wert (250/80) zeigt den Hinweis weiter.
+test('Re-Kritik: steht ein harter Fehler am Feld, schweigt der Plausibilitaets-Hinweis dazu', () => {
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  const update = src.slice(src.indexOf('const updatePlausibility = () => {'), src.indexOf('const clearPlausibilityWhenResolved'));
+  assert.match(src, /const fieldCarriesError = \(\) => Boolean\(fieldsHost\.querySelector\('\[aria-invalid="true"\]'\)\);/,
+    'der Hinweis fragt, ob ein Wertefeld seinen Fehler selbst traegt');
+  assert.match(update, /vitalPlausibility\(values\)\.hard\.length && fieldCarriesError\(\) \? null : vitalPlausibilityText\(values\)/,
+    'Hartes nur, solange kein Feld es traegt - Ungewoehnliches immer');
+  const submitHard = src.slice(src.indexOf('if (reportFieldErrors(vitalPlausibility(body).hard.map('), src.indexOf('submitBtn.disabled = true;', src.indexOf('if (reportFieldErrors(vitalPlausibility(body).hard.map(')));
+  assert.match(submitHard, /updatePlausibility\(\);\s*return;/, 'nach dem Melden am Feld zieht der Hinweis nach');
+});
+
+// Critique R19 Nachlese (Guide validate-input-after-interaction): der Hinweis
+// stand beim Tippen von "37,5 °C" schon nach der "3" als "nicht moeglich" da.
+// Gezeigt wird erst beim Abschluss des Feldes, beim Tippen nur weggenommen.
+test('der Plausibilitaets-Hinweis erscheint nach dem Eingeben, nicht waehrend', () => {
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  assert.match(src, /fieldsHost\.addEventListener\('input', clearPlausibilityWhenResolved\)/,
+    'auf input wird der Hinweis gezeigt - mitten im Tippen');
+  assert.match(src, /fieldsHost\.addEventListener\('change', updatePlausibility\)/);
+  assert.doesNotMatch(src, /fieldsHost\.addEventListener\('input', updatePlausibility\)/);
+  const clear = src.slice(src.indexOf('const clearPlausibilityWhenResolved'), src.indexOf("fieldsHost.addEventListener('input'"));
+  assert.match(clear, /if \(plausibilityHint && !vitalPlausibilityText\(/, 'beim Tippen darf der Hinweis nur gehen, nicht kommen');
+});
+
+// Re-Critique 2026-10-17, P1: ein Blutdruck ohne Puls zeichnete Puls 0, weil
+// Number(null) 0 ist. Fehlend bleibt fehlend - im Punkt UND im Delta.
+test('Blutdruck ohne Puls: der Puls fehlt, er ist nicht 0', () => {
+  const rows = [
+    { id: 1, type: 'bp', value_num: 120, value_num2: 80, value_num3: null, unit: 'mmHg', measured_at: '2026-06-10T08:00' },
+    { id: 2, type: 'bp', value_num: 130, value_num2: 85, value_num3: '', unit: 'mmHg', measured_at: '2026-06-12T08:00' },
+    { id: 3, type: 'bp', value_num: 125, value_num2: 82, value_num3: 70, unit: 'mmHg', measured_at: '2026-06-14T08:00' },
+  ];
+  const s = computeVitalSeries(rows, { type: 'bp', range: 'month', anchor: '2026-06-15' });
+  const at = (date) => s.points.find((p) => p.date === date);
+  assert.equal(at('2026-06-10').value_num3, null, 'null ist kein Puls von 0');
+  assert.equal(at('2026-06-12').value_num3, null, "'' ist kein Puls von 0");
+  assert.equal(at('2026-06-14').value_num3, 70);
+  assert.equal(at('2026-06-12').value_num, 130, 'der Druck selbst bleibt');
+  assert.equal(s.deltas.value_num3, null, 'kein Delta gegen einen Puls, der nie gemessen wurde');
+});

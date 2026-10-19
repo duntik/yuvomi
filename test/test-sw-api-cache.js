@@ -61,6 +61,7 @@ class MockResponse {
     });
   }
   async blob() { return this._body; }
+  async text() { return typeof this._body === 'string' ? this._body : JSON.stringify(this._body); }
   async json() { return typeof this._body === 'string' ? JSON.parse(this._body) : this._body; }
 }
 
@@ -123,21 +124,24 @@ function loadSw({ fetchImpl } = {}) {
     parseInt, console, Symbol, setTimeout, clearTimeout,
   };
   sandbox.globalThis = sandbox;
-  runInContext(SRC, createContext(sandbox));
+  const context = createContext(sandbox);
+  runInContext(SRC, context);
   return {
     listeners, caches: cacheStorage,
+    evaluate: (code) => runInContext(code, context),
     setFetch: (f) => { ctl.fetchImpl = f; },
   };
 }
 
 function apiUrl(path) { return `${ORIGIN}/api/v1${path}`; }
 
-/** Feuert ein fetch-Event; liefert ob respondWith aufgerufen wurde + dessen Promise. */
+/** Feuert ein fetch-Event; liefert ob respondWith aufgerufen wurde + dessen Promise, dazu die waitUntil-Promises. */
 function dispatchFetch(env, request) {
   let responded = false;
   let result;
-  env.listeners.fetch[0]({ request, respondWith(p) { responded = true; result = p; } });
-  return { responded, result: responded ? Promise.resolve(result) : null };
+  const waited = [];
+  env.listeners.fetch[0]({ request, respondWith(p) { responded = true; result = p; }, waitUntil(p) { waited.push(p); } });
+  return { responded, result: responded ? Promise.resolve(result) : null, waited };
 }
 
 async function dispatchActivate(env) {
@@ -207,6 +211,90 @@ test('offline ohne Cache → 503 mit {error:"offline"}', async () => {
   const res = await result;
   assert.equal(res.status, 503);
   assert.deepEqual(await res.json(), { error: 'offline' });
+});
+
+// Aufgaben, Termine und Uebersicht tragen fuer ein Profilbild die Adresse
+// /people/:id/avatar statt der Data-URL (server/routes/people.js). Offline
+// zeigt die gecachte Zeile ihr Bild nur, wenn es im selben Cache liegt.
+test('Profilbilder (/people/:id/avatar) gehen in den API-Cache und kommen offline zurueck', async () => {
+  const env = loadSw({
+    fetchImpl: async () => new MockResponse('BILD', { status: 200 }),
+  });
+  const req = new MockRequest(apiUrl('/people/2/avatar?v=4012'), { method: 'GET' });
+  await (dispatchFetch(env, req).result);
+
+  env.setFetch(async () => { throw new TypeError('Failed to fetch'); });
+  const { responded, result } = dispatchFetch(env, req);
+  assert.ok(responded, 'das Bild ist ein Whitelist-GET');
+  const res = await result;
+  assert.equal(res.status, 200, 'offline aus dem Cache');
+  assert.ok(res.headers.get('x-cached-at'));
+});
+
+// Codex-Review zu #2056: ein Bild in einer Zeile, die nie auf dem Schirm war,
+// laedt der Browser wegen loading="lazy" nie - offline fehlte es dann, obwohl
+// die Liste aus dem Cache kam. Wer eine Liste cacht, holt die Bilder, deren
+// Adresse darin steht, gleich mit (je Person einmal).
+test('eine gecachte Liste holt die Profilbilder ihrer Zeilen mit in den Cache', async () => {
+  const key = 'ab'.repeat(16);
+  const seen = [];
+  const env = loadSw({
+    fetchImpl: async (req) => {
+      const url = typeof req === 'string' ? req : req.url;
+      seen.push(url);
+      if (url.includes('/people/')) return new MockResponse('BILD', { status: 200 });
+      return new MockResponse(JSON.stringify({ data: [
+        { id: 1, assigned_avatar: `/api/v1/people/2/avatar?v=${key}` },
+        { id: 2, assigned_users: [{ avatar_data: `/api/v1/people/2/avatar?v=${key}` }] },
+      ] }), { status: 200 });
+    },
+  });
+  const list = dispatchFetch(env, new MockRequest(apiUrl('/tasks'), { method: 'GET' }));
+  await list.result;
+  // Codex-Review zu #2056: das Mitholen haengt am fetch-Event (`waitUntil`).
+  // Ohne das darf der Browser den Worker beenden, sobald die Liste beantwortet
+  // ist, und das Bild kaeme nie im Cache an.
+  await new Promise((r) => setTimeout(r, 0));
+  assert.ok(list.waited.length > 0, 'das fetch-Event bleibt bis zum Mitholen am Leben');
+  await Promise.all(list.waited);
+  const avatarUrl = apiUrl(`/people/2/avatar?v=${key}`);
+  assert.equal(seen.filter((u) => u === avatarUrl).length, 1, 'das Bild wird genau einmal geholt, nicht je Zeile');
+
+  env.setFetch(async () => { throw new TypeError('Failed to fetch'); });
+  const { result } = dispatchFetch(env, new MockRequest(avatarUrl, { method: 'GET' }));
+  const res = await result;
+  assert.equal(res.status, 200, 'offline kommt das nie angezeigte Bild aus dem Cache');
+});
+
+// Codex-Review zu #2056: nur die Bildfelder zaehlen. Ein Titel oder eine
+// Beschreibung, in die jemand Bildpfade tippt, loeste sonst je Treffer einen
+// Abruf aus - bei jedem Laden der Liste wieder, weil ein 404 nie im Cache liegt.
+test('nur Bildfelder holen ein Bild mit, eingetippter Text nie', async () => {
+  const key = 'cd'.repeat(16);
+  const typed = Array.from({ length: 5 }, (_, i) => `/api/v1/people/${10 + i}/avatar?v=${'e'.repeat(32)}`);
+  const seen = [];
+  const env = loadSw({
+    fetchImpl: async (req) => {
+      const url = typeof req === 'string' ? req : req.url;
+      seen.push(url);
+      if (url.includes('/people/')) return new MockResponse('BILD', { status: 200 });
+      return new MockResponse(JSON.stringify({ data: [
+        { id: 1, title: typed[0], description: typed.slice(1).join(' '), creator_avatar: `/api/v1/people/3/avatar?v=${key}` },
+      ] }), { status: 200 });
+    },
+  });
+  const list = dispatchFetch(env, new MockRequest(apiUrl('/tasks'), { method: 'GET' }));
+  await list.result;
+  await new Promise((r) => setTimeout(r, 0));
+  await Promise.all(list.waited);
+  const fetched = seen.filter((u) => u.includes('/people/'));
+  assert.deepEqual(fetched, [apiUrl(`/people/3/avatar?v=${key}`)], 'nur das Bild aus creator_avatar');
+});
+
+test('der Service Worker liest dieselben Bildfelder wie der Server', async () => {
+  const { AVATAR_FIELDS } = await import('../server/services/person-avatar.js');
+  const env = loadSw();
+  assert.deepEqual([...env.evaluate('AVATAR_FIELDS')].sort(), [...AVATAR_FIELDS].sort());
 });
 
 test('Mutationen werden nie gecacht und nicht angefasst', async () => {

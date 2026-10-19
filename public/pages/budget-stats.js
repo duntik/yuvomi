@@ -2,6 +2,7 @@
  * Modul: Budget-Statistik-View
  * Zweck: Statistik-Tab (Zeitraum-Filter, Summary-Cards, Trendlinie, Donut, CSV-Export).
  */
+import { CATEGORY_SERIES_COLORS, CATEGORY_OTHER_COLOR, categoryColorIndex, categoryColor, categoryTexture } from '/utils/budget-category-colors.js';
 import { api } from '/api.js';
 import { t, formatDate, getLocale } from '/i18n.js';
 import { wireTablist } from '/utils/tablist.js';
@@ -10,7 +11,7 @@ import { renderSkeletonChart } from '/utils/skeleton.js';
 import { growBars, drawChartOnce } from '/utils/ux.js';
 import { mountEmptyState, mountLoadError } from '/utils/empty-state.js';
 import { CHART, chartX, chartY, chartGridMarkup, chartXLabelsMarkup, calmDomain } from '/utils/chart.js';
-import { formatMoneyAxis, formatSignedAmount, sharePercent } from '/utils/money.js';
+import { formatMoneyAxis, formatSignedAmount, sharePercent, roundToCurrency } from '/utils/money.js';
 import { addLocalDays, todayKey } from '/utils/date.js';
 import { trendMarkup } from '/utils/metric-card.js';
 
@@ -233,11 +234,9 @@ function renderBodyContent(body) {
 // --module-shopping/--module-meals tragen eine andere Bedeutung und garantieren
 // keinen Kontrast gegen die Kartenfläche. Die Zahl der Segmente ist auf
 // DONUT_SEGMENTS begrenzt, damit sich keine zwei Segmente dieselbe Farbe teilen.
-const DONUT_COLORS = [
-  'var(--chart-series-1)', 'var(--chart-series-2)', 'var(--chart-series-3)',
-  'var(--chart-series-4)', 'var(--chart-series-5)', 'var(--chart-series-6)',
-  'var(--chart-series-7)',
-];
+// Die Palette steht seit der Critique 2026-10-16 an EINER Stelle
+// (utils/budget-category-colors.js): Uebersicht und Plan faerben mit ihr.
+const DONUT_COLORS = CATEGORY_SERIES_COLORS;
 const DONUT_SEGMENTS = DONUT_COLORS.length;
 
 function signed(n) {
@@ -273,18 +272,10 @@ function previousPeriodLabel(prev) {
  * mehr Einnahmen besser) - dieselbe Trend-Sprache wie die Kennzahl-Karten.
  * Eine Kategorie, die nur im Vorzeitraum vorkam, steht mit null da: ihr
  * Wegfall ist genau die Veraenderung, nach der man hier sucht. */
-/* EINE FARBE JE KATEGORIE IN BEIDEN DIAGRAMMEN (R14 P8, A5 P2-8). Die
- * Ausgabenbalken standen alle im Modulton, der Donut daneben in sieben
- * Serienfarben - dieselben Betraege in zwei Farbsystemen. Jetzt nimmt jeder
- * Balken die Farbe seines Donut-Segments (dieselbe Reihenfolge wie
- * donutSlices: groesste Ausgabe zuerst, jenseits der Palette die Farbe der
- * Sammelscheibe). */
-function categoryColorIndex(byCategory) {
-  const order = (byCategory ?? [])
-    .filter((c) => c.expenses < 0)
-    .sort((a, b) => Math.abs(b.expenses) - Math.abs(a.expenses));
-  return new Map(order.map((c, i) => [c.category, Math.min(i, DONUT_SEGMENTS - 1)]));
-}
+/* EINE FARBE JE KATEGORIE IN BEIDEN DIAGRAMMEN (R14 P8, A5 P2-8) - und seit
+ * der Critique 2026-10-16 in jeder Budget-Ansicht: `categoryColorIndex` kommt
+ * aus utils/budget-category-colors.js, dieselbe Zuordnung wie Uebersicht und
+ * Plan (groesste Ausgabe zuerst, jenseits der Palette die Sammelscheibe). */
 
 function renderCatBars() {
   const host = view.root.querySelector('#budget-stats-cat');
@@ -306,10 +297,13 @@ function renderCatBars() {
   }).filter((b) => b.rows.some((r) => r.amount !== 0));
   if (!blocks.length) return;
 
-  const colors = categoryColorIndex(view.data.byCategory);
+  const colors = categoryColorIndex(view.data.byCategory, view.ctx.expenseCategoryKeys);
   const html = blocks.map(({ kind, labelKey, betterWhen, rows }) => {
-    // DAS EIGENE MAXIMUM DES BLOCKS, wie im Monats-Diagramm.
-    const max = Math.max(...rows.map((r) => Math.abs(r.amount)), 1);
+    // DAS EIGENE MAXIMUM DES BLOCKS, wie im Monats-Diagramm - samt der Ziele
+    // (Critique R19): eine Zielmarke ueber dem groessten Betrag klemmte vorher
+    // per Math.min an der Kante und sagte damit "Ziel erreicht", wo noch Luft war.
+    const targetOf = (r) => (kind === 'expenses' && plans[r.category] != null ? Number(plans[r.category]) : null);
+    const max = Math.max(...rows.map((r) => Math.abs(r.amount)), ...rows.map((r) => targetOf(r) ?? 0), 1);
     const total = rows.reduce((sum, r) => sum + r.amount, 0);
     const absTotal = rows.reduce((sum, r) => sum + Math.abs(r.amount), 0);
     const titleId = `budget-stats-${kind}-title`;
@@ -317,23 +311,32 @@ function renderCatBars() {
       // Der Anteil ist der Anteil: kein Boden (Critique 2026-08-13, Guard in
       // test:frontend-audit) - der Mindeststummel steht als Laenge im CSS.
       const scale = Math.abs(r.amount) / max;
-      const target = kind === 'expenses' ? plans[r.category] : undefined;
-      const targetPos = target != null ? Math.min(1, target / max) : null;
-      const targetMarker = targetPos != null
-        ? `<div class="budget-bar-row__target" style="--target-pos:${targetPos.toFixed(4)}"
-               title="${view.ctx.esc(t('budget.planTarget', { amount: view.ctx.formatAmount(target) }))}"></div>`
+      const target = targetOf(r);
+      // Die Marke ist nur noch Bild: was sie sagt, steht als Text unter dem
+      // Betrag ("von 1.700 €") und fuer Screenreader samt Ausschoepfung.
+      const targetMarker = target != null
+        ? `<div class="budget-bar-row__target" style="--target-pos:${(target / max).toFixed(4)}" aria-hidden="true"></div>`
+        : '';
+      const targetText = target != null
+        ? `<span class="budget-bar-row__of"><span aria-hidden="true">${view.ctx.esc(t('budget.planTargetOf', { amount: view.ctx.formatAmount(target) }))}</span><span class="sr-only">${view.ctx.esc(t('budget.planTargetSr', {
+          amount: view.ctx.formatAmount(target),
+          percent: target > 0 ? sharePercent(Math.abs(r.amount), target) : '-',
+        }))}</span></span>`
         : '';
       const catLabel = view.ctx.esc(view.ctx.categoryLabel(r.category));
       // Betragsraum wie auf den Karten: Ausgaben als Betrag, damit „+" mehr
       // ausgegeben heisst und nicht weniger.
-      const delta = Math.abs(r.amount) - Math.abs(r.prev);
-      const deltaHtml = hasPrev
+      // Auf die Waehrung gerundet (Critique R19): sonst trug eine Differenz
+      // von 2e-14 einen roten Pfeil neben "0,00 €".
+      const delta = roundToCurrency(Math.abs(r.amount) - Math.abs(r.prev), view.ctx.currency);
+      const deltaHtml = (hasPrev
         ? trendMarkup({ delta, betterWhen, text: view.ctx.esc(signed(delta)) })
-        : '';
+        : '');
       // Ausgaben: Farbe des Donut-Segments und der Anteil als Text - die Farbe
       // ist Zuordnung, der Anteil die Aussage (auch ohne Farbsehen lesbar).
-      const colorIndex = kind === 'expenses' ? colors.get(r.category) : undefined;
-      const fillColor = colorIndex != null ? `;--bar-fill:${DONUT_COLORS[colorIndex]}` : '';
+      const color = kind === 'expenses' ? categoryColor(colors, r.category) : null;
+      const fillColor = color ? `;--bar-fill:${color}` : '';
+      const texture = kind === 'expenses' ? categoryTexture(colors, r.category) : null;
       const share = kind === 'expenses' && absTotal > 0 && r.amount !== 0
         ? ` <span class="budget-bar-row__share">${view.ctx.esc(sharePercent(r.amount, absTotal))}</span>`
         : '';
@@ -341,11 +344,11 @@ function renderCatBars() {
         <div class="budget-bar-row budget-bar-row--compare">
           <div class="budget-bar-row__label" title="${catLabel}">${catLabel}</div>
           <div class="budget-bar-row__track" style="--bar-visible:${r.amount !== 0 ? 1 : 0}">
-            <div class="budget-bar-row__fill budget-bar-row__fill--${kind}" style="--bar-scale:${scale.toFixed(4)}${fillColor}" data-bar-key="${kind}:${view.ctx.esc(String(r.category))}"></div>
+            <div class="budget-bar-row__fill budget-bar-row__fill--${kind}" style="--bar-scale:${scale.toFixed(4)}${fillColor}"${texture ? ` data-texture="${texture}"` : ''} data-bar-key="${kind}:${view.ctx.esc(String(r.category))}"></div>
             ${targetMarker}
           </div>
           <div class="budget-bar-row__amount">${view.ctx.esc(signed(r.amount))}${share}</div>
-          ${deltaHtml ? `<div class="budget-bar-row__delta">${deltaHtml}</div>` : ''}
+          ${deltaHtml || targetText ? `<div class="budget-bar-row__delta">${targetText}${deltaHtml}</div>` : ''}
         </div>`;
     }).join('');
     return `
@@ -375,16 +378,31 @@ function renderCatBars() {
 // Segmente auf die Palettengröße begrenzen: alles jenseits davon fließt in eine
 // „Sonstige"-Sammelscheibe. Ein Donut mit 15 Kategorien ist ohnehin nicht mehr
 // ablesbar, und ohne Deckel bekämen Segment 1 und 8 dieselbe Farbe.
+//
+// Jedes Segment traegt die Farbe SEINER Kategorie (R19: nach Katalogstelle,
+// nicht nach Rang - categoryColorIndex), die Sammelscheibe die neutrale.
 function donutSlices(byCategory) {
+  const colors = categoryColorIndex(byCategory, view.ctx.expenseCategoryKeys);
   const exp = byCategory
     .filter((c) => c.expenses < 0)
-    .map((c) => ({ label: view.ctx.categoryLabel(c.category), value: Math.abs(c.expenses) }))
+    .map((c) => ({
+      label: view.ctx.categoryLabel(c.category),
+      value: Math.abs(c.expenses),
+      color: categoryColor(colors, c.category),
+      texture: categoryTexture(colors, c.category),
+    }))
     .sort((a, b) => b.value - a.value);
   if (exp.length <= DONUT_SEGMENTS) return exp;
   const head = exp.slice(0, DONUT_SEGMENTS - 1);
   const restValue = exp.slice(DONUT_SEGMENTS - 1).reduce((s, e) => s + e.value, 0);
-  return [...head, { label: t('budget.statsOtherCategories'), value: restValue }];
+  return [...head, { label: t('budget.statsOtherCategories'), value: restValue, color: CATEGORY_OTHER_COLOR }];
 }
+
+/* FUGEN ZWISCHEN DEN SEGMENTEN (R19, Critique 2026-10-16): Segmente stiessen
+ * ohne Abstand aneinander, und zwei Toene, die eine Farbfehlsicht angleicht,
+ * flossen ineinander. 2 Einheiten (bei 160 Einheiten Breite rund 2px) bleiben
+ * zwischen je zwei Segmenten frei; ein einziges Segment schliesst den Ring. */
+const DONUT_GAP = 2;
 
 function renderDonut() {
   const host = view.root.querySelector('#budget-stats-donut');
@@ -395,15 +413,25 @@ function renderDonut() {
   const pctOf = (value) => Math.round((value / total) * 100);
   const C = 2 * Math.PI * 60; // r=60
   let offset = 0;
-  const segs = exp.map((e, i) => {
+  const gap = exp.length > 1 ? DONUT_GAP : 0;
+  const segs = exp.map((e) => {
     const frac = e.value / total;
+    const dash = `stroke-dasharray="${Math.max(frac * C - gap, 0.5).toFixed(2)} ${C.toFixed(2)}"
+        stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 80 80)"`;
+    // Die Schraffur liegt als zweiter Strich auf dem Segment (categoryTexture,
+    // Tritanopie): derselbe Bogen, gemalt mit dem Muster aus <defs>.
     const seg = `
-      <circle r="60" cx="80" cy="80" fill="none" stroke="${DONUT_COLORS[i]}"
-        stroke-width="16" stroke-dasharray="${(frac * C).toFixed(2)} ${C.toFixed(2)}"
-        stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 80 80)" />`;
+      <circle r="60" cx="80" cy="80" fill="none" stroke="${e.color}" stroke-width="16" ${dash} />${e.texture ? `
+      <circle r="60" cx="80" cy="80" fill="none" stroke="url(#budget-donut-${e.texture})" stroke-width="16" ${dash} class="budget-stats__donut-texture" />` : ''}`;
     offset += frac * C;
     return seg;
   }).join('');
+  const hatch = exp.some((e) => e.texture === 'hatch') ? `
+          <defs>
+            <pattern id="budget-donut-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="1.5" height="4" class="budget-stats__hatch-line" />
+            </pattern>
+          </defs>` : '';
   // KEINE ZWEITE LEGENDE (R14 P8): Betrag und Anteil je Kategorie stehen an
   // den Balken, die dieselbe Farbe tragen (categoryColorIndex). Die
   // Donut-Legende zaehlte alles ein zweites Mal auf. Die Zusammenfassung
@@ -432,7 +460,7 @@ function renderDonut() {
       <h2 class="budget-chart-section__title">${t('budget.statsDonutTitle')}</h2>
       <p class="sr-only">${view.ctx.esc(summary)}</p>
       <div class="budget-stats__card budget-stats__donut-wrap">
-        <svg viewBox="0 0 160 160" class="budget-stats__donut" aria-hidden="true">
+        <svg viewBox="0 0 160 160" class="budget-stats__donut" aria-hidden="true">${hatch}
           <g class="budget-stats__donut-arcs">${segs}</g>
           <text class="budget-stats__donut-total" x="80" y="77" text-anchor="middle">${view.ctx.esc(formatMoneyAxis(total, view.ctx.currency))}</text>
           <text class="budget-stats__donut-label" x="80" y="77" dy="1.5em" text-anchor="middle">${view.ctx.esc(t('budget.statsExpenses'))}</text>
@@ -587,8 +615,8 @@ function renderTrendChart() {
       </div>
       <div class="budget-stats__readout" id="budget-stats-readout" aria-hidden="true"></div>
       <div class="budget-stats__legend">
-        <span class="budget-stats__legend-item"><i class="budget-stats__swatch budget-stats__swatch--income"></i>${t('budget.statsIncome')} · ${fmtAmount(sum(rawIncomes))}${totalTrend(sum(rawIncomes), comparison?.income, 'higher')}</span>
-        <span class="budget-stats__legend-item"><i class="budget-stats__swatch budget-stats__swatch--expense"></i>${t('budget.statsExpenses')} · ${fmtAmount(sum(rawExpenses))}${totalTrend(sum(rawExpenses), comparison && Math.abs(comparison.expenses), 'lower')}</span>
+        ${legendItemHtml('income', 'budget.statsIncome', trendLegendFigures(incomes, rawIncomes, markIndex, todayIndex >= 0), comparison?.income, 'higher')}
+        ${legendItemHtml('expense', 'budget.statsExpenses', trendLegendFigures(expenses, rawExpenses, markIndex, todayIndex >= 0), comparison && Math.abs(comparison.expenses), 'lower')}
       </div>
       </div>
     </div>`);
@@ -597,7 +625,10 @@ function renderTrendChart() {
   // Aufruf von hier: `watchChartGutters()` (utils/chart.js) sieht das SVG, sobald
   // es im Dokument steht (#1722).
   if (window.lucide) lucide.createIcons({ el: host });
-  wireTrendPoints(host, shown, pointKey, s);
+  // Die Ableselinie startet am beschrifteten Punkt, solange der Zeitraum
+  // laeuft: sonst nannte sie den letzten Tag MIT Eintrag (auch einen geplanten
+  // nach heute), und unter Punkt und Legende stand eine dritte Zahl.
+  wireTrendPoints(host, shown, pointKey, s, todayIndex >= 0 ? markIndex : null);
   // Die Kurven zeichnen sich einmal ein, beim ersten Erscheinen - nicht bei
   // jedem Zeitraum (ux.js, drawChartOnce). Raster und Achse stehen.
   drawChartOnce('budget-stats-trend', { lines: host.querySelector('.budget-stats__lines') });
@@ -790,13 +821,46 @@ function periodLabel(period) {
 // Punktes — die sichtbare Zeile ist die Entsprechung für alle anderen.
 /* Die Summe des Zeitraums gegen den Vorzeitraum, in der Trend-Sprache der
  * Kennzahl-Karten - die Karten selbst stehen auf der Uebersicht. */
+/**
+ * Was die Legende neben einer Serie nennt (Re-Critique 2026-10-17, P1).
+ *
+ * Sie las die Summe des GANZEN Zeitraums, der beschriftete Punkt der Kurve den
+ * Stand am heutigen Tag: "Heute" 2.712 EUR neben "Einnahmen · 3.046,11 EUR",
+ * zwei Zahlen fuer scheinbar dasselbe. Jetzt eine Quelle: Laeuft der Zeitraum
+ * noch (aufsummiert, heute im Bild), nennt die Legende genau den Wert des
+ * Punkts und das, was danach noch eingetragen ist, getrennt als "geplant".
+ * Sonst bleibt es bei der Summe. Der Vergleich mit dem Vorzeitraum rechnet
+ * weiter mit der Summe des ganzen Zeitraums - so ist er auch gebaut.
+ *
+ * @param {number[]} shownArr  die gezeichnete Serie (aufsummiert oder roh)
+ * @param {number[]} rawArr    die Rohwerte je Abschnitt
+ * @param {number} markIndex   der Abschnitt des beschrifteten Punkts
+ * @param {boolean} running    aufsummiert und der Zeitraum enthaelt heute
+ *                             (todayIndex gibt es nur aufsummiert)
+ * @returns {{ total: number, value: number, planned: number }}
+ */
+function trendLegendFigures(shownArr, rawArr, markIndex, running) {
+  const total = rawArr.reduce((a, b) => a + b, 0);
+  if (!running) return { total, value: total, planned: 0 };
+  const value = shownArr[markIndex] ?? total;
+  const planned = roundToCurrency(total - value, view.ctx?.currency);
+  return { total, value, planned: planned > 0 ? planned : 0 };
+}
+
+function legendItemHtml(kind, labelKey, { total, value, planned }, previous, betterWhen) {
+  const plannedHtml = planned > 0
+    ? ` <span class="budget-stats__legend-planned">${view.ctx.esc(t('budget.statsPlannedRest', { amount: fmtAmount(planned) }))}</span>`
+    : '';
+  return `<span class="budget-stats__legend-item"><i class="budget-stats__swatch budget-stats__swatch--${kind}"></i>${t(labelKey)} · ${fmtAmount(value)}${plannedHtml}${totalTrend(total, previous, betterWhen)}</span>`;
+}
+
 function totalTrend(current, previous, betterWhen) {
   if (previous == null) return '';
-  const delta = current - previous;
+  const delta = roundToCurrency(current - previous, view.ctx.currency);
   return ` ${trendMarkup({ delta, betterWhen, text: view.ctx.esc(signed(delta)) })}`;
 }
 
-function wireTrendPoints(host, series, labelKey, raw = series) {
+function wireTrendPoints(host, series, labelKey, raw = series, startIndex = null) {
   const group = host.querySelector('.budget-stats__points');
   const readout = host.querySelector('#budget-stats-readout');
   if (!group || !readout) return;
@@ -863,6 +927,7 @@ function wireTrendPoints(host, series, labelKey, raw = series) {
   // Aufsummiert ist kein Wert mehr null - gesucht wird am ROHEN Abschnitt.
   let initial = raw.length - 1;
   while (initial > 0 && !raw[initial].income && !raw[initial].expenses) initial--;
+  if (startIndex != null && series[startIndex]) initial = startIndex;
   show(initial, { mark: false });
 }
 
@@ -873,4 +938,4 @@ function updatePeriodLabel() {
 }
 
 // Nur fuer Tests: die Farbzuordnung von Balken und Donut (R14 P8).
-export const __test = { fetchStats, statsView: () => view, categoryColorIndex, DONUT_SEGMENTS, futureStartIndex, TREND_CHART_NARROW, calmAxis, markLabelPlan, todayAnchor, axisLabels };
+export const __test = { trendLegendFigures, fetchStats, statsView: () => view, renderCatBars, categoryColorIndex, DONUT_SEGMENTS, futureStartIndex, TREND_CHART_NARROW, calmAxis, markLabelPlan, todayAnchor, axisLabels };

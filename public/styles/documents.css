@@ -28,45 +28,10 @@
 /* .documents-toolbar__search traegt keine Breite (Re-Critique 2026-09-27, D4):
  * Breite und Stelle der Kopfsuche kommen aus page-search.css. */
 
-.documents-view-toggle {
-  display: inline-flex;
-  padding: var(--space-0h);
-  gap: var(--space-0h);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-3);
-}
-
-/* EINE KOPFHOEHE (Critique 2026-09-25): gemessen standen Suche 44, dieser
- * Umschalter 48 und der Menueknopf 44 (mobil 48 / 52 / 48) nebeneinander -
- * der Well legte seine 2px Rand AUF die Zielgroesse. Die Knoepfe sind jetzt
- * genau um diesen Rand kleiner, der Well ist damit so hoch wie jedes andere
- * Kopf-Bedienelement: --target-base, am Zeiger 44, am Finger 48. Die
- * Segmente stehen als Reihe (WCAG 2.5.8, Zielgroessen-Regel in tokens.css),
- * dieselbe Rechnung wie der Ansichts-Umschalter der Aufgaben (tasks.css). */
-.documents-view-toggle__btn {
-  width: calc(var(--target-base) - 2 * var(--space-0h));
-  height: calc(var(--target-base) - 2 * var(--space-0h));
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: calc(var(--radius-full) - 2px);
-  color: var(--color-text-secondary);
-}
-
-.documents-view-toggle__btn svg {
-  width: 17px;
-  height: 17px;
-}
-
-/* Aktiv = erhabene Surface-Pille im Well, Modulton nur in der Tinte (Rezept:
- * tokens.css, Abschnitt 6c). Die Leiste selbst musste dafür ein Well werden -
- * sie stand auf --color-surface-work, also auf Weiß, und eine weiße Pille auf
- * weißem Grund ist kein Zustand. */
-.documents-view-toggle__btn--active {
-  background: var(--seg-active-bg);
-  box-shadow: var(--seg-active-shadow);
-  color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-ink), var(--color-text-primary));
-}
+/* Der Ansichts-Umschalter ist seit D1 (Critique 2026-10-16) das Kanon-Segment
+ * (`.segmented.segmented--icons`, panel.css): Well, Pille, Hoehe und Naht kommen
+ * von dort. Hier stand eine runde Eigen-Pille mit eigener Hoehenrechnung - die
+ * dritte Form derselben Bedienfrage neben Aufgaben und Kalender. */
 
 /* EIN WEG ZUR ANSICHT JE BREITE (R16, Kopfregel mobil 1a). Unter 768px stehen
  * die Werkzeuge in der Titelzeile, und die traegt kein Segment: die Ansicht
@@ -142,7 +107,7 @@
 /* Traegt keine Gruppe einen Chip (leere Ansicht, documents.js
  * renderCategoryChips), geht die Spur samt Haarlinie: ein Strich neben dem
  * Segment, hinter dem nichts kommt, waere Moebel ohne Zweck. */
-.documents-filters__chips:not(:has(.filter-chip)) {
+.documents-filters__chips:not(:has(.filter-chip:not(.documents-folder-chip))) {
   display: none;
 }
 
@@ -248,35 +213,10 @@
   font-weight: var(--font-weight-semibold);
 }
 
-/* Der Auslöser der aufklappbaren Auswahl - nur unterhalb Tablet sichtbar
- * (Regel im @media-Block weiter unten). Er trägt den Ordner, in dem man steht. */
-.documents-folder-browser__toggle {
-  display: none;
-  align-items: center;
-  gap: var(--space-2);
-  flex: 1;
-  min-width: 0;
-  min-height: var(--target-base);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  font-weight: var(--font-weight-medium);
-  text-align: start;
-  transition: background-color var(--transition-fast);
-}
-
-.documents-folder-browser__toggle:hover {
-  background-color: var(--color-surface-hover);
-}
-
-.documents-folder-browser__toggle svg {
-  width: var(--icon-md);
-  height: var(--icon-md);
-  flex-shrink: 0;
-  color: var(--module-accent);
-}
-
+/* Der Auslöser der aufklappbaren Auswahl stand hier als eigene Zeile im Kopf
+ * der Ordnerspalte; seit der Critique 2026-10-16 ist er der erste Chip der
+ * Filterzeile (`.documents-folder-chip`, Regeln weiter unten). Name und Pfeil
+ * behalten ihre Klassen. */
 .documents-folder-browser__toggle-label {
   flex: 1;
   min-width: 0;
@@ -288,12 +228,18 @@
   transition: transform var(--transition-fast);
 }
 
-.documents-folder-browser__toggle[aria-expanded="true"] .documents-folder-browser__chevron {
+.documents-folder-chip[aria-expanded="true"] .documents-folder-browser__chevron {
   transform: rotate(180deg);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .documents-folder-browser__chevron { transition: none; }
+}
+
+/* Der Ordner-Chip (documents.js, erster Chip der Filterzeile) gibt es nur
+ * unterhalb Tablet - am Desktop steht die Ordnerspalte offen. */
+.documents-folder-chip {
+  display: none;
 }
 
 /* Freistehendes Ziel im Kopf der Ordnerliste - kein gleichartiges Ziel engt es
@@ -718,6 +664,29 @@
    * direkt an den Text an; die Oberkanten und die Vorschauen (feste Form)
    * halten die Reihe. */
   align-items: start;
+}
+
+/* DER LEERZUSTAND NIMMT DIE GANZE BREITE (Re-Critique 2026-10-17, A4 P2-3).
+ * Im Raster war er ein Rasterelement wie eine Karte: "Keine Treffer" stand
+ * bei 1440px in einer 203px-Zelle links, daneben 650px nichts. */
+.documents-list--grid > .documents-empty-state {
+  grid-column: 1 / -1;
+}
+
+/* EINE REIHE, EINE LINIE (Re-Critique 2026-10-17, A4 P3). Ohne Dehnung (R18,
+ * oben) ist jede Karte so hoch wie ihr Inhalt, und ein zweizeiliger Titel
+ * schob Meta und Leiste seiner Karte eine Zeile unter die der Nachbarn - die
+ * Reihe endete in Stufen (gemessen 394/414px bei 1440). Der Titel haelt im
+ * Raster deshalb immer zwei Zeilen: ein kurzer Name laesst die zweite leer,
+ * Meta und Leiste fluchten ueber die Reihe, und zwischen Meta und Leiste
+ * entsteht kein Loch (der Grund fuer R18).
+ *
+ * Subgrid waere die genauere Antwort (die Zeilen der Karten teilen), ist hier
+ * aber ausgeschlossen: die Karte ist ein Container (`container: document-card`,
+ * Kurzformen unten), und ein Container mit Layout-Eingrenzung kann kein
+ * Subgrid sein - gemessen `grid-template-rows: none`. */
+.documents-list--grid .document-card__title {
+  min-block-size: 2lh;
 }
 
 /* Lade-Zustand: Grid/Flex aufheben, damit die geteilte Skeleton-Liste
@@ -1438,6 +1407,9 @@
    * der geteilten Grammatik, die keinen Namen kappen. */
   .documents-folder-browser__head {
     padding-inline-start: 0;
+    /* Aufgeklappt traegt der Kopf nur noch „Ordner anlegen" (der Titel ist
+     * unsichtbar, der Auslöser steht als Chip in der Filterzeile). */
+    justify-content: flex-end;
   }
 
   /* Die Ueberschrift bleibt fuer Screenreader und wandert aus dem Bild: der
@@ -1455,8 +1427,40 @@
     white-space: nowrap;
   }
 
-  .documents-folder-browser__toggle {
+  .documents-folder-chip {
+    display: inline-flex;
+  }
+
+  /* DER ORDNER-CHIP FUEHRT DIE SPUR (Critique 2026-10-16): die Spur steht
+   * damit auch ohne Facetten, und der Chip schrumpft nicht unter seinen
+   * Namen. Er traegt den gewaehlten Ordner; sein Pfeil sagt „klappt auf". */
+  .documents-filters__chips:has(.documents-folder-chip) {
     display: flex;
+  }
+
+  .documents-folder-chip {
+    flex-shrink: 0;
+    max-inline-size: 16rem;
+  }
+
+  .documents-folder-chip .documents-folder-browser__toggle-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Ein gewaehlter Ordner ist ein aktiver Filter - der Chip sagt es wie
+   * jede Facette (Aktivton), solange nicht „Alle Dokumente" gilt. */
+  .documents-folder-chip[data-folder-active] {
+    background-color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-state), transparent);
+    border-color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-hint), transparent);
+    color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-ink), var(--color-text-primary));
+  }
+
+  /* Zugeklappt belegt die Ordnerauswahl KEINE Zeile mehr: ihr Kopf (Titel
+   * und „Ordner anlegen") erscheint erst mit der aufgeklappten Liste. */
+  .documents-folder-browser:not(.documents-folder-browser--open) {
+    display: none;
   }
 
   .documents-folder-browser__list {

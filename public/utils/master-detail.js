@@ -28,12 +28,19 @@
  *   mountMasterDetail({ root, list, ... })     -> Handle, siehe dort
  *   handleMasterDetailPopstate()               -> vom Router (popstate)
  *   detailPaneHeaderEl({ title, actions })     -> Kopf der Detailspalte
+ *   setSelectionBulk(handle, spec|null)        -> Sammelaktionen einer Auswahl:
+ *        in der Spalte als „N ausgewaehlt" (Muster Mail), darunter als Pille
  */
 
 import { esc } from '/utils/html.js';
 import { emptyStateEl, mountLoadError } from '/utils/empty-state.js';
 import { t } from '/i18n.js';
 import { swapContent } from '/utils/content-swap.js';
+import { setBulkPill, clearBulkPill, setBulkPane } from '/utils/bulk-pill.js';
+import { dockNextModal } from '/components/modal.js';
+
+/** Wie lange die Ansage der Auswahlzahl wartet: schnelles Tippen sagt nur die letzte Zahl. */
+const BULK_ANNOUNCE_MS = 400;
 
 /** Die eine lebende Instanz. Es gibt je Seite hoechstens eine Liste + Detail. */
 let active = null;
@@ -71,7 +78,11 @@ export function splitViewDetailHtml({ id, label, empty = {} }) {
  * @param {object} opts
  * @param {string} opts.title
  * @param {Array<{label: string, icon?: string, variant?: string, id?: string,
- *   iconOnly?: boolean, onClick?: Function}>} [opts.actions]
+ *   iconOnly?: boolean, dock?: boolean, onClick?: Function}>} [opts.actions]
+ *   `dock`: die Aktion oeffnet ein Formular, das sich in DIESE Spalte legt
+ *   statt als Fenster darueber („Bearbeiten", Critique R19; components/modal.js,
+ *   dockNextModal). Unter der Schwelle steht die Spalte nicht - dann bleibt es
+ *   das Modal.
  * @returns {HTMLElement}
  */
 export function detailPaneHeaderEl({ title = '', actions = [] } = {}) {
@@ -103,7 +114,12 @@ export function detailPaneHeaderEl({ title = '', actions = [] } = {}) {
       } else {
         btn.append(document.createTextNode(action.label ?? ''));
       }
-      if (typeof action.onClick === 'function') btn.addEventListener('click', () => action.onClick({ button: btn }));
+      if (typeof action.onClick === 'function') {
+        btn.addEventListener('click', () => {
+          if (action.dock) dockNextModal(btn.closest('.split-view__detail'));
+          action.onClick({ button: btn });
+        });
+      }
       bar.appendChild(btn);
     }
     head.appendChild(bar);
@@ -146,7 +162,27 @@ function inertHandle() {
     open: noop, select: noop, clear: noop, refresh: noop, destroy: noop,
     isSplit: () => false,
     selectedId: () => null,
+    // Ohne Spalte gibt es nur die Pille.
+    setBulk: (spec) => { if (spec) setBulkPill(spec); else clearBulkPill(); },
   };
+}
+
+/**
+ * Die Sammelaktionen einer Mehrfachauswahl - EIN Weg fuer jede Seite mit Liste
+ * + Detail (Critique R19, Muster Apple Mail). Ab der Split-Schwelle zeigt die
+ * Detailspalte „N ausgewaehlt" mit den Aktionen, und die schwebende Pille
+ * entfaellt: sie stand ueber dem Detail einer anderen Zeile, und dessen
+ * eigenes Loeschen stand daneben. Darunter (und ohne Baustein, z. B. im
+ * Aufgaben-Brett) bleibt es die Pille. Wechselt die Darstellung waehrend der
+ * Auswahl, zieht die Auswahl mit.
+ *
+ * @param {object|null|undefined} handle  das Handle aus mountMasterDetail()
+ * @param {object|null} spec  wie setBulkPill(); `null` beendet die Auswahl
+ */
+export function setSelectionBulk(handle, spec) {
+  if (handle?.setBulk) handle.setBulk(spec);
+  else if (spec) setBulkPill(spec);
+  else clearBulkPill();
 }
 
 /**
@@ -276,6 +312,13 @@ export function mountMasterDetail({
   // die Liste den Zusammenhang gewechselt; eine Auswahl, die NIE eine Zeile
   // hatte (unbekannter Deep-Link), ist dagegen ein „gibt es nicht".
   let shownSelection = null;
+  // Die Sammelaktionen einer laufenden Mehrfachauswahl (setSelectionBulk).
+  let bulkSpec = null;
+  let bulkHost = null;
+  // Die Ansage der Auswahl in der Spalte (siehe announceBulk).
+  let bulkLive = null;
+  let bulkAnnounceTimer = null;
+  let bulkAnnounced = '';
 
   const isSplit = () => root.isConnected && getComputedStyle(detailEl).display !== 'none';
 
@@ -291,6 +334,12 @@ export function mountMasterDetail({
       focusTarget(host)?.removeAttribute('aria-current');
     }
     if (selected == null) return;
+    // IM AUSWAHLMODUS IST KEINE ZEILE "AKTUELL" (Re-Kritik 2026-10-17): die
+    // Spalte zeigt "N ausgewaehlt" statt des Details, die zuvor geoeffnete
+    // Zeile blieb aber violett markiert - bei "0 ausgewaehlt" sah sie aus wie
+    // ausgewaehlt. Die Markierung kehrt zurueck, wenn das Detail zurueckkehrt
+    // (applyBulk ruft markSelection in beide Richtungen).
+    if (detailEl.classList.contains('is-selecting')) return;
     const row = rowFor(selected);
     if (!row) return;
     shownSelection = selected;
@@ -527,8 +576,12 @@ export function mountMasterDetail({
       // Aktivierung (Klick/Enter auf eine andere Zeile) waehlt nur aus - das
       // uebernimmt der Klick-Handler des Moduls ueber open().
       event.preventDefault();
-      if (typeof onEnter === 'function') onEnter(selected);
-      else detailEl.focus();
+      if (typeof onEnter === 'function') {
+        // Enter heisst bei den Modulen „bearbeiten": das Formular legt sich in
+        // die Spalte wie nach dem Knopf in ihrem Kopf (R19, dockNextModal).
+        dockNextModal(detailEl);
+        onEnter(selected);
+      } else detailEl.focus();
       return;
     }
     if (event.key === 'Escape' && selected != null) {
@@ -549,6 +602,85 @@ export function mountMasterDetail({
     focusTarget(row)?.focus();
   }
 
+  /**
+   * Die Auswahl dorthin, wo sie gerade steht: in die Spalte oder in die Pille.
+   * Der Traeger in der Spalte verdeckt Detail und Leerzustand nur (CSS,
+   * `.split-view__detail.is-selecting`), statt sie zu leeren - nach der
+   * Auswahl steht wieder das Detail da, das vorher stand.
+   */
+  /**
+   * DIE ZAHL WIRD ANGESAGT, WO SIE NICHT BEIM FOKUS STEHT (R19-Nachlese,
+   * modern-web-guidance „accessibility", Live Regions). In der Spalte steht
+   * „3 ausgewaehlt" eine Spalte neben dem Auswahlkreis, auf dem der Fokus
+   * liegt; der Kreis sagt nur „gedrueckt". Eine hoefliche Region (polite, nie
+   * assertive) traegt die Zahl nach - entprellt, damit schnelles Tippen nicht
+   * jede Zwischenzahl vorliest, und nur, wenn sich der Satz aendert. Die Region
+   * steht dauerhaft in der Spalte (eine mit ihrem Inhalt neu gebaute sagt
+   * nichts an) und gilt nur der Spalte: die Pille unter der Schwelle bleibt
+   * bewusst ohne Ansage (bulk-pill.js, Kopf).
+   */
+  function announceBulk(text) {
+    if (!bulkLive) {
+      bulkLive = document.createElement('span');
+      bulkLive.className = 'split-view__selection-live sr-only';
+      bulkLive.setAttribute('aria-live', 'polite');
+      bulkLive.setAttribute('aria-atomic', 'true');
+      detailEl.append(bulkLive);
+    }
+    clearTimeout(bulkAnnounceTimer);
+    if (!text) {
+      bulkAnnounced = '';
+      bulkLive.textContent = '';
+      return;
+    }
+    if (text === bulkAnnounced) return;
+    bulkAnnounceTimer = setTimeout(() => {
+      bulkAnnounced = text;
+      bulkLive.textContent = text;
+    }, BULK_ANNOUNCE_MS);
+  }
+
+  function applyBulk() {
+    const split = isSplit();
+    if (!bulkSpec || !split) {
+      if (bulkLive) announceBulk('');
+      const wasSelecting = detailEl.classList.contains('is-selecting');
+      detailEl.classList.remove('is-selecting');
+      if (wasSelecting) markSelection();
+      if (bulkHost) bulkHost.hidden = true;
+      bulkHost?.replaceChildren();
+      if (bulkSpec) setBulkPill(bulkSpec);
+      return;
+    }
+    clearBulkPill();
+    if (!bulkHost) {
+      bulkHost = document.createElement('div');
+      bulkHost.className = 'split-view__selection';
+      detailEl.append(bulkHost);
+    }
+    bulkHost.hidden = false;
+    const entering = !detailEl.classList.contains('is-selecting');
+    detailEl.classList.add('is-selecting');
+    if (entering) markSelection();
+    setBulkPane(bulkHost, bulkSpec);
+    announceBulk(bulkSpec.label);
+  }
+
+  function setBulk(spec) {
+    const wasPane = Boolean(bulkSpec) && detailEl.classList.contains('is-selecting');
+    bulkSpec = spec ?? null;
+    if (!bulkSpec) {
+      // Stand der Fokus in der Spalte, die gleich wieder das Detail zeigt, geht
+      // er auf die Spalte statt auf <body>.
+      const hadFocus = wasPane && bulkHost?.contains(document.activeElement);
+      applyBulk();
+      clearBulkPill();
+      if (hadFocus) detailEl.focus();
+      return;
+    }
+    applyBulk();
+  }
+
   listEl.addEventListener('keydown', onKeydown, { signal: teardown.signal });
   detailEl.addEventListener('keydown', onDetailKeydown, { signal: teardown.signal });
 
@@ -563,6 +695,7 @@ export function mountMasterDetail({
       lastSplit = split;
       abortNarrow();
       onModeChange?.({ split, selectedId: selected });
+      if (bulkSpec) applyBulk();
       if (split && selected != null) {
         markSelection();
         paint(selected);
@@ -575,6 +708,8 @@ export function mountMasterDetail({
 
   function destroy() {
     teardown.abort();
+    bulkSpec = null;
+    clearTimeout(bulkAnnounceTimer);
     abortNarrow();
     renderAbort?.abort();
     ro?.disconnect();
@@ -607,6 +742,7 @@ export function mountMasterDetail({
     refresh,
     destroy,
     isSplit,
+    setBulk,
     selectedId: () => selected,
     // Fuer handleMasterDetailPopstate(); kein Teil der Modul-API.
     _pathname: pathname,

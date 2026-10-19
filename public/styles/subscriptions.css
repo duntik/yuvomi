@@ -217,12 +217,16 @@
   text-align: center;
 }
 
-/* Eine Balkenzeile: Name | Balken | Betrag | Anteil. Name und Balken teilen
- * sich den Rest, Betrag und Anteil nehmen, was sie brauchen - keine festen
- * Mindestbreiten, die in einer schmalen Karte ueberlaufen. */
+/* Eine Balkenzeile: Name | Balken | Betrag | Anteil. Betrag und Anteil nehmen,
+ * was sie brauchen - keine festen Mindestbreiten, die in einer schmalen Karte
+ * ueberlaufen. DER NAME VOR DEM BALKEN (Re-Critique 2026-10-17, A4): beide
+ * teilten sich den Rest 1,2 : 1, und "Versorgungsdienste" kuerzte bei 390,
+ * 1280 und 1440, waehrend der Balken daneben breit stand. Jetzt nimmt der Name
+ * seine Laenge (`max-content`), der Balken den Rest bis hinunter auf 2.5rem;
+ * gekuerzt wird erst, wenn auch das nicht reicht. */
 .subscriptions-chart-rows {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(2.5rem, 1fr) auto auto;
+  grid-template-columns: minmax(0, max-content) minmax(2.5rem, 1fr) auto auto;
   gap: var(--space-2);
   margin: 0;
   padding: 0;
@@ -424,11 +428,16 @@
 /* Name und Beschreibung sind SPANs, keine Überschrift und kein Absatz: der
  * Zeilenkörper ist ein `<button>`, dessen Content-Model Phrasing Content ist -
  * dieselbe Angleichung, die `pantry.js` und `contacts.js` schon tragen. */
+/* Der NAME folgt der Titelregel (hoechstens zwei Zeilen, typography.css,
+ * R19); die Beschreibung daneben bleibt einzeilig und kuerzt sich zuerst. */
 .subscription-card__name,
 .subscription-card__desc {
-  display: block;
   margin: 0;
   min-width: 0;
+}
+
+.subscription-card__desc {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -533,6 +542,13 @@
   display: none;
 }
 
+/* Mit Kombinator: `.subscription-card__meta > span` (inline-flex) schlug die
+ * einfache Klasse per Spezifitaet, und breit stand die Beschreibung zweimal -
+ * hinter dem Namen und vorn in der Meta-Zeile (R19, gemessen bei 1440). */
+.subscription-card__meta > .subscription-card__meta-desc {
+  display: none;
+}
+
 @container subscriptions-list (max-width: 559px) {
   .subscription-card__meta .subscription-card__meta-cycle {
     display: none;
@@ -540,6 +556,20 @@
 
   .subscription-card__cost .subscription-card__cost-cycle {
     display: block;
+  }
+
+  /* DIE BESCHREIBUNG IST SCHMAL DIE ERSTE META-ZEILE (R19): eine eigene Zeile
+   * der Textspalte, einzeilig mit Ellipse - der Name hat die Titelzeile allein. */
+  .subscription-card__title-row > .subscription-card__desc {
+    display: none;
+  }
+
+  .subscription-card__meta > .subscription-card__meta-desc {
+    display: block;
+    flex: 1 0 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

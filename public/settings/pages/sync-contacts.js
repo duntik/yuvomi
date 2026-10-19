@@ -1,6 +1,6 @@
 import { api } from '/api.js';
 import { formatDate, formatTime, t } from '/i18n.js';
-import { esc } from '/utils/html.js';
+import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { emptyHintEl } from '/utils/empty-state.js';
 import {
   closeModal,
@@ -15,7 +15,11 @@ import {
   createStatusSummary,
 } from '/settings/components.js';
 import { withBusy } from '/utils/ux.js';
+import { formRowHtml, formRowsHtml } from '/utils/form-row.js';
+
+/** Das Pflichtzeichen hinter einem Etikett - Markup, kein Text (aria-hidden). */
 import { renderSkeletonList } from '/utils/skeleton.js';
+import { reloadAfterSave } from '/utils/reload-after-save.js';
 
 function formatSyncTime(value) {
   if (!value) return null;
@@ -250,7 +254,7 @@ function renderAccount(container, account, addressbooks, refresh, user) {
       try {
         await api.post(`/contacts/cardav/accounts/${account.id}/sync`);
         showToast(t('settings.cardavSyncSuccess'), 'success');
-        await refresh();
+        await reloadAfterSave(() => refresh());
       } catch (err) {
         showToast(err?.data?.errorCode ? errorMessage(err) : (err.message || t('settings.cardavSyncFailed')), 'danger');
       }
@@ -347,7 +351,7 @@ function renderAccount(container, account, addressbooks, refresh, user) {
     try {
       await api.post(`/contacts/cardav/accounts/${account.id}/addressbooks/refresh`);
       showToast(t('settings.addressbooksRefreshed'), 'success');
-      await refresh();
+      await reloadAfterSave(() => refresh());
     } catch (err) {
       showToast(errorMessage(err), 'danger');
     }
@@ -497,9 +501,11 @@ async function loadAccounts(container, user) {
  * leer und optional - leer lassen heißt „bestehendes behalten"; die Adressbuch-
  * Auswahl bleibt in jedem Fall erhalten.
  *
- * Passwortfeld: autocomplete="off". Gefragt ist ein bestehendes Passwort für
- * einen FREMDEN Server - "current-password" bietet das Yuvomi-Passwort an,
- * "new-password" schlägt ein generiertes vor. Beides ist hier falsch.
+ * Passwortfeld: autocomplete="new-password". Gefragt ist ein bestehendes
+ * Passwort für einen FREMDEN Server - "current-password" bietet das
+ * Yuvomi-Passwort an, und "off" ignorieren viele Browser an Passwortfeldern
+ * (MDN). "new-password" ist der Hinweis, der kein gespeichertes Passwort
+ * einfüllt; dass der Manager eines vorschlägt, ist der kleinere Schaden.
  *
  * @param {Object|null} account - null = neues Konto
  * @param {() => Promise<void>} onDone
@@ -511,36 +517,40 @@ function openAccountModal(account, onDone) {
     size: 'sm',
     content: `
       <form id="cardav-account-form" novalidate autocomplete="off">
-        <div class="form-group">
-          <label class="form-label" for="cardav-name">${t('settings.cardavNameLabel')}<span class="required-marker" aria-hidden="true"> *</span></label>
-          <input class="form-input" type="text" id="cardav-name" required
+        ${/* DER DIALOG SPRICHT DENSELBEN DIALEKT (R19, B7): Zeilen im Traeger
+             wie die iOS-Kontoanlage; jede Zeile ist die Fehlergruppe ihres Felds. */ ''}
+        ${formRowsHtml([
+          formRowHtml({
+            label: t('settings.cardavNameLabel'), labelFor: 'cardav-name', labelExtra: REQUIRED_MARK, field: true,
+            control: `<input class="form-input" type="text" id="cardav-name" required
                  placeholder="${t('settings.cardavNamePlaceholder')}" maxlength="100"
-                 value="${esc(account?.name ?? '')}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="cardav-url">${t('settings.cardavUrlLabel')}<span class="required-marker" aria-hidden="true"> *</span></label>
-          <input class="form-input" type="url" id="cardav-url" required
+                 value="${esc(account?.name ?? '')}" />`,
+          }),
+          formRowHtml({
+            label: t('settings.cardavUrlLabel'), labelFor: 'cardav-url', labelExtra: REQUIRED_MARK, field: true,
+            description: t('settings.cardavUrlHint'), descriptionId: 'cardav-url-hint',
+            control: `<input class="form-input" type="url" id="cardav-url" required aria-describedby="cardav-url-hint"
                  placeholder="${t('settings.cardavUrlPlaceholder')}"
-                 value="${esc(account?.cardavUrl ?? '')}" />
-          <small class="form-hint">${t('settings.cardavUrlHint')}</small>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="cardav-username">${t('settings.cardavUsernameLabel')}<span class="required-marker" aria-hidden="true"> *</span></label>
-          <input class="form-input" type="text" id="cardav-username" required autocomplete="off"
-                 value="${esc(account?.username ?? '')}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="cardav-password">${t('settings.cardavPasswordLabel')}${isEdit ? '' : '<span class="required-marker" aria-hidden="true"> *</span>'}</label>
-          <!-- aria-describedby verbindet die Hinweise mit dem Feld. Ohne die
-               Verknüpfung hört ein Screenreader nur „Password, edit text, blank" -
-               der entscheidende Satz „leer lassen behält das Passwort" existiert
-               für ihn dann nicht. -->
-          <input class="form-input" type="password" id="cardav-password" ${isEdit ? '' : 'required'}
-                 autocomplete="off"
-                 aria-describedby="${isEdit ? 'cardav-password-keep ' : ''}cardav-password-hint" />
-          ${isEdit ? `<small class="form-hint" id="cardav-password-keep">${t('settings.cardavPasswordKeepHint')}</small>` : ''}
-          <small class="form-hint" id="cardav-password-hint">${t('settings.cardavPasswordHint')}</small>
-        </div>
+                 value="${esc(account?.cardavUrl ?? '')}" />`,
+          }),
+          formRowHtml({
+            label: t('settings.cardavUsernameLabel'), labelFor: 'cardav-username', labelExtra: REQUIRED_MARK, field: true,
+            control: `<input class="form-input" type="text" id="cardav-username" required autocomplete="off"
+                 value="${esc(account?.username ?? '')}" />`,
+          }),
+          // aria-describedby verbindet die Hinweise mit dem Feld. Ohne die
+          // Verknuepfung hoert ein Screenreader nur "Password, edit text,
+          // blank" - der Satz "leer lassen behaelt das Passwort" fehlte ihm.
+          formRowHtml({
+            label: t('settings.cardavPasswordLabel'), labelFor: 'cardav-password',
+            labelExtra: isEdit ? '' : REQUIRED_MARK, field: true,
+            control: `<input class="form-input" type="password" id="cardav-password" ${isEdit ? '' : 'required'}
+                 autocomplete="new-password"
+                 aria-describedby="${isEdit ? 'cardav-password-keep ' : ''}cardav-password-hint" />`,
+            extra: `${isEdit ? `<small class="form-hint" id="cardav-password-keep">${t('settings.cardavPasswordKeepHint')}</small>` : ''}`
+              + `<small class="form-hint" id="cardav-password-hint">${t('settings.cardavPasswordHint')}</small>`,
+          }),
+        ])}
         <!-- Die Vertrauensaussage gilt dem ganzen Formular, nicht dem Passwortfeld:
              am Fuß gelesen, nicht als dritter Hinweis unter einem leeren Feld. -->
         <p class="form-hint settings-form-note">${t('settings.cardavCredentialsTrustHint')}</p>

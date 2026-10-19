@@ -30,6 +30,20 @@ function getCsrfToken() {
 }
 
 /**
+ * Die Antwort, die boot-fetch.js fuer `url` schon angefragt hat - oder null.
+ * Eine einmal abgeholte Antwort gibt es kein zweites Mal (ihr Rumpf ist dann
+ * gelesen); nach dem Start gibt es keine mehr.
+ * @param {string} url
+ * @returns {Promise<Response>|null}
+ */
+function takeBootResponse(url) {
+  // `null`: alles Vorab-Gefragte verwerfen.
+  return typeof window !== 'undefined' && typeof window.__yuvomiTakeBoot === 'function'
+    ? window.__yuvomiTakeBoot(url)
+    : null;
+}
+
+/**
  * Zentraler Fetch-Wrapper.
  * Setzt Content-Type, handhabt 401-Redirects und parsed JSON-Fehler.
  *
@@ -51,7 +65,18 @@ async function apiFetch(path, options = {}, _retried = false) {
 
   let response;
   try {
-    response = await fetch(url, {
+    // Die Vorab-Frage des Starts (boot-fetch.js): dieselbe Adresse, einmal.
+    // Scheitert sie, fragt dieser Aufruf selbst - wie ohne sie.
+    // Nur eine Erfolgsantwort zaehlt: eine 401 von vor dem Anmelden darf die
+    // Sitzung danach nicht beenden. Jede schreibende Anfrage (Anmelden,
+    // Abmelden, ...) verwirft den Rest - er gehoerte dem Stand davor.
+    if (stateChanging) takeBootResponse(null);
+    const early = method === 'GET' && !fetchOptions.body ? takeBootResponse(url) : null;
+    if (early) {
+      const answer = await early.catch(() => null);
+      if (answer?.ok) response = answer;
+    }
+    if (!response) response = await fetch(url, {
       credentials: 'same-origin',
       cache: 'no-store',
       ...fetchOptions,
@@ -79,9 +104,13 @@ async function apiFetch(path, options = {}, _retried = false) {
     // "der Wartezustand ist abgelaufen" - beides gehört auf die Anmeldeseite
     // gesagt und nicht in einen Sitzungsabbruch übersetzt (#672).
     if (path !== '/auth/login' && path !== '/auth/2fa/verify') {
-      if (quietExpiry) throw Object.assign(new Error('Sitzung abgelaufen.'), { status: 401 });
+      // Der Wurf traegt seinen Status in BEIDEN Faellen (Critique R19): nur
+      // ein 401 schickt den Auth-Guard in navigate() zur Anmeldung, jeder
+      // andere Fehler der Sitzungspruefung zeigt den Fehlerzustand der Shell.
+      const expired = Object.assign(new Error('Sitzung abgelaufen.'), { status: 401 });
+      if (quietExpiry) throw expired;
       window.dispatchEvent(new CustomEvent('auth:expired'));
-      throw new Error('Sitzung abgelaufen.');
+      throw expired;
     }
     // Für beide: fall-through zum generischen !response.ok-Handler unten.
   }
@@ -114,7 +143,7 @@ async function apiFetch(path, options = {}, _retried = false) {
     const meRes = await fetch(`${API_BASE}/auth/me`, { credentials: 'same-origin', cache: 'no-store' });
     if (meRes.status === 401) {
       window.dispatchEvent(new CustomEvent('auth:expired'));
-      throw new Error('Sitzung abgelaufen.');
+      throw Object.assign(new Error('Sitzung abgelaufen.'), { status: 401 });
     }
     const meData = await meRes.json().catch(() => null);
     if (meData?.csrfToken) _csrfToken = meData.csrfToken;

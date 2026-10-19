@@ -17,7 +17,7 @@ import {
   asksHouseholdAudience, householdAudienceAnswer, householdAudienceShows, householdVisibleWhere, visibilityWhere,
 } from '../services/visibility.js';
 import { resolveBudgetMode } from '../services/budget-visibility.js';
-import { hiddenModulesFor } from '../permissions.js';
+import { hiddenModulesFor, requestHasCapability } from '../permissions.js';
 import { birthdaysSwitchedOff, modulesLeftOut } from '../services/household-modules.js';
 import { documentViewer } from '../services/document-links.js';
 import { householdMemberSql, memberOrderSql, memberPositionSql } from '../services/household-members.js';
@@ -35,6 +35,7 @@ import { activeCatalog, ledgerBalanceSql } from '../services/rewards.js';
 import { moneyParams, moneyReader, moneyVisibleSql } from '../services/reward-money.js';
 import { MEAL_COOK_COLUMNS_SQL, MEAL_COOK_JOIN_SQL } from '../services/meal-cook.js';
 import { clampEventLimit } from '../../public/utils/dashboard-event-limit.js';
+import { personAvatarUrlSql } from '../services/person-avatar.js';
 
 const log = createLogger('Dashboard');
 
@@ -182,7 +183,7 @@ function emptyBudget(month) {
 const ASSIGNED_USERS_SQL = `(
   SELECT json_group_array(json_object(
     'id', u.id, 'display_name', u.display_name, 'color', u.avatar_color,
-    'avatar_data', u.avatar_data
+    'avatar_data', ${personAvatarUrlSql('u')}
   ))
   FROM task_assignments ta JOIN users u ON u.id = ta.user_id
   WHERE ta.task_id = t.id
@@ -490,6 +491,18 @@ router.get('/', (req, res) => {
   // nicht die Module darin. Eine Kachel, deren Modul das Token nicht lesen darf,
   // kommt in derselben leeren Fassung wie bei einer Rollensperre.
   const denied = hiddenModulesFor(req, Object.keys(DENIED_PAYLOAD));
+  // Wand-Displays zeigen Mahlzeiten, Einkauf, Haushaltshilfe, Abfuhr und Vorrat
+  // (#1903): das Heute-Blatt auf der Wand braucht diese Quellen, aber das
+  // Display-Credential hat keinen Modulzugang. Die fuenf Schluessel werden VOR
+  // `modulesLeftOut` aus `denied` entfernt, NICHT danach aus `leftOut` - so
+  // wirkt der Haushaltsschalter weiter: hat ein Haushalt Mahlzeiten abgeschaltet,
+  // fuegt `modulesLeftOut` sie aus `householdDisabledModules` wieder hinzu.
+  const isDisplay = req.authMethod === 'display';
+  if (isDisplay && householdAudience) {
+    for (const key of ['meals', 'shopping', 'housekeeping', 'waste', 'pantry']) {
+      denied.delete(key);
+    }
+  }
   // UND DER HAUSHALTSSCHALTER (#1660, docs/DECISIONS.md 11). Bis dahin fragte
   // diese Stelle nur nach Rechten und Scopes: ein haushaltsweit abgeschaltetes
   // Modul lieferte seine Termine, Aufgaben, Buchungen und Medikamente weiter
@@ -717,6 +730,8 @@ router.get('/', (req, res) => {
              -- entscheidet die Kachel ohne Nachfrage - eigenes zuerst, sonst das
              -- des Providers.
              r.provider_has_image AS recipe_has_image,
+             -- Version des Providerbildes fuer ?v= (#2048, routes/recipes.js).
+             r.provider_updated_at AS recipe_image_version,
              (r.image_data IS NOT NULL) AS recipe_has_own_image,
              -- Wer kocht (#1679): Name, Farbe und Bild neben der Mahlzeit, aus
              -- derselben Quelle wie im Planer.${MEAL_COOK_COLUMNS_SQL}
@@ -736,6 +751,17 @@ router.get('/', (req, res) => {
   } catch (err) {
     log.error('todayMeals error:', err.message);
     result.todayMeals = [];
+  }
+  // Displays zeigen nur, was die Wand-Zeile braucht: Datum, Typ, Titel und Koch.
+  // `notes` und `created_by` bleiben zurueck (#1903).
+  if (isDisplay && householdAudience && Array.isArray(result.todayMeals)) {
+    result.todayMeals = result.todayMeals.map(({
+      id, date, meal_type, title, recipe_id, cook_user_id, cook_name, cook_color,
+      recipe_has_image, recipe_has_own_image,
+    }) => ({
+      id, date, meal_type, title, recipe_id, cook_user_id, cook_name, cook_color,
+      recipe_has_image: recipe_has_image ?? null, recipe_has_own_image: recipe_has_own_image ?? null,
+    }));
   }
 
   // Neueste Notizen (gepinnte zuerst, dann aktuellste)
@@ -1265,14 +1291,15 @@ router.get('/', (req, res) => {
       presentSince: openSession?.check_in || null,
       workerName: openWorker?.worker_name || null,
       visitsThisMonth: month.visits,
-      unpaidAmount: month.unpaid,
+      // Der offene Lohn ist Geld (R20): ohne `housekeeping_view_amounts` -
+      // so starten neue Kinderkonten - kommt er als `null`, wie im Modul.
+      unpaidAmount: requestHasCapability(d, req, 'housekeeping_view_amounts') ? month.unpaid : null,
       lastVisit: lastRow?.check_in || null,
     };
   } catch (err) {
     log.error('housekeeping error:', err.message);
     result.housekeeping = { configured: false, present: false, presentSince: null, workerName: null, visitsThisMonth: 0, unpaidAmount: 0, lastVisit: null };
   }
-
   // Abfuhr fuer das Heute-Blatt: heute (Tonne raus) und morgen (heute Abend
   // rausstellen). Dieselbe Aufloesung wie Kachel, Modul und Kalender
   // (`getOccurrences`, invariant #3: nie doppelt), nur das Zwei-Tage-Fenster
@@ -1330,6 +1357,14 @@ router.get('/', (req, res) => {
   } catch (err) {
     log.error('pantryExpiring error:', err.message);
     result.pantryExpiring = null;
+  }
+  // Displays erhalten nur den Namen: Menge, Einheit und Ort sind interne
+  // Kennzahlen und gehoeren nicht an die Wand (#1903).
+  if (isDisplay && householdAudience && Array.isArray(result.pantryExpiring?.todayItems)) {
+    result.pantryExpiring = {
+      ...result.pantryExpiring,
+      todayItems: result.pantryExpiring.todayItems.map(({ name }) => ({ name })),
+    };
   }
 
   // „Heute dran"-Karte: pro Mitglied die Zahl der heute fälligen oder über-

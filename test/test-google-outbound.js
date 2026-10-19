@@ -2419,3 +2419,131 @@ test('#2019: Neu verbinden mit einem anderen Konto nimmt die Kalender des alten 
   assert.equal(cfg('google_refresh_token'), 'r-other');
   assert.equal(cfg('google_needs_reauth'), null);
 });
+
+// ── Abgelöste Verbindung während eines laufenden Durchgangs (#2035) ────────────
+// Neu verbinden (handleCallback) und Trennen laufen außerhalb der google-Sperre.
+// Ein Sync oder Sofortversuch, der da gerade auf Google wartet, arbeitet mit dem
+// Client der alten Verbindung weiter. Ab dem Wechsel darf er weder Google noch
+// die Datenbank im Namen der neuen Verbindung anfassen.
+
+function replaceRefreshToken(token) {
+  db.prepare("UPDATE sync_config SET value = ? WHERE key = 'google_refresh_token'").run(token);
+}
+
+/** Sync-Attrappe, deren events.list auf `gate` wartet und dann `items` liefert. */
+function gatedInboundCalendar(gate, items) {
+  const base = syncCalendar({ calendars: writableCalendars(['primary']) });
+  const lists = [];
+  return {
+    ...base,
+    lists,
+    events: {
+      ...base.events,
+      list: async (params) => {
+        lists.push(params);
+        await gate.promise;
+        return { data: { items, nextSyncToken: 'sync-token-old-account' } };
+      },
+    },
+  };
+}
+
+for (const [label, swap] of [
+  ['neu verbunden', () => replaceRefreshToken('r-new')],
+  ['getrennt', () => disconnect()],
+]) {
+  test(`#2035: ein Sync, während dessen ${label} wird, importiert nichts und bucht nichts`, async () => {
+    reset();
+    db.prepare('DELETE FROM google_calendar_selection').run();
+    __test.setCalendarEnabled('primary', true, { name: 'Primary' });
+    const gate = deferred();
+    const calendar = gatedInboundCalendar(gate, [inboundItem('gev-old-account', 'Termin des alten Kontos')]);
+
+    const running = sync({ createCalendar: () => calendar });
+    await settle();
+    assert.equal(calendar.lists.length, 1, 'der Lauf wartet auf events.list');
+    swap();
+    gate.resolve();
+    await running;
+
+    assert.equal(googleRows().length, 0, 'kein Termin aus der abgelösten Verbindung');
+    assert.equal(__test.getSyncToken('primary') ?? null, null, 'kein syncToken der alten Verbindung');
+    assert.equal(cfg('google_last_sync'), null, 'der abgebrochene Lauf zählt nicht als Sync');
+    assert.equal(cfg('google_last_error'), null, 'und meldet der neuen Verbindung keinen Fehler');
+  });
+}
+
+test('#2035: nach einem Neuverbinden schickt ein laufender Sync keine weiteren Vormerkungen an das alte Konto', async () => {
+  reset();
+  db.prepare('DELETE FROM google_calendar_selection').run();
+  queueDeletion({ source: 'google', calendarExternalId: 'primary', eventExternalId: 'gev-2035-a' });
+  queueDeletion({ source: 'google', calendarExternalId: 'primary', eventExternalId: 'gev-2035-b' });
+  const gate = deferred();
+  const calendar = syncCalendar({ onDelete: () => gate.promise });
+
+  const running = sync({ createCalendar: () => calendar });
+  await settle();
+  assert.equal(calendar.deletes.length, 1, 'die erste Löschung hängt');
+  replaceRefreshToken('r-new');
+  gate.resolve();
+  await running;
+
+  assert.equal(calendar.deletes.length, 1, 'die zweite Löschung geht nicht mehr an das alte Konto');
+  assert.equal(tombstones().length, 2, 'beide warten auf die neue Verbindung');
+});
+
+test('#2035: ein Sofortversuch hört nach einem Neuverbinden genauso auf', async () => {
+  reset();
+  queueDeletion({ source: 'google', calendarExternalId: 'primary', eventExternalId: 'gev-2035-c' });
+  queueDeletion({ source: 'google', calendarExternalId: 'primary', eventExternalId: 'gev-2035-d' });
+  const gate = deferred();
+  const calendar = syncCalendar({ onDelete: () => gate.promise });
+
+  const running = flushOutbound({ createCalendar: () => calendar });
+  await settle();
+  assert.equal(calendar.deletes.length, 1, 'die erste Löschung hängt');
+  replaceRefreshToken('r-new');
+  gate.resolve();
+
+  assert.deepEqual(await running, { deleted: 0, updated: 0 });
+  assert.equal(calendar.deletes.length, 1, 'die zweite Löschung geht nicht mehr an das alte Konto');
+  assert.equal(tombstones().length, 2);
+});
+
+test('#2035: wird während des Auswahl-Abgleichs erneut verbunden, bleibt die Auswahl', async () => {
+  reset();
+  db.prepare('DELETE FROM google_calendar_selection').run();
+  __test.setCalendarEnabled('cal-a', true, { name: 'A' });
+  __test.setCalendarEnabled('cal-b', true, { name: 'B' });
+
+  const proto = google.auth.OAuth2.prototype;
+  const { getToken, request } = proto;
+  const saved = Object.fromEntries(Object.keys(OAUTH_ENV).map((k) => [k, process.env[k]]));
+  const gate = deferred();
+  let listed = false;
+  proto.getToken = async () => ({
+    tokens: { access_token: 'a-second', refresh_token: 'r-second', expiry_date: Date.UTC(2099, 0, 1) },
+  });
+  // Die Liste des zweiten Kontos kennt cal-a und cal-b nicht; sie kommt aber erst,
+  // nachdem schon ein drittes Konto verbunden ist.
+  proto.request = async () => { listed = true; await gate.promise; return { data: { items: [{ id: 'other' }] } }; };
+  Object.assign(process.env, OAUTH_ENV);
+  try {
+    const { handleCallback } = await import('../server/services/google-calendar.js');
+    const callback = handleCallback('code-2035');
+    await settle();
+    assert.equal(listed, true, 'der Abgleich wartet auf die Kalenderliste');
+    replaceRefreshToken('r-third');
+    gate.resolve();
+    await callback;
+  } finally {
+    proto.getToken = getToken;
+    proto.request = request;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+
+  assert.deepEqual(__test.listSelection().map((r) => r.calendar_id).sort(), ['cal-a', 'cal-b'],
+    'die Liste eines abgelösten Kontos räumt die Auswahl des aktuellen nicht ab');
+});

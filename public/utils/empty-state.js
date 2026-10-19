@@ -11,7 +11,9 @@
  *
  * Der Renderer bleibt absichtlich i18n-frei: Aufrufer übergeben schon
  * aufgelöste Strings aus ihrem eigenen `t()`. Eine zweite Übersetzungsschicht
- * hier würde nur Key-Namen über Modulgrenzen schleppen.
+ * hier würde nur Key-Namen über Modulgrenzen schleppen. Die eine Ausnahme ist
+ * der Fehlerzustand nach einem Ladevorgang (`mountLoadError`): sein Satz kommt
+ * aus der Ursache, und die kennt nur der Fehler, nicht der Aufrufer.
  *
  * Die drei Varianten und ihre ARIA-Rollen sind aus `pantry.js` übernommen, das
  * sie als einziges Modul korrekt unterschieden hat:
@@ -28,6 +30,10 @@
  */
 
 import { esc } from '/utils/html.js';
+// Nur fuer `mountLoadError` (Critique R19): der Satz zur Ursache und das Wort
+// fuer die Details. Der Rest des Renderers bleibt i18n-frei, siehe oben.
+import { t } from '/i18n.js';
+import { loadErrorSentence } from '/utils/friendly-error.js';
 
 const VARIANTS = {
   'empty':      { role: null,     icon: 'inbox',          tone: 'primary'   },
@@ -61,7 +67,7 @@ const VARIANTS = {
  */
 export function emptyStateEl({
   variant = 'empty', icon, title, description, hint, action, actions, details,
-  className, compact = false,
+  className, compact = false, terms,
 } = {}) {
   const spec = VARIANTS[variant] ?? VARIANTS.empty;
 
@@ -85,6 +91,15 @@ export function emptyStateEl({
     ...String(className ?? '').split(/\s+/).filter(Boolean),
   ].join(' ');
   if (spec.role) box.setAttribute('role', spec.role);
+  // NICHT UNTER DER SEITENBLENDE (Critique 2026-10-16, A5) - dieselbe Regel wie
+  // `stagger` (utils/ux.js). Entsteht der Leerzustand, waehrend der Router die
+  // Seite ueberblendet (`html.page-swapping`), IST die Blende sein Einblenden;
+  // `empty-state-in` lief sonst zusaetzlich darin (Aufgaben-Detailspalte: zwei
+  // Blenden und 6px Versatz uebereinander). Inline und nur am Namen: der
+  // Knoten steht danach einfach, ein spaeter entstehender blendet wie gehabt.
+  if (typeof document !== 'undefined' && document.documentElement?.classList?.contains('page-swapping')) {
+    box.style.animationName = 'none';
+  }
 
   // Feste Reihenfolge Icon → Titel → Beschreibung → Hinweis. Genau die
   // Freiheit, hier umzusortieren oder Teile zu überspringen, hat die vier
@@ -113,12 +128,23 @@ export function emptyStateEl({
   // immer als <p>; bis sie hierher delegierte, war das der einzige Unterschied
   // zwischen den beiden Fassungen.)
   if (description) parts.push(`<p class="empty-state__description">${esc(description)}</p>`);
+  // Die Begriffe einer leeren Suche als Chips (searchEmptyOptions): WAS gesucht
+  // wurde, steht als Gegenstand da, nicht in Anfuehrungszeichen im Satz.
+  const chips = (Array.isArray(terms) ? terms : [])
+    .map((term) => ({ text: plainText(term?.text), icon: plainText(term?.icon) }))
+    .filter((term) => term.text);
+  if (chips.length) {
+    parts.push(`<p class="empty-state__terms">${chips.map((term) => `<span class="empty-state__term">${
+      term.icon ? `<i data-lucide="${esc(term.icon)}" class="empty-state__term-icon" aria-hidden="true"></i>` : ''
+    }<span class="empty-state__term-text">${esc(term.text)}</span></span>`).join('')}</p>`);
+  }
   if (hint) parts.push(`<p class="empty-state__hint">${esc(hint)}</p>`);
   box.insertAdjacentHTML('beforeend', parts.join(''));
 
-  // Aufklappbare technische Details. Nur der globale Fehlerbildschirm des
-  // Routers nutzt sie: dort ist der Stack die einzige verwertbare Information
-  // und lag vorher ausschliesslich in der Browserkonsole. Als Textknoten
+  // Aufklappbare technische Details: der Stack im globalen Fehlerbildschirm
+  // des Routers, der Statuscode im Ladefehler (`mountLoadError`) und im
+  // Fehlerzustand der Sitzungspruefung. Zugeklappt stoeren sie niemanden,
+  // aufgeklappt sind sie das, was ein Bugreport braucht. Als Textknoten
   // gesetzt, nie als Markup - der Inhalt ist eine rohe Fehlermeldung.
   if (plainText(details?.text)) {
     const box2 = document.createElement('details');
@@ -227,29 +253,80 @@ export function mountEmptyState(target, opts) {
  *      für den Selbsthoster - der hier oft der Nutzer selbst ist - die einzig
  *      brauchbare Information.
  *
- * Bleibt i18n-frei wie der Rest der Datei: Aufrufer übergeben aufgelöste Strings.
+ *   3. **Die Ursache, nicht eine Vermutung** (Critique R19, 2026-10-16). Bis
+ *      hierher sagte jeder Ladefehler, was der Aufrufer fest mitgab - an 17
+ *      Stellen "Bitte pruefe die Verbindung", auch bei einer Bremse (429) oder
+ *      einem Serverfehler -, und darunter stand ein roher Chip "HTTP 429".
+ *      Jetzt kommt der Satz aus dem Fehler (`loadErrorSentence`, dieselbe
+ *      Zuordnung wie friendlyError, aber nie der Servertext). Die
+ *      `description` des Aufrufers ist nur noch der Rueckfall fuer eine
+ *      Ursache ohne eigenen Satz. Der Statuscode wandert in die aufklappbaren
+ *      Details - fuer den Selbsthoster da, fuer alle anderen kein Raetsel.
+ *
+ * Die einzige Stelle der Datei mit `t()`: der Satz zur Ursache und das Wort
+ * "Technische Details" gehoeren dem Fehlerzustand, nicht dem Aufrufer.
+ *
+ * Einen Toast zum selben Fehler gibt es nicht: der Zustand steht, bis jemand
+ * handelt, ein Toast daneben sagte dasselbe ein zweites Mal und verginge.
  *
  * @param {HTMLElement} target
  * @param {object}      opts
  * @param {string}      opts.title        Aufgelöst, modulspezifisch („Vorrat
  *                                        konnte nicht geladen werden").
- * @param {string}      opts.description  Aufgelöst, was der Nutzer tun kann.
- * @param {unknown}     [opts.error]      Das gefangene Fehlerobjekt. Nur der
- *                                        Statuscode wird gelesen.
- * @param {string}      opts.retryLabel   Aufgelöstes CTA-Label.
+ * @param {string}      [opts.description] Aufgelöster Rueckfall, wenn die
+ *                                        Ursache keinen eigenen Satz hat.
+ * @param {unknown}     [opts.error]      Das gefangene Fehlerobjekt.
+ * @param {string}      [opts.retryLabel] Aufgelöstes CTA-Label; Vorgabe
+ *                                        "Erneut versuchen".
  * @param {Function}    opts.onRetry      Wiederholt den Ladevorgang.
  * @returns {HTMLDivElement|null}
  */
-export function mountLoadError(target, { title, description, error, retryLabel, onRetry } = {}) {
-  return mountEmptyState(target, {
+export function mountLoadError(target, opts = {}) {
+  if (!target) return null;
+  const box = loadErrorEl(opts);
+  target.replaceChildren(box);
+  if (window.lucide) window.lucide.createIcons({ el: box });
+  return box;
+}
+
+/**
+ * Der Fehlerzustand als Element, ohne ihn einzuhaengen - fuer Aufrufer, die
+ * ihn in ein Template setzen (`loadErrorHTML`). Dieselben Optionen wie
+ * `mountLoadError`.
+ *
+ * @returns {HTMLDivElement}
+ */
+export function loadErrorEl({ title, description, error, retryLabel, onRetry, attrs } = {}) {
+  const detail = errorDetail(error);
+  const label = retryLabel || t('common.retry');
+  return emptyStateEl({
     variant: 'error',
     title,
-    description,
-    hint: errorDetail(error),
-    action: typeof onRetry === 'function'
-      ? { label: retryLabel, icon: 'refresh-cw', onClick: onRetry }
+    description: loadErrorSentence(error) ?? description ?? t('common.loadErrorDescription'),
+    details: detail ? { summary: t('common.errorDetails'), text: detail } : undefined,
+    action: typeof onRetry === 'function' || attrs
+      ? {
+        label,
+        icon: 'refresh-cw',
+        ...(typeof onRetry === 'function' ? { onClick: onRetry } : {}),
+        ...(attrs ? { attrs } : {}),
+      }
       : undefined,
   });
+}
+
+/**
+ * `loadErrorEl` als HTML-String, fuer Template-Literale - dieselbe Begruendung
+ * wie `emptyStateHTML`. Der Knopf wird ueber `attrs` (`data-action`)
+ * verdrahtet, ein `onRetry` ueberlebte die Serialisierung nicht.
+ *
+ * @returns {string}
+ */
+export function loadErrorHTML(opts = {}) {
+  if (typeof opts.onRetry === 'function') {
+    throw new TypeError('loadErrorHTML(): onRetry ueberlebt die String-Ausgabe nicht. attrs setzen.');
+  }
+  return loadErrorEl(opts).outerHTML;
 }
 
 /**
@@ -307,6 +384,67 @@ export function emptyStateHTML(opts = {}) {
 }
 
 /**
+ * DER LEERZUSTAND „SUCHE OHNE TREFFER" - EINER FUER ALLE MODULE (R19).
+ *
+ * Die Critique vom 2026-10-16 fand ihn in drei Dialekten: „Keine Treffer"
+ * ohne Ausweg (Aufgaben-Liste), „Nichts gefunden" mit dem Begriff in
+ * Anfuehrungszeichen und „zuruecksetzen" (Vorrat, Inventar, Rezepte) und
+ * „Suche leeren" mit dem Begriff im Satz (Aufgaben-Brett, Dokumente). Jeder
+ * Modulwechsel hiess neu lesen. Jetzt baut ihn EINE Stelle: Titel „Keine
+ * Treffer", ein Satz, der Suchbegriff (und gesetzte Filter) als Chips, und
+ * EINE Aktion „Suche zuruecksetzen". Sie setzt alles zurueck, was die Chips
+ * nennen - die Chips sind die Auskunft, was der Knopf aufhebt.
+ *
+ * Deshalb steht hier `t()`: der Text ist in allen Modulen derselbe, und eine
+ * Aufrufstelle, die ihn selbst uebersetzt, ist genau die Stelle, an der der
+ * naechste Dialekt entsteht.
+ *
+ * @param {object}   opts
+ * @param {string}   [opts.query]        Der rohe Suchbegriff (escapt der Renderer).
+ * @param {string[]} [opts.filters]      Aufgeloeste Namen gesetzter Filter.
+ * @param {Function} [opts.onReset]      Setzt Suche (und Filter) zurueck.
+ * @param {object}   [opts.resetAttrs]   Attribute am Knopf fuer die String-Ausgabe.
+ * @param {object[]} [opts.actions]      Weitere, nachrangige Wege (Dokumente:
+ *                                       im Archiv suchen).
+ * @param {string}   [opts.className]
+ * @returns {object} Optionen fuer emptyStateEl / emptyStateHTML / mountEmptyState
+ */
+export function searchEmptyOptions({ query = '', filters = [], onReset, resetAttrs, actions = [], className } = {}) {
+  const term = plainText(query)?.trim();
+  const filterNames = (Array.isArray(filters) ? filters : []).map(plainText).filter(Boolean);
+  return {
+    variant: 'no-results',
+    icon: 'search-x',
+    title: t('common.searchNoResultsTitle'),
+    description: t(filterNames.length ? 'common.searchNoResultsFilteredDescription' : 'common.searchNoResultsDescription'),
+    terms: [
+      ...(term ? [{ text: term, icon: 'search' }] : []),
+      ...filterNames.map((name) => ({ text: name, icon: 'list-filter' })),
+    ],
+    actions: [
+      { label: t('common.searchReset'), icon: 'x', onClick: onReset, attrs: resetAttrs },
+      ...(Array.isArray(actions) ? actions : []),
+    ],
+    className,
+  };
+}
+
+/** `searchEmptyOptions` als Element. */
+export function searchEmptyEl(opts) {
+  return emptyStateEl(searchEmptyOptions(opts));
+}
+
+/** `searchEmptyOptions` als String - fuer Listen, die als Markup entstehen. */
+export function searchEmptyHTML(opts = {}) {
+  return emptyStateHTML(searchEmptyOptions(opts));
+}
+
+/** `searchEmptyOptions` eingehaengt (ersetzt den Inhalt von `target`). */
+export function mountSearchEmpty(target, opts) {
+  return mountEmptyState(target, searchEmptyOptions(opts));
+}
+
+/**
  * `emptyHintEl` als HTML-String - dieselbe Begruendung wie `emptyStateHTML`.
  *
  * @param {string} text    Aufgeloester Hinweistext.
@@ -318,14 +456,21 @@ export function emptyHintHTML(text, opts) {
 }
 
 /**
- * Sprachneutrale Kurzform der Ursache, oder `null`.
+ * Sprachneutrale Kurzform der Ursache fuer die Details, oder `null`.
  *
  * `status === 0` ist in `api.js` der Netzfehler ohne Antwort - dafür gibt es
- * keinen Code zu nennen, und „HTTP 0" wäre schlechter als nichts.
+ * keinen Code zu nennen, und „HTTP 0" wäre schlechter als nichts. Ein Fehler
+ * ohne Status (Netzabbruch: `TypeError: Failed to fetch`) nennt Name und
+ * Meldung - roh, wie im Fehlerbildschirm des Routers: zum Weitergeben gedacht.
  */
 function errorDetail(error) {
   const status = Number(error?.status);
-  return Number.isInteger(status) && status > 0 ? `HTTP ${status}` : null;
+  if (Number.isInteger(status) && status > 0) {
+    const retry = plainText(error?.retryAfter);
+    return retry ? `HTTP ${status} (Retry-After: ${retry})` : `HTTP ${status}`;
+  }
+  if (error instanceof Error && error.message) return `${error.name}: ${error.message}`;
+  return null;
 }
 
 /**

@@ -87,17 +87,10 @@
   --scrollport-pad: var(--space-6);
 }
 
-/* DIE LISTENBAHN FUEHRT KEINE INLINE-AKTIONEN - dasselbe Reminders-Muster wie
- * unter 640px (Regel weiter unten). In der 420-520px-Bahn quetschten die drei
- * 44px-Knoepfe den Titel auf 116px (gemessen 1440x900, „Kinderzimmer…");
- * Bearbeiten, Ablegen und Teilaufgabe stehen im Detail direkt daneben, und
- * der Stift waere dort ein zweiter Weg zu demselben Formular. Ausgeblendet
- * per `display: none`, nicht per Deckkraft (ignore.md: Aktionen werden
- * weniger, nicht unsichtbar-klickbar). An der Klasse der Hoehenkette statt an
- * einer zweiten Container-Abfrage: EINE Schwelle, die in layout.css steht. */
-.tasks-page--split .task-card__inline-action {
-  display: none;
-}
+/* DIE LISTENBAHN ZEIGT IHREN MEHR-KNOPF (R18, D6). Bis 2026-10-16 stand hier
+ * `display: none` - aus der Zeit, als drei 44px-Knoepfe den Titel in der
+ * 420-520px-Bahn auf 116px quetschten. Seit R18 ist es EIN Knopf, und "nur
+ * im Detail" ist genau der versteckte Weg, den D6 ausschliesst. */
 
 /* Platzhalter, solange eine Aufgabe fuer die Spalte laedt (tasks.js,
  * renderTaskPane) - erst nach 150ms, ein schneller Wechsel blinkt nicht. */
@@ -168,13 +161,6 @@
     padding-inline: 0;
   }
 
-  /* Icon-only-Segmente (Ansichts-Umschalter im Kopf) brauchen weniger
-   * Innenraum als Text-Segmente. Eigene Variante statt Toolbar-Selektor: der
-   * #577-Rail-Guard verbietet horizontales Padding unter Rail-Aliassen
-   * pauschal. */
-  .group-toggle--icons .group-toggle__btn {
-    padding-inline: var(--space-2);
-  }
 }
 
 /* Gruppierungs-Toggle */
@@ -223,26 +209,6 @@
   }
 }
 
-/* ZWEI HÖHEN JE KOPFZEILE (Critique 2026-08-31, P3): der Ansichts-Umschalter
- * stand am Desktop als 54px-Well neben 40px-Kapseln (--target-md ist die
- * entschiedene Desktop-Zielhöhe der Kopf-Bedienelemente, siehe tokens.css) -
- * die wichtigste Aktion war das KLEINSTE Element der Zeile. Am Zeigegerät
- * fallen die Segmente des Kopf-Umschalters in dieselbe Höhenklasse wie ihre
- * Nachbarn; Touch behält --target-lg aus der Basisregel. Bewusst nur im Kopf
- * (.page-toolbar): die Personenleiste des Verlaufs folgt der Hoehenklasse
- * ihrer Umgebung (Kommentar oben). */
-@media (hover: hover) and (pointer: fine) {
-  .page-toolbar .group-toggle {
-    /* 1px-Naht statt 2px: 40px-Segmente + Naht + Rand = 44px Aussenhoehe,
-     * exakt die Silhouette der Icon-Kapseln daneben. */
-    padding: var(--space-px);
-  }
-
-  .page-toolbar .group-toggle__btn {
-    min-height: var(--target-md);
-  }
-}
-
 /* Ein Segment-Label ist EINZEILIG oder gar nicht da: fuer Enge gibt es die
  * Label-Verlust-Regel (Weglassen), nicht den Umbruch. Ohne nowrap brach
  * „Kanban-Ansicht" am Bindestrich auf zwei Zeilen und streckte via
@@ -273,23 +239,40 @@
   color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-ink), var(--color-text-primary));
 }
 
-/* DER KOPF-UMSCHALTER TRAEGT SEIN LABEL ERST IN DER WIDE-KLASSE (>= 1440).
+/* DER ANSICHTS-UMSCHALTER IM KOPF (D1, Critique 2026-10-16) ist das Kanon-
+ * Segment (`.segmented.segmented--icons`, panel.css) - Well, Pille, Hoehe und
+ * gleitende Kapsel kommen von dort. Hier steht nur, was ihm gehoert:
  *
- * Der Umschalter teilt sich seine Zeile mit Suche, „Filter (n)", dem
- * Werkzeugmenue und am Desktop dem Primaerknopf. Mit Label misst er einzeilig
- * rund 390px: gemessen (2026-08-28/31) drueckte er den Kopf auf dem iPad
- * hochkant von zwei auf drei Zeilen und schob ab 1024px den Primaerknopf
- * ueber die Kante; frei ist die Zeile erst ab ~1240px, und der Breakpoint-
- * Kanon (tokens.css §11c) kennt nur 640/768/1024/1440. Darunter stehen Icons
+ * SEIN LABEL ERST IN DER WIDE-KLASSE (>= 1440). Der Umschalter teilt sich
+ * seine Zeile mit Suche, Filter, dem Werkzeugmenue und am Desktop dem
+ * Primaerknopf. Mit Label misst er einzeilig rund 390px: gemessen (2026-08-
+ * 28/31) drueckte er den Kopf auf dem iPad hochkant von zwei auf drei Zeilen
+ * und schob ab 1024px den Primaerknopf ueber die Kante. Darunter stehen Icons
  * mit aria-label/title.
  *
- * Warum HIER und nicht im 640er-Block oben: die Bauteile stehen weiter oben
- * in der Datei als dieser Block, aber HINTER dem 640er-Block. Eine Regel
- * gleicher Spezifitaet dort wuerde gegen die spaetere Basisdefinition
- * verlieren - dieselbe Kaskaden-Falle, die im schmalen Zustand der Kueche
- * schon einmal 358px Hoehe gekostet hat. */
+ * UND EIN WEG ZUR ANSICHT JE BREITE: unter 768px stehen Lupe, Filter und
+ * Menue in der Titelzeile (Kopfregel mobil 1a), und die traegt kein Segment -
+ * die Ansicht steht dort als Einfachauswahl im Werkzeugmenue (toolsMenuItems),
+ * der Umschalter ist ausgeblendet. Ab 768px umgekehrt (Vorbild Dokumente). */
+.tasks-view-toggle__label {
+  white-space: nowrap;
+}
+
 @media (max-width: 1439px) {
-  .group-toggle--icons .group-toggle__label {
+  .tasks-view-toggle__label {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .tasks-view-toggle {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .tasks-toolbar .popover-menu__group:has([data-view-choice]),
+  .tasks-toolbar .popover-menu__group:has([data-view-choice]) + .popover-menu__separator {
     display: none;
   }
 }
@@ -298,14 +281,9 @@
  * Filterblatt (utils/filter-sheet.js)
  * -------------------------------------------------------- */
 /* Basis, Aktiv-Zustand und Hoehenklasse von .filter-chip leben in der
- * geteilten styles/filter-chip.css, Gruppen und Ueberschriften des Blatts in
- * layout.css (`.filter-sheet__*`). Hier bleiben nur die Chipreihe einer Achse
- * und die gemerkten Sets. */
-.filter-panel__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
+ * geteilten styles/filter-chip.css, Gruppen, Ueberschriften und die
+ * Chipreihe einer Achse (`.filter-panel__chips`) in layout.css - seit der
+ * Kalender dasselbe Blatt traegt (D2). Hier bleiben nur die gemerkten Sets. */
 
 /* Ein gemerktes Set ist eine Aktion („wende das an"), kein Zustand - deshalb
  * gestrichelt statt getoent, ohne aria-pressed. */
@@ -356,6 +334,24 @@
  * einer Regel - vorher stand derselbe Wert zweimal da. */
 .task-group {
   margin-bottom: var(--space-6);
+}
+
+/* LANGE LISTEN RECHNEN NUR, WAS IN SICHT IST (R20, Re-Critique 2026-10-17 a6
+ * P2; Guide defer-rendering-heavy-content). Mit 200+ Aufgaben (18.000
+ * Knoten) kostete der Wechsel nach /tasks einen Frame von 815 ms bei 4x CPU,
+ * zum guten Teil Stil und Layout der Gruppen unter der Falz. Ab der zweiten
+ * Gruppe - die erste steht immer in der Falz - ueberspringt der Browser sie,
+ * bis sie in die Naehe kommen; `auto` merkt sich danach die echte Hoehe, der
+ * Bildlaufbalken springt nicht. Die Luft unter der Gruppe steht dort als
+ * Innenabstand: Paint-Containment schnitte den Schatten des Traegers an der
+ * Gruppenkante sonst ab. Ohne Unterstuetzung bleibt alles, wie es war. */
+@supports (content-visibility: auto) {
+  .task-group + .task-group {
+    content-visibility: auto;
+    contain-intrinsic-size: auto none auto 480px;
+    margin-bottom: 0;
+    padding-bottom: var(--space-6);
+  }
 }
 
 /* --------------------------------------------------------
@@ -431,6 +427,27 @@
   background-color: var(--color-surface-receded);
 }
 
+/* DIE GEWAEHLTE ZEILE IM AUSWAHLMODUS (R20). Nur der Kreis sagte, was
+ * gewaehlt ist, und er sah in Ruhe aus wie der Erledigen-Kreis, den er
+ * ersetzt. Die Flaeche traegt jetzt den Ton des gewaehlten Kreises (App-Akzent,
+ * nicht der Modulton: der ist bei den Aufgaben das Gruen von „erledigt") -
+ * dieselbe Toenung wie eine gewaehlte Kontaktzeile. Sie liegt auf der
+ * Zeile (`__main`), nicht auf der Karte: deren zurueckgenommene Flaeche
+ * (erledigt, abgelegt) bleibt unberuehrt und schimmert unter der Toenung
+ * durch, und die Unteraufgaben darunter sind nicht mitgewaehlt. */
+.tasks-page .task-card--selected > .task-card__main {
+  background-color: color-mix(in srgb, var(--color-accent) var(--tint-state), transparent);
+}
+
+/* Am Desktop markiert die Spalte die Zeile, deren Aufgabe rechts steht
+ * (`.is-selected`). Waehrend der Auswahl steht rechts „N ausgewaehlt", und die
+ * Markierung las sich bei 0 gewaehlten wie ein erster Haken (Re-Critique
+ * 2026-10-17, A2 P2-2). Sie schweigt, solange gewaehlt wird - wie in den
+ * Kontakten. */
+.tasks-page.is-selecting .task-card.is-selected:not(.task-card--selected) {
+  background-color: transparent;
+}
+
 .task-card--archived .task-card__title {
   color: var(--color-text-secondary);
 }
@@ -468,12 +485,12 @@
 /* Gasse für den Wisch-Chevron (.swipe-row::after, layout.css): 8px Abstand vom
  * Rand + 12px Glyph + 8px Luft. Der Einkauf reservierte sie an .shopping-item
  * schon immer, die Aufgaben nicht - dort lag der Chevron über dem Zeilenende.
- * Unauffällig unter 640px (Inline-Aktionen sind dort ausgeblendet), sichtbar
- * auf Touch-Tablets zwischen 641 und 1023px, wo Chevron UND Inline-Aktionen
- * gleichzeitig da sind. Ab 1024px blendet layout.css den Chevron aus, die
- * Reserve kostet dort nichts, weil (hover: none) am Zeigergerät nicht greift. */
+ * Seit R18 (D6) traegt eine Zeile mit Mehr-Knopf keinen Chevron mehr
+ * (layout.css), also auch keine Gasse: die gilt nur noch der Zeile ohne
+ * Knopf, die trotzdem wischt. Ab 1024px blendet layout.css den Chevron aus,
+ * die Reserve kostet dort nichts, weil (hover: none) am Zeigergerät nicht greift. */
 @media (hover: none) {
-  .task-card__main {
+  .swipe-row:not(.swipe-row--static) .task-card__main:not(:has(> .row-action--more)) {
     padding-inline-end: calc(var(--space-2) + var(--space-3) + var(--space-2));
   }
 }
@@ -749,8 +766,9 @@
    * kostete hier 4px je Zeile ohne eine zweite Zeile, die ihn braucht.
    * Ist ein <button>: der Titel öffnet die Aufgabe und muss fokussierbar sein.
    * Die Reset-Regeln (font/border/background) kommen aus reset.css, hier nur
-   * die Block-Geometrie, damit der Button wie der frühere Div fließt. */
-  display: block;
+   * die Block-Geometrie, damit der Button wie der frühere Div fließt; die
+   * Anzeige (`-webkit-box`, hoechstens zwei Zeilen) setzt die Titelregel in
+   * typography.css. */
   position: relative;
   width: 100%;
   padding-inline: 0;
@@ -768,21 +786,11 @@
   margin-block-start: calc(-1 * var(--list-row-pad, var(--space-3)));
   margin-block-end: 0;
   cursor: pointer;
-  /* EINZEILIG MIT ELLIPSE, und das ist die Ausnahme von der Regel nebenan
-   * (list-row.css: „UMBRECHEN, NICHT ABSCHNEITEN"). Die Regel gilt dem
-   * ARTIKELNAMEN im Laden: dort ist der Name der einzige Zweck der Zeile und
-   * nirgends sonst zu haben. Ein Aufgabentitel steht vollstaendig in der
-   * Detailflaeche, die ein Tipp auf genau diesen Knopf oeffnet.
-   *
-   * Gemessen bei 390x844: von zwoelf Zeilen brachen zwei zweizeilig um
-   * („Tropfenden Wasserhahn reparieren", „Geburtstagsgeschenk fuer Mama") und
-   * standen mit 80,6px gegen 61,1px der uebrigen zehn - eine Streuung von
-   * 19,5px in einer Liste, die einen Takt haben soll. Die 228px Titelspalte
-   * fassen rund 28 Zeichen; was darueber liegt, endet jetzt in einer Ellipse
-   * statt in einer zweiten Zeile. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* HOECHSTENS ZWEI ZEILEN (R19): die Titelregel aller Listenzeilen steht in
+   * typography.css. Hier stand eine eigene Fassung - einzeilig mit Ellipse,
+   * weil zwei von zwoelf Titeln umbrachen und die Liste ihren Takt verlor.
+   * Die Critique vom 2026-10-16 fand vier solcher Fassungen fuer dieselbe
+   * Stelle; eine zweite Zeile ist der Preis der einen Regel. */
   text-decoration: line-through;
   text-decoration-color: transparent;
   transition:
@@ -953,13 +961,11 @@
     --list-row-pad: var(--space-2);
   }
 
-  /* HIG-Dichte (Reminders-Muster): auf Touch KEINE Inline-Action-Buttons -
-   * Tippen öffnet die Lese-Ansicht (mit allen Aktionen), Wischen erledigt/
-   * bearbeitet. Drei 44px-Buttons pro Zeile quetschten den Titel auf ~115px
-   * und brachen jede Aufgabe zweizeilig um. */
-  .task-card__inline-action {
-    display: none;
-  }
+  /* DER MEHR-KNOPF BLEIBT AUCH AUF DEM TELEFON (R18, D6). Hier stand bis
+   * 2026-10-16 `display: none` aus der Zeit der drei Inline-Knoepfe (Titel auf
+   * ~115px). Seit R18 ist es EIN Knopf; versteckt blieb nur Wischen und das
+   * Detail - und "nur per Geste" schliesst D6 aus. Die Breite holt die Zeile
+   * mit dem Rezept des Griffs zurueck: schmal, aber hoch (Raster unten). */
 }
 
 /* MOBIL GEHOERT DIE ZEILE DEM TITEL (R9 M1, Re-Critique 2026-09-27 A3 P1-1).
@@ -1039,24 +1045,62 @@
    * ihm statt unter ihm. Die Regeln haengen am Griff selbst (:has), damit
    * Zeilen ohne Griff - anderes Gruppieren, Auswahlmodus, nur lesen - ihr
    * Raster behalten. */
-  /* Nicht in einer Gruppe mit nur einer Zeile: dort blendet list-row.css den
-   * Griff aus (.swipe-row:only-child), und die leere vierte Spalte kostete den
-   * Titel 8px. */
-  .swipe-row:not(:only-child) .task-card__main:has(> .list-row__drag) {
+  /* Auch in einer Gruppe mit nur einer Zeile: list-row.css macht den Griff
+   * dort nur unsichtbar (.swipe-row:only-child), seine Spalte bleibt - sonst
+   * stuenden Avatare und Faelligkeit der Einzelzeile 42px weiter rechts als in
+   * jeder anderen Gruppe (Re-Critique 2026-10-17, A2). */
+  .task-card__main:has(> .list-row__drag) {
     grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
 
-  .swipe-row:not(:only-child) .task-card__main:has(> .list-row__drag) .task-card__title {
+  .task-card__main:has(> .list-row__drag) .task-card__title {
     grid-column: 2 / 4;
   }
 
-  .swipe-row:not(:only-child) .task-card__main:has(> .list-row__drag):not(:has(> .avatar-stack)) .task-card__meta {
+  .task-card__main:has(> .list-row__drag):not(:has(> .avatar-stack)) .task-card__meta {
     grid-column: 2 / 4;
   }
 
   .task-card__main > .list-row__drag {
     grid-column: 4;
     grid-row: 1 / span 2;
+  }
+
+  /* DER MEHR-KNOPF (R18, D6) bekommt dieselbe Endspalte ueber beide Zeilen
+   * wie der Griff - und dasselbe Mass: schmal, aber hoch (list-row.css,
+   * `.list-row__drag`). Ein 48er-Quadrat kostete den Titel 14px mehr; die
+   * Trefferflaeche bleibt ueber die volle Zeilenhoehe 34x58, also ueber dem
+   * Touch-Minimum. Steht ein Griff daneben, rueckt der eine Spalte weiter. */
+  .task-card__main:has(> .row-action--more) {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+
+  .task-card__main:has(> .row-action--more) .task-card__title,
+  .task-card__main:has(> .row-action--more):not(:has(> .avatar-stack)) .task-card__meta {
+    grid-column: 2 / 4;
+  }
+
+  .task-card__main > .row-action--more {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+    width: auto;
+    min-width: 0;
+    height: auto;
+    align-self: stretch;
+    min-height: var(--target-md);
+    padding-inline: var(--space-2);
+    /* Gleiche Kante wie der Titel: das Polster der Zeile gehoert hier zur
+     * Trefferflaeche, der Knopf reicht bis an ihren Rand. */
+    margin-block: calc(-1 * var(--list-row-pad, var(--space-3)));
+    border-radius: var(--radius-md);
+  }
+
+  .swipe-row:not(:only-child) .task-card__main:has(> .row-action--more):has(> .list-row__drag) {
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  }
+
+  .task-card__main > .row-action--more ~ .list-row__drag {
+    grid-column: 5;
   }
 
   /* Ein Long-Press ist hier eine Frage nach der Person, kein Markieren und

@@ -30,7 +30,7 @@ import {
   configuredHouseholdTimeZone, householdTimeZone, isValidTimeZone, localToUTCPrecise,
 } from '../utils/timezone.js';
 import { localDayEndUtc, utcStamp } from '../utils/rrule-until.js';
-import { authoredAfterInbound, outboundEvent } from './outbound-dtstart.js';
+import { authoredAfterInbound, outboundEvent, outboundRecurrenceRule } from './outbound-dtstart.js';
 import { alignmentMoved, googleReading, isEcho, sentSnapshot } from './outbound-echo.js';
 import { assignDefaultToEvent, reassignDefaultOnCalendarMove } from './sync-assignment.js';
 import { countSourceEvents, deleteSourceEvents } from './calendar-prune.js';
@@ -159,7 +159,87 @@ function isCurrentRefreshToken(token) {
  * "neu verbinden". Durchgereicht landet sie in withReauthGuard.
  */
 function passOnRefusal(err) {
-  if (isInvalidGrant(err)) throw err;
+  if (isInvalidGrant(err) || err instanceof GoogleConnectionReplacedError) throw err;
+}
+
+// --------------------------------------------------------
+// Abgelöste Verbindung mitten im Lauf (#2035)
+// Neu verbinden und Trennen laufen außerhalb der google-Sperre: das OAuth-
+// Callback soll nicht auf einen langen Sync warten, und disconnect() ist
+// synchron. Ein Durchgang, der gerade auf Google wartet, arbeitet danach mit dem
+// Client der alten Verbindung weiter. Er hört deshalb selbst auf, sobald das
+// gespeicherte Refresh-Token nicht mehr seines ist: keine weitere Anfrage an das
+// alte Konto, kein Import, keine Buchung, kein syncToken, kein Ergebnis in der
+// Statuszeile der neuen Verbindung.
+// --------------------------------------------------------
+
+class GoogleConnectionReplacedError extends Error {
+  constructor() {
+    super('Google connection was replaced while the run was in progress.');
+    this.name = 'GoogleConnectionReplacedError';
+    // Der Ausgang gehört zu einer Verbindung, die es nicht mehr gibt (sync-outcome.js).
+    this.superseded = true;
+  }
+}
+
+// Die Ressourcen, über die Sync und Sofortversuch mit Google sprechen.
+const GUARDED_RESOURCES = new Set(['events', 'calendarList', 'colors']);
+
+/**
+ * Bindet einen Kalender-Client an die Verbindung, für die er gebaut wurde. Jede
+ * Anfrage prüft vor dem Absenden und nach der Antwort, ob das gespeicherte
+ * Refresh-Token noch das des Clients ist; sonst wirft sie
+ * GoogleConnectionReplacedError, auch statt eines Fehlers von Google, damit kein
+ * Handler ihn als Fehlversuch einer Vormerkung verbucht. Nach der Prüfung folgt
+ * bis zum Schreiben kein await mehr.
+ *
+ * Das Token des Clients zieht der `tokens`-Listener bei einer Rotation mit; eine
+ * Attrappe ohne Auth-Client (Suiten) gilt mit dem Token beim Start.
+ * @returns {{ calendar: object, assertCurrent: () => void }}
+ */
+function bindToConnection(calendar) {
+  const startToken = cfgGet('google_refresh_token');
+  // Gleichheit statt isCurrentRefreshToken: eine Attrappe, die ohne gespeichertes
+  // Token startet (Suiten), bleibt bei "kein Token" gültig. Ein echter Client
+  // entsteht nie ohne (loadAuthorizedClient wirft).
+  const assertCurrent = () => {
+    if (cfgGet('google_refresh_token') !== (refreshTokenOf(calendar) ?? startToken)) {
+      throw new GoogleConnectionReplacedError();
+    }
+  };
+  const wrapResource = (resource) => new Proxy(resource, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop);
+      if (typeof value !== 'function') return value;
+      return async (...args) => {
+        assertCurrent();
+        let result;
+        try {
+          result = await value.apply(target, args);
+        } catch (err) {
+          assertCurrent();
+          throw err;
+        }
+        assertCurrent();
+        return result;
+      };
+    },
+  });
+  // Kein Proxy um den Kalender selbst: googleapis legt `events` & Co. als nicht
+  // konfigurierbare Eigenschaften an, die ein Proxy unverändert liefern müsste.
+  // Das Objekt erbt alles Übrige (`context` für refreshTokenOf) vom Original.
+  const bound = Object.create(calendar);
+  for (const name of GUARDED_RESOURCES) {
+    const resource = calendar[name];
+    if (resource && typeof resource === 'object') {
+      Object.defineProperty(bound, name, { value: wrapResource(resource) });
+    }
+  }
+  return { calendar: bound, assertCurrent };
+}
+
+function logSuperseded(what) {
+  log.info(`${what} stopped: the Google connection was replaced or removed while it was running.`);
 }
 
 /** Das Refresh-Token, das ein OAuth2-Client (oder der Kalender darüber) gerade trägt. */
@@ -497,12 +577,18 @@ async function runFlushOutbound(createCalendar) {
   const hasUpdates   = pendingUpdateCount() > 0;
   if (!hasDeletions && !hasUpdates) return idle;
 
-  return withReauthGuard((track) =>
-    runFlushWith(() => track(createCalendar()), hasDeletions, hasUpdates));
+  try {
+    return await withReauthGuard((track) =>
+      runFlushWith(() => track(createCalendar()), hasDeletions, hasUpdates));
+  } catch (err) {
+    if (!(err instanceof GoogleConnectionReplacedError)) throw err;
+    logSuperseded('Outbound pass');
+    return idle;
+  }
 }
 
 async function runFlushWith(createCalendar, hasDeletions, hasUpdates) {
-  const calendar = createCalendar();
+  const { calendar } = bindToConnection(createCalendar());
   await ensureAccessToken(calendar);
   const deleted = hasDeletions ? await processPendingDeletions(calendar) : 0;
   const updated = hasUpdates
@@ -784,16 +870,28 @@ async function handleCallback(code) {
  * Scheitert der Abruf, bleibt die Auswahl, wie sie ist.
  */
 async function dropUnreachableSelection() {
+  let client = null;
   let offered;
   try {
-    offered = new Set((await listCalendarsWith()).map((cal) => cal.id));
+    offered = new Set((await listCalendarsWith((c) => { client = c; return c; })).map((cal) => cal.id));
   } catch (err) {
     log.warn('Calendar list after reconnecting is not available, selection kept:', err.message);
     return;
   }
-  const del = db.get().prepare('DELETE FROM google_calendar_selection WHERE calendar_id = ?');
-  const gone = listSelection().map((row) => row.calendar_id).filter((id) => !offered.has(id));
-  for (const id of gone) del.run(id);
+  // Während der Abfrage erneut verbunden oder getrennt (#2035): die Liste gehört
+  // zu einem abgelösten Konto und sagt über die aktuelle Auswahl nichts.
+  // Prüfen und Löschen in einer Transaktion, ohne await dazwischen.
+  const gone = db.get().transaction(() => {
+    if (!isCurrentRefreshToken(refreshTokenOf(client))) return null;
+    const del = db.get().prepare('DELETE FROM google_calendar_selection WHERE calendar_id = ?');
+    const ids = listSelection().map((row) => row.calendar_id).filter((id) => !offered.has(id));
+    for (const id of ids) del.run(id);
+    return ids;
+  })();
+  if (gone === null) {
+    log.info('Connection replaced while checking the calendar selection, selection kept.');
+    return;
+  }
   if (gone.length) log.info(`${gone.length} calendar(s) not offered by the reconnected account removed from the selection.`);
 }
 
@@ -876,12 +974,19 @@ async function sync({ createCalendar = authorizedCalendar } = {}) {
   // festgehalten haben.
   return runSerialized('google', 'sync', async () => {
     if (needsReauth()) throw new GoogleReauthRequiredError();
-    return withSyncOutcome(db.get(), 'google', () => withReauthGuard((track) => runSync(() => track(createCalendar()))));
+    try {
+      return await withSyncOutcome(db.get(), 'google', () => withReauthGuard((track) => runSync(() => track(createCalendar()))));
+    } catch (err) {
+      // Abgelöst (#2035): kein Fehler der neuen Verbindung, ihr nächster Lauf holt nach.
+      if (!(err instanceof GoogleConnectionReplacedError)) throw err;
+      logSuperseded('Sync');
+      return undefined;
+    }
   });
 }
 
 async function runSync(createCalendar) {
-  const calendar = createCalendar();
+  const { calendar, assertCurrent } = bindToConnection(createCalendar());
   await ensureAccessToken(calendar);
 
   // Event-Farbpalette (colorId → Hex) einmalig für den ganzen Sync laden.
@@ -1033,6 +1138,7 @@ async function runSync(createCalendar) {
     else log.debug(outboundSummary);
   }
 
+  assertCurrent();
   cfgSet('google_last_sync', new Date().toISOString());
 }
 
@@ -1613,8 +1719,11 @@ function googleBody(rawEvent, colorMap, timeZone) {
     gEvent.end   = { dateTime: endDt,   timeZone };
   }
 
+  // Ein UNTIL aus dem alten Formular geht an einer eigenen Serie ohne Zone als
+  // Datum in `normalizeRecurrenceUntil` (#1992, services/outbound-dtstart.js).
   if (event.recurrence_rule) {
-    gEvent.recurrence = [`RRULE:${normalizeRecurrenceUntil(rruleValue(event.recurrence_rule), allDay, timeZone, event.tzid)}`];
+    const rule = outboundRecurrenceRule(event);
+    gEvent.recurrence = [`RRULE:${normalizeRecurrenceUntil(rruleValue(rule), allDay, timeZone, event.tzid)}`];
   }
 
   return gEvent;

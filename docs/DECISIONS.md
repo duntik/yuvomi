@@ -920,3 +920,107 @@ code live to a long-lived secret in a script. A review state that a fresh databa
 which is the deny-list in `sync_config` deciding alone again. A replace that keeps the switch
 because the source "is the same". And a delete or a replace that reaches a folder without an
 install record.
+
+---
+
+## 13. Comments stay in the source and stay off the wire
+
+**The files under `public/` keep their comments. The server removes them from Yuvomi's own
+JavaScript and CSS when it serves them, keeps the result in memory, and gives it the ETag of the
+bytes it sends. There is no build step, and line numbers stay where they are.**
+
+Yuvomi has no bundler on purpose, and its comments carry the reasons a reader needs: why a guard
+exists, which measurement a value came from, which issue a branch closes. They are also most of
+what goes over the wire. Measured on 2026-10-16 over `public/`: 59 % of the CSS and 41 % of the
+JavaScript are comments, and after Brotli the share is larger still, because German prose packs
+worse than code - JavaScript went from 2.0 to 0.9 MB, CSS from 621 to 129 KB. Critique R18
+(2026-10-07) had decided to keep the comments and save on transport only; R19 measured that this
+was not enough on a phone and moved the cut to delivery time, decided by Ulas on 2026-10-16.
+
+The cut happens where it can be checked rather than where it is cheapest. A build step would put
+a second copy of every file into the image and leave the operator reading code without its
+reasons. Doing it per request would cost CPU on every load. So the server cuts each file once, on
+its first request, and holds the result next to its Brotli version (`server/utils/static-assets.js`).
+A comment is replaced by the line breaks it contained, so a stack trace from a bug report points
+at the same line in the repository. Comments marked `/*!`, `@license` or `@preserve` stay, and
+vendored code (`public/vendor/`, `*.min.js`) is never touched.
+
+The risky half is JavaScript: a tokenizer that mistakes a `//` inside a regular expression for a
+comment deletes code. The rule for whether a `/` starts a regular expression is the usual one for a
+tokenizer without a parser, and the proof is not that rule but a comparison with a real parser on
+every file that ships.
+
+### How to sort the next case
+
+1. **Is it our own text file under `public/`?** Then it is cut. A vendored or minified file is not.
+2. **Does a new file type need it?** Add a cutter with its own proof against a real parser or the
+   browser before it joins; until then it goes as it is.
+3. **Does the served text differ from the file?** Then the ETag is the hash of the served text,
+   and any path that serves the file itself uses the file's hash. The same ETag must mean the same
+   bytes, or the service worker's revalidation keeps a stale copy.
+
+### Where the rule lives
+
+- `server/utils/strip-comments.js` does the cut (`stripJsComments`, `stripCssComments`).
+- `server/utils/static-assets.js` (point 4 of its header) decides which files are cut, stores the
+  result, compresses it, and serves it with its own ETag; `server/index.js` mounts it with the
+  default `strip: true`. The over-limit path past the in-memory store serves the raw file under the
+  raw file's ETag.
+- `npm run test:strip-comments` compares the comments the cutter finds with acorn's (shipped with
+  Node, reached with `--expose-internals` in that suite only) for every JavaScript file under
+  `public/`, runs `node --check` on every result, and checks every stylesheet rule by rule.
+- `npm run test:static-assets` holds the transport: same bytes on br, gzip and identity under one
+  ETag, raw vendor files, raw over-limit responses under their own ETag, re-cutting a changed file.
+
+### What counts as undoing it
+
+Stripping comments in the repository or in a build step. Serving a cut file under the raw file's
+ETag, or the other way round. Cutting vendored code. And a cutter for a new file type that ships
+without a check against a real parser.
+
+---
+
+## 14. Cascade layers wait for the browser floor
+
+**No `@layer` until the supported floor reaches Chrome 99, Firefox 97 and Safari 15.4; until
+then the number of real `!important` declarations in `public/styles/` may only go down** (R20,
+2026-10-18: the floor in [installation.md](installation.md) is Chrome 87 / Firefox 79 / Safari
+14.1, which drop a layered stylesheet whole, and wrapping the current sheets in layers changed
+52 of 76 measured screens; the ceiling lives in `npm run test:frontend-audit`,
+"!important-Sperrklinke"; raising the floor reopens it).
+
+---
+
+## 15. No index of modules until a module can be held to what was reviewed
+
+**Yuvomi keeps no list of third-party modules, neither in this repository nor in the app.
+Authors set the GitHub topic `yuvomi-module`, and [MODULES.md](../MODULES.md) points to that
+topic with the note that nothing found there is tested or recommended** (D#746, #1671; decided
+by Ulas on 2026-10-18).
+
+A list the maintainer keeps reads as a recommendation, and nothing in Yuvomi lets the maintainer give one.
+A module is same-origin script with the session of every member who opens it (entry 12): there
+is no permission model a manifest could declare and the server could enforce, and no sandbox.
+And what gets installed is a movable ref, a branch or a tag, not the commit somebody read, so
+a module reviewed today can be something else after its next push. Once #1671 put an install
+one step away from a link, an entry in a list became an install path. Projects without a
+sandbox land in the same place: Paperless-ngx keeps "Related Projects" in its wiki with a
+note that it does not endorse them, Immich has the community-run awesome-immich. Obsidian's
+manual review of its plugin directory could not keep up, and VS Code extensions were hit by
+GlassWorm through malicious updates to extensions that had already been accepted.
+
+### Where the rule lives
+
+- [MODULES.md](../MODULES.md), "Finding Modules", with the topic link and the disclaimer, and
+  the topic hint under "Preparing a module for installation".
+- No index file in the repository, no list of modules in the app, and no built-in source in
+  Settings -> Modules -> Add custom module: the admin pastes an address they chose.
+
+### What would reopen it
+
+All three of these, not one of them: a permission model in the manifest that the server
+enforces (the `/api/v1` scopes a module declares, and nothing beyond them), an approval bound
+to a commit SHA instead of a ref, so that an update needs a new approval, and a second
+reviewer besides the maintainer. Only then is a list pinned to reviewed SHAs worth discussing.
+A community-run list linked from MODULES.md is not undoing this decision; a list in this
+repository or in the app, curated or not, is.

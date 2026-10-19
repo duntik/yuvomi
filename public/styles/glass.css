@@ -167,11 +167,13 @@
     }
   }
 
-  /* Active-State in Sidebar */
+  /* Active-State in Sidebar: die Flaeche traegt die Pille (Abschnitt 38,
+   * auch am gepinnten Eintrag). Hier stand eine eigene statische Toenung mit
+   * Glanzkante - in der Liste per `--liquid` abgeschaltet, an Einstellungen
+   * blieb sie stehen (Critique 2026-10-16). Uebrig bleibt die Ecke, die auch
+   * die Hover-Flaeche des gepinnten Eintrags rundet. */
   .nav-sidebar .nav-item[aria-current="page"] {
-    background: color-mix(in srgb, var(--color-accent) var(--tint-state), transparent);
     border-radius: var(--radius-sm);
-    box-shadow: inset 0 1px 0 var(--glass-highlight-subtle);
   }
 }
 
@@ -229,7 +231,10 @@
 
 /* Blur nur wenn unterstützt */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  .modal-overlay {
+  /* Der Grund des nativen Dialogs (`::backdrop`, D7) traegt dasselbe Glas. */
+  .modal-overlay,
+  dialog.modal-overlay::backdrop,
+  dialog.dialog-surface::backdrop {
     background-color: var(--color-overlay-glass);
     backdrop-filter: var(--blur-xs) saturate(120%);
     -webkit-backdrop-filter: var(--blur-xs) saturate(120%);
@@ -585,6 +590,20 @@ textarea.form-input {
   }
 }
 
+/* Dieselbe Einfahrt fuer die eigenen nativen Dialoge (Symbolauswahl,
+ * Zuschnitt; `.dialog-surface` in layout.css, D7). */
+@media (min-width: 768px) {
+  dialog.dialog-surface:not(.dialog-surface--closing) {
+    animation: glass-modal-scale-in var(--duration-xl) var(--ease-glass) forwards;
+  }
+}
+
+@media (max-width: 767px) {
+  dialog.dialog-surface:not(.dialog-surface--closing) {
+    animation: glass-sheet-in var(--sheet-in) forwards;
+  }
+}
+
 /* ================================================================
  * 19. Seitentransitionen - entfallen (2026-09-26)
  *
@@ -637,16 +656,19 @@ html.navigating .app-content *::after {
 /* ================================================================
  * 22. Skeleton Shimmer — Glass Shimmer
  * ================================================================ */
+/* Flaeche und Band getrennt (R19): die Flaeche steht, das Band gleitet als
+ * `::after` per transform (layout.css). Dieselben Farben wie vorher. */
 .skeleton {
+  background: var(--color-border-subtle);
+}
+
+.skeleton::after {
   background: linear-gradient(
     105deg,
-    var(--color-border-subtle) 0%,
-    var(--color-border-subtle) 30%,
+    transparent 30%,
     color-mix(in srgb, var(--color-surface) 90%, var(--glass-highlight)) 50%,
-    var(--color-border-subtle) 70%,
-    var(--color-border-subtle) 100%
+    transparent 70%
   );
-  background-size: 250% 100%;
 }
 
 /* ================================================================

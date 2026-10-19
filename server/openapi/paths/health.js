@@ -55,6 +55,8 @@ export function healthPaths() {
   // heisst, nennt ihren Fall - angehaengt an jede Operation auf einer Zeile
   // (Pfad mit `{id}`), siehe withNotFoundReasons() am Ende.
   const NOT_FOUND = 'A 404 for a row that does not exist or is not writable for the caller carries a `reason` naming the row: `health_vital_not_found`, `health_medication_not_found`, `health_schedule_not_found`, `health_dose_not_found`, `health_lab_report_not_found`, `health_lab_result_not_found`, `health_activity_not_found`, `health_prevention_type_not_found`, `health_prevention_record_not_found`, `health_nutrition_entry_not_found`, `health_cycle_period_not_found` or `health_cycle_log_not_found` (#1909).';
+  // Critique R19: unmoegliche Vitalwerte (server/routes/health/vital-limits.js).
+  const VITAL_LIMITS = ' A measurement no person can have is refused with 400 and a `reason`: `health_vital_bp_order` when systolic is not above diastolic, `health_vital_out_of_range` outside the possible range of its type and unit (weight 0.2-700 kg / 0.4-1550 lb, SpO2 at most 100 %, temperature 10-46 °C / 50-115 °F, glucose 10-2000 mg/dL / 0.5-111 mmol/L, blood pressure 40-300 / 20-200 mmHg, pulse 20-300). A PATCH is checked as the row would stand afterwards; units outside this list have no numeric bounds.';
   const TAKEN_NOW = ' A dose that ends up `taken` without a `taken_at` gets the current minute in household wall-clock time, so no path stores `taken` without a time.';
   // Der kanonische Satz aus docs/DECISIONS.md Abschnitt 5, nicht das Paar
   // private/family der uebrigen Gesundheit. Der benannte Satz ('assignees')
@@ -65,15 +67,15 @@ export function healthPaths() {
   return withNotFoundReasons(NOT_FOUND, {
     '/api/v1/health/vitals': {
       get: op({ summary: 'List vital measurements', tag: 'Health', description: 'Scoped to the viewer; `?user_id=` filters to a family member (only their `family`-visible rows). Optional `type`, `from`, `to` filters.' }),
-      post: op({ summary: 'Create a vital measurement', tag: 'Health', stateChanging: true, requestBody: jsonBody(null), description: WALL_CLOCK_INPUT.trim() }),
+      post: op({ summary: 'Create a vital measurement', tag: 'Health', stateChanging: true, requestBody: jsonBody(null), description: (WALL_CLOCK_INPUT + VITAL_LIMITS).trim() }),
     },
     '/api/v1/health/vitals/{id}': {
-      patch: op({ summary: 'Update a vital measurement', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null), description: WALL_CLOCK_INPUT.trim() }),
+      patch: op({ summary: 'Update a vital measurement', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null), description: (WALL_CLOCK_INPUT + VITAL_LIMITS).trim() }),
       delete: op({ summary: 'Delete a vital measurement', tag: 'Health', params: [idParam()], stateChanging: true }),
     },
     '/api/v1/health/medications': {
       get: op({ summary: 'List medications', tag: 'Health', description: 'Scoped to the viewer; `?user_id=` and `?active=` filters supported.' }),
-      post: op({ summary: 'Create a medication', tag: 'Health', stateChanging: true, requestBody: jsonBody(null) }),
+      post: op({ summary: 'Create a medication', tag: 'Health', stateChanging: true, requestBody: jsonBody(null), description: 'Optional `schedules`: an array of up to 48 intake schedules ({ time_of_day, days_mask?, dose_qty?, start_date?, end_date?, active? }, same rules as the schedules endpoint). The medication and its schedules are written in one transaction: if any schedule is invalid or fails, nothing is created. When `schedules` is sent, the response row carries the created `schedules`.' }),
     },
     '/api/v1/health/medications/{id}': {
       patch: op({ summary: 'Update a medication', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null) }),
@@ -89,7 +91,7 @@ export function healthPaths() {
     },
     '/api/v1/health/medications/{id}/logs': {
       get: op({ summary: 'List a medication\'s dose log', tag: 'Health', params: [idParam()], description: 'Optional `from`/`to` filters on `scheduled_at`.' }),
-      post: op({ summary: 'Add a dose-log entry', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null), description: 'Body: { scheduled_at?, schedule_id?, status?, taken_at?, dose_qty?, note? }; `status` defaults to `pending`. Only a `taken` entry keeps `taken_at`: sent alongside `pending` or `skipped`, it is dropped and stored as null.' + TAKEN_NOW + WALL_CLOCK_INPUT }),
+      post: op({ summary: 'Add a dose-log entry', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null), description: 'Body: { scheduled_at?, schedule_id?, status?, taken_at?, dose_qty?, note?, stock_deduct? }; `status` defaults to `pending`. Only a `taken` entry keeps `taken_at`: sent alongside `pending` or `skipped`, it is dropped and stored as null. `stock_deduct` (not negative) lowers the recorded stock in the same transaction as the log entry, never below 0, and only for a `taken` entry; a medication without recorded stock keeps none (#2069). One entry per planned occurrence: when an entry for the same `schedule_id` and `scheduled_at` exists, it is updated and the answer is `200`, and stock is deducted only when it turns `taken`. Send an `Idempotency-Key` to retry an as-needed dose safely.' + TAKEN_NOW + WALL_CLOCK_INPUT }),
     },
     '/api/v1/health/logs/{id}': {
       patch: op({
@@ -109,7 +111,7 @@ export function healthPaths() {
       }),
     },
     '/api/v1/health/logs/{id}/take': {
-      post: op({ summary: 'Mark a dose as taken', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null), description: 'Body: { taken_at? }.' + TAKEN_NOW + WALL_CLOCK_INPUT }),
+      post: op({ summary: 'Mark a dose as taken', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null), description: 'Body: { taken_at?, stock_deduct? }. `stock_deduct` (not negative) lowers the recorded stock in the same transaction, never below 0; an entry that is already taken does not deduct a second time (#2069).' + TAKEN_NOW + WALL_CLOCK_INPUT }),
     },
     '/api/v1/health/logs/{id}/skip': {
       post: op({ summary: 'Mark a dose as skipped', tag: 'Health', params: [idParam()], stateChanging: true, requestBody: jsonBody(null) }),

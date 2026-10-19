@@ -1,6 +1,6 @@
 /**
  * Test: A household product above the stock batch (#1448, part 1)
- * Purpose: Migration 250 groups the existing batches into products by their
+ * Purpose: Migration 253 groups the existing batches into products by their
  *          own wording (trimmed, whitespace collapsed, case-insensitive, Unicode
  *          case included) and unit, with its own frozen grouping; the start of
  *          the server adopts batches an older version wrote without a product
@@ -86,7 +86,7 @@ function databaseAt(version) {
 }
 
 /**
- * The stock of a household before migration 250: one row per batch, the
+ * The stock of a household before migration 253: one row per batch, the
  * wording as people typed it. `created_at`/`updated_at` are explicit, because
  * "most recently updated" and "oldest" decide name, category and author.
  */
@@ -144,11 +144,11 @@ test('productKey: the household wording, trimmed, collapsed, case-insensitive; n
 });
 
 // --------------------------------------------------------------------------
-// Migration 250
+// Migration 253
 // --------------------------------------------------------------------------
 
-test('migration 250 groups the existing batches by wording and unit', () => {
-  const legacy = databaseAt(249);
+test('migration 253 groups the existing batches by wording and unit', () => {
+  const legacy = databaseAt(252);
   insertLegacyRows(legacy);
   // The trap a SQL backfill would fall into: SQLite folds ASCII only.
   assert.notEqual(legacy.prepare("SELECT lower('Öl') AS k").get().k, 'öl');
@@ -178,12 +178,12 @@ test('migration 250 groups the existing batches by wording and unit', () => {
   assert.deepEqual(unnamed.map((p) => p.name_key), [null, null]);
 
   // The entry carries its own grouping: nothing live is called from it.
-  const entry = dbmod.MIGRATIONS.find((m) => m.version === 250);
+  const entry = dbmod.MIGRATIONS.find((m) => m.version === 253);
   assert.doesNotMatch(String(entry.afterUp), /groupBatchesIntoProducts|productKey|ingredientMatchKey|assignPantryProduct/);
 });
 
-test('migration 250 leaves updated_at of every batch alone and puts the trigger back', () => {
-  const legacy = databaseAt(249);
+test('migration 253 leaves updated_at of every batch alone and puts the trigger back', () => {
+  const legacy = databaseAt(252);
   insertLegacyRows(legacy);
   dbmod.migrate(legacy, dbmod.MIGRATIONS);
 
@@ -215,18 +215,18 @@ test('pantry_products: unique per key and unit as stored, product_id cascades, t
 });
 
 // --------------------------------------------------------------------------
-// The frozen grouping of migration 250 and the live grouping
+// The frozen grouping of migration 253 and the live grouping
 // --------------------------------------------------------------------------
 
-// Migration 250 carries its own frozen copy of key and grouping; the start of
+// Migration 253 carries its own frozen copy of key and grouping; the start of
 // the server uses the live groupBatchesIntoProducts() with productKey. Today
 // both must give the same products for the same rows. RED HERE MEANS the live
-// grouping or ingredient-match-key.js changed. Do NOT touch migration 250: it
+// grouping or ingredient-match-key.js changed. Do NOT touch migration 253: it
 // stays what it did. Decide whether the change is meant; if the key changed,
 // the stored name_key values follow the old rule and the writers would stop
 // finding their products, which needs a migration of its own.
-test('the frozen grouping of migration 250 and the live grouping agree today', () => {
-  const migrated = databaseAt(249);
+test('the frozen grouping of migration 253 and the live grouping agree today', () => {
+  const migrated = databaseAt(252);
   insertLegacyRows(migrated);
   dbmod.migrate(migrated, dbmod.MIGRATIONS);
 

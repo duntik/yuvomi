@@ -1,10 +1,12 @@
-<!-- version: 2.77.2 -->
-This update makes the app start again on 64-bit ARM devices and brings a few budget and subscription fixes.
+<!-- version: 2.78.0 -->
+This update makes Yuvomi start faster, gives phones more room for content and reworks many screens, with a few new features along the way.
 
-On ARM-based systems the 2.77.1 image stopped right at startup because two libraries were missing from it. They are back, and every image is now checked for its libraries on each platform before it is published.
+You can now find your weather location by name instead of typing coordinates. Birthdays and name days have their own calendar feed, the budget ledger sorts by date or amount and filters by account, and on wide screens the calendar shows a sidebar with a mini month, people and what is up next. The search palette (Cmd+K or Ctrl+K) remembers the places you opened recently.
 
-Subscriptions with an end behave as expected: the last payment stays in the budget, a completed subscription can no longer be marked as paid again, and switching one back on continues with the payment after the last one instead of booking it twice. A private subscription no longer shows its expense in the household budget when two changes meet. The budget overview shows each category's share of the total, and error messages on the recipes, documents and subscriptions pages now speak the language of the app.
+New child accounts start with child defaults: budget off, household help read-only without amounts, and their own points first. Existing accounts keep their permissions. A household help payment task is now only visible to the adults who pay.
 
-No database migration and no action is needed. As always, a backup before updating is a good idea.
+On a phone the tab bar shrinks to a small pill while you read, headers take less space, and lists react faster when you tick off items. Budget figures are clearer: loans keep money you owe apart from money owed to you, statistics share one scale, and a missing pulse is no longer drawn as zero. Settings, dialogs and empty screens follow one layout across all modules.
 
-Full release notes are available at https://github.com/ulsklyc/yuvomi/releases/tag/v2.77.2
+Two database migrations run automatically on first start: one prepares the birthday feed, the other moves open household help payment tasks to the adults who pay. No action is needed. As always, a backup before updating is a good idea.
+
+Full release notes are available at https://github.com/ulsklyc/yuvomi/releases/tag/v2.78.0

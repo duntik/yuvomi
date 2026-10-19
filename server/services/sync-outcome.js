@@ -86,7 +86,10 @@ export async function withSyncOutcome(database, provider, run) {
     recordSyncOutcome(database, provider, null);
     return result;
   } catch (err) {
-    recordSyncOutcome(database, provider, err);
+    // Ein Lauf, dessen Verbindung währenddessen ersetzt oder getrennt wurde
+    // (#2035), hat über die jetzige nichts zu sagen: kein Eintrag, auch kein
+    // Löschen eines stehenden.
+    if (!err?.superseded) recordSyncOutcome(database, provider, err);
     throw err;
   }
 }

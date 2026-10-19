@@ -1411,8 +1411,8 @@ function dragFakeEl(classes, { parent = null, dataset = {}, shown = true } = {})
     },
     getClientRects: () => (el.shown ? [{ width: 48, height: 48 }] : []),
     addEventListener(type, fn) { (el.listeners[type] ||= []).push(fn); },
-    removeEventListener() {},
-    setPointerCapture() {},
+    removeEventListener(type, fn) { el.listeners[type] = (el.listeners[type] ?? []).filter((f) => f !== fn); },
+    setPointerCapture() { el.captured = true; },
   };
   if (parent) parent.children.push(el);
   return el;
@@ -1433,15 +1433,35 @@ function dragFixture({ handleShown = true } = {}) {
   globalThis.window = { matchMedia: () => ({ matches: true }) };
   try { mealsUi.wireDragDrop(grid); } finally { globalThis.window = zuvorWindow; }
 
-  const down = (target, pointerType) => {
+  // Ein Zug beginnt erst mit Weg (Mausklick, Critique 2026-10-16): `down`
+  // faehrt deshalb standardmaessig einen Schritt ueber die Schwelle nach,
+  // `move: 0` laesst den Zeiger stehen. elementFromPoint findet hier nichts -
+  // der Zug endet also im eigenen Slot.
+  const dispatch = (type, ev) => {
+    for (const fn of [...(card.listeners[type] ?? [])]) fn(ev);
+  };
+  const withDocument = (fn) => {
+    const zuvorDocument = globalThis.document;
+    globalThis.document = { elementFromPoint: () => null };
+    try { return fn(); } finally { globalThis.document = zuvorDocument; }
+  };
+  const down = (target, pointerType, { move = 12 } = {}) => {
     let prevented = false;
     for (const fn of grid.listeners.pointerdown ?? []) {
       fn({ target, pointerType, pointerId: 1, clientX: 10, clientY: 10,
         preventDefault: () => { prevented = true; } });
     }
+    if (move) withDocument(() => dispatch('pointermove', { target, pointerId: 1, clientX: 10 + move, clientY: 10 }));
     return { dragging: slot.classes.has('meal-slot--dragging'), prevented };
   };
-  return { slot, card, open, handle, icon, actions, down };
+  const up = (target, { x = 10 } = {}) => withDocument(() => dispatch('pointerup', { target, pointerId: 1, clientX: x, clientY: 10 }));
+  /** Faehrt den Klick-Riegel des Gitters; true = der Klick wurde verschluckt. */
+  const click = (target) => {
+    let swallowed = false;
+    for (const fn of grid.listeners.click ?? []) fn({ target, stopImmediatePropagation: () => { swallowed = true; } });
+    return swallowed;
+  };
+  return { grid, slot, card, open, handle, icon, actions, down, up, click };
 }
 
 test('#1317: die Mahlzeit-Zeile traegt einen Ziehgriff mit benanntem Label, ausserhalb der Aktionsleiste', () => {
@@ -1486,6 +1506,43 @@ test('#1317: ohne sichtbaren Griff (breites Board auf Touch) bleibt es beim bish
   assert(f.down(f.open, 'touch').dragging, 'Touch auf dem Board ohne Griff beginnt keinen Zug mehr - dort gibt es keinen anderen Ort');
   const g = dragFixture();
   assert(!g.down(g.actions, 'touch').dragging, 'die Aktionsleiste ist weiterhin kein Griff');
+});
+
+// --------------------------------------------------------
+// Mausklick auf die Karte (Critique 2026-10-16, P1)
+//
+// Ein Mausklick oeffnete keinen Dialog. `pointerdown` fing den Zeiger sofort
+// per setPointerCapture an der KARTE: der Browser schickt den folgenden `click`
+// dann an das gemeinsame Ziel von Druecken und Loslassen, also an das
+// `.meal-card`-div statt an `.meal-card__open[data-action="edit-meal"]`, und
+// onGridClick fand kein `[data-action]`. Dazu legte jeder Klick einen Geist
+// und die Zieh-Markierung an. Gemessen im echten Chrome: `mouse.click` ohne
+// Dialog, `element.click()` auf denselben Knopf mit Dialog.
+// --------------------------------------------------------
+
+test('Mausklick: Druecken und Loslassen ohne Weg beginnt keinen Zug und faengt den Zeiger nicht an der Karte', () => {
+  const f = dragFixture();
+  const r = f.down(f.open, 'mouse', { move: 0 });
+  assert(!r.dragging, 'ein Mausklick ohne Weg hat einen Zug begonnen - die Karte zeigt bei jedem Klick Geist und Zieh-Markierung');
+  assert(!f.card.captured,
+    'der Zeiger wurde an der KARTE gefangen - der Klick geht dann an das div statt an den Oeffnen-Knopf, und der Dialog bleibt zu');
+  f.up(f.open);
+  assert(!f.click(f.open), 'der Klick nach einem Klick ohne Weg wurde verschluckt');
+});
+
+test('Mausklick: ein Zittern unter der Schwelle bleibt ein Klick', () => {
+  const f = dragFixture();
+  assert(!f.down(f.open, 'mouse', { move: 2 }).dragging, '2px Weg haben einen Zug begonnen - ein Klick mit unruhiger Hand oeffnet dann nichts');
+  f.up(f.open, { x: 12 });
+  assert(!f.click(f.open), 'der Klick nach 2px Weg wurde verschluckt');
+});
+
+test('Mausklick: ein echter Zug verschluckt den Klick danach, auch wenn er im eigenen Slot endet', () => {
+  const f = dragFixture();
+  assert(f.down(f.open, 'mouse').dragging, 'ein Zug ueber die Schwelle hat nicht begonnen');
+  f.up(f.open, { x: 22 });
+  assert(!f.slot.classes.has('meal-slot--dragging'), 'die Zieh-Markierung bleibt nach dem Loslassen stehen');
+  assert(f.click(f.open), 'nach einem Zug zurueck in den eigenen Slot oeffnet der Klick den Dialog - der Zug war keine Bitte zum Bearbeiten');
 });
 
 test('#1317: touch-action: none sitzt am Griff der schmalen Zeile und NUR dort, sichtbar nur in der schmalen Fassung', () => {
@@ -1604,10 +1661,13 @@ test('Critique 2026-09-26: die Anlege-Knoepfe nennen ihren Tag, sieben Tage sind
   assert(new Set(empty).size === 7, `sieben Tage, aber ${new Set(empty).size} verschiedene Namen: ${empty.join(' | ')}`);
   const monday = pageEsc(pageT('meals.addMealTypeOnDay', { type: type.label, day: pageT('calendar.dayLongMonday') }));
   assert(empty[0] === monday, `Montag heisst „${empty[0]}", erwartet „${monday}"`);
+  // D5 (Critique 2026-10-16): das Plus steht nur in LEEREN Zellen. Unter einer
+  // belegten lag eine gestrichelte „+"-Leiste - am Desktop 28 Plus je Woche.
+  // Die zweite Mahlzeit in denselben Platz legt der FAB (Dialog mit Tag und Typ).
   const filled = labelsOf(mealsUi.renderSlot('2026-09-27', type,
     [{ id: 3, date: '2026-09-27', meal_type: 'breakfast', title: 'Porridge', ingredients: [] }], 2, 2));
-  assert(filled.length === 1 && filled[0].includes(pageT('calendar.dayLongSunday')),
-    `das Plus unter der Karte nennt seinen Tag nicht: ${filled.join(' | ')}`);
+  assert(filled.length === 0, `eine belegte Zelle traegt wieder ein Plus: ${filled.join(' | ')}`);
+  assert(!/meal-slot__add-more-btn/.test(mealsSource), 'kein Plus-Knopf fuer belegte Zellen mehr im Markup');
   // Der Tagesknopf (mobil) zieht denselben Namen, nur ohne Mahlzeittyp.
   assert(/class="day-add"[^>]*aria-label="\$\{esc\(t\('meals\.addMealOnDay', \{ day: dayLongName\(date\) \}\)\)\}"/.test(mealsSource),
     'der Tagesknopf .day-add muss meals.addMealOnDay mit dem Tagesnamen tragen');
@@ -1616,7 +1676,7 @@ test('Critique 2026-09-26: die Anlege-Knoepfe nennen ihren Tag, sieben Tage sind
 test('Critique 2026-09-26: die Kartenaktionen tragen mobil die Stufe der Zeilenaktionen, nicht 12px', () => {
   const html = mealsUi.renderSlot('2026-09-21', { key: 'dinner', label: 'Abendessen' },
     [{ id: 9, date: '2026-09-21', meal_type: 'dinner', title: 'Suppe', ingredients: [{ id: 1, name: 'Lauch', on_shopping_list: 0 }] }], 2, 2);
-  const actions = html.slice(html.indexOf('class="meal-card__actions"'), html.indexOf('meal-slot__add-more-btn'));
+  const actions = html.slice(html.indexOf('class="meal-card__actions"'));
   // Probe, dass der Test die Karte liest: seit R18 (2026-10-07) traegt sie
   // keinen Papierkorb mehr - das wiederkehrende Zeichen der Leiste ist der
   // Einkaufswagen (die Mahlzeit hier hat Zutaten).
@@ -1772,34 +1832,43 @@ test('Kueche: "Zutat hinzufuegen" ist in beiden Editoren derselbe Knopf, Dialog-
 
 // Re-Critique 2026-09-28 (P7 / A4 P2-9): "Mahlzeit hinzufuegen" aus einem
 // Slot fragte zuerst Datum und Mahlzeit - genau das, was der Slot schon weiss;
-// der Name lag bei 427px Hoehe unter dem Falz.
-test('Mahlzeit aus dem Slot: Name zuerst, Tag und Mahlzeit als Zusammenfassung darunter', () => {
+// der Name lag bei 427px Hoehe unter dem Falz. Critique 2026-10-16 (D4): auch
+// ohne Slot (FAB) fuehrte das Datum und bekam den Fokus - der Name steht jetzt
+// auf JEDEM Weg zuerst, die Mahlzeitart ist eine Chip-Reihe wie im Rezept.
+test('Mahlzeit-Dialog: Name zuerst auf jedem Weg, Mahlzeitart als Chips wie im Rezept (D4)', () => {
   const at = (html, id) => html.indexOf(`id="${id}"`);
-  const slot = mealsUi.buildModalContent({ mode: 'create', date: '2026-09-28', mealType: 'lunch', fromSlot: true });
-  assert(at(slot, 'modal-title') > -1 && at(slot, 'modal-date') > -1, 'beide Felder stehen da');
-  assert(at(slot, 'modal-title') < at(slot, 'modal-date'), 'aus dem Slot steht der Name vor dem Datum');
-  assert(at(slot, 'modal-title') < at(slot, 'modal-type'), 'und vor der Mahlzeit');
-  assert(/class="[^"]*\bmeal-modal__when\b/.test(slot), 'Tag und Mahlzeit stehen als eigene, ruhige Zeile');
-  const plain = mealsUi.buildModalContent({ mode: 'create', date: '2026-09-28', mealType: 'lunch' });
-  assert(at(plain, 'modal-date') < at(plain, 'modal-title'), 'ohne Slot (FAB) bleibt die Reihenfolge: erst wann, dann was');
+  for (const fromSlot of [true, false]) {
+    const html = mealsUi.buildModalContent({ mode: 'create', date: '2026-09-28', mealType: 'lunch', fromSlot });
+    assert(at(html, 'modal-title') > -1 && at(html, 'modal-date') > -1, 'beide Felder stehen da');
+    assert(at(html, 'modal-title') < at(html, 'modal-type-chips'), `Name vor der Mahlzeitart (fromSlot=${fromSlot})`);
+    assert(at(html, 'modal-type-chips') < at(html, 'modal-date'), `Mahlzeitart vor dem Tag (fromSlot=${fromSlot})`);
+  }
+  const html = mealsUi.buildModalContent({ mode: 'create', date: '2026-09-28', mealType: 'lunch' });
+  assert(!/<select[^>]*id="modal-type"/.test(html), 'keine Auswahlliste mehr');
+  assert(/id="modal-type-chips" role="radiogroup"/.test(html), 'Einfachauswahl als Radiogruppe');
+  assert(/class="filter-chip meal-type-chip filter-chip--active" role="radio"\s+data-meal-type="lunch" aria-checked="true" tabindex="0"/.test(html),
+    'der gewaehlte Chip ist aktiv und der eine Tab-Halt');
+  assert(/<input type="hidden" id="modal-type" value="lunch">/.test(html), 'das versteckte Feld traegt den Wert fuer Speichern und Dirty-Check');
+  assert((html.match(/aria-checked="true"/g) ?? []).length === 1, 'genau einer gewaehlt');
+  assert(/onSave\(panel\) \{\s*wireMealTypeChips\(panel\);/.test(mealsSource), 'die Chips werden beim Oeffnen verdrahtet');
   assert(/openMealModal\(\{ mode: 'create', date: btn\.dataset\.date, mealType: btn\.dataset\.type, fromSlot: true \}\)/.test(mealsSource),
     'der Slot-Knopf sagt, dass er aus dem Slot kommt');
 });
 
-// Re-Critique 2026-09-28 (P11 / A4 P2-8): der Rezept-Aufklapper oeffnete
-// hart. Der Zustand bleibt `hidden` (sichtbarer Default, auch headless), die
-// Bewegung kommt aus dem geteilten Paar expandIn/collapseOut (utils/ux.js) -
-// Oeffnen zieht auf, Schliessen klappt erst ein und versteckt dann.
-test('Rezepte mobil: der Aufklapper zieht auf und klappt ein, statt zu springen', () => {
+// Re-Critique 2026-09-28 (P11 / A4 P2-8) zog den Rezept-Aufklapper mit
+// expandIn/collapseOut auf. Seit R19 (Critique 2026-10-16, "Zeilentipp hat
+// vier Bedeutungen") gibt es ihn nicht mehr: mobil OEFFNET die Zeile das
+// Rezept als Leseblatt (openDetailView), wie Kontakte, Inventar, Aufgaben.
+test('Rezepte mobil: die Zeile oeffnet ein Leseblatt, sie klappt nichts auf', () => {
   const recipesSrc = readFileSync(new URL('../public/pages/recipes.js', import.meta.url), 'utf8');
-  assert(/import \{[^}]*\bexpandIn\b[^}]*\bcollapseOut\b[^}]*\} from '\/utils\/ux\.js'|import \{[^}]*\bcollapseOut\b[^}]*\bexpandIn\b[^}]*\} from '\/utils\/ux\.js'/.test(recipesSrc),
-    'das geteilte Paar aus utils/ux.js');
-  const branch = recipesSrc.slice(recipesSrc.indexOf("if (btn.dataset.action === 'toggle-detail') {"),
-    recipesSrc.indexOf("if (btn.dataset.action === 'edit') {"));
-  assert(/panel\.hidden = false;[\s\S]*expandIn\(panel\)/.test(branch), 'Oeffnen: sichtbar machen, dann aufziehen');
-  assert(/collapseOut\(panel\)\.then\([\s\S]*panel\.hidden = true/.test(branch), 'Schliessen: erst einklappen, dann verstecken');
-  assert(/getAnimations(?:\?\.)?\(\)\.forEach\(\(a\) => a\.cancel\(\)\)/.test(branch),
-    'die gehaltene Einklapp-Animation (fill: forwards) wird danach verworfen - sonst oeffnete das Panel beim naechsten Mal auf Hoehe 0');
+  const narrow = recipesSrc.slice(recipesSrc.indexOf('function openRecipeNarrow('), recipesSrc.indexOf('function syncRowMode('));
+  assert(/if \(btn\.dataset\.action === 'open-detail'\) \{\s*openRecipeSheet\(recipe\);/.test(narrow), 'der Tipp oeffnet das Leseblatt');
+  assert(!/expandIn|collapseOut|aria-expanded/.test(narrow), 'kein Aufklapper mehr');
+  const sheet = recipesSrc.slice(recipesSrc.indexOf('function openRecipeSheet('), recipesSrc.indexOf('function openRecipeNarrow('));
+  assert(/openDetailView\(\{/.test(sheet), 'dasselbe Blatt wie die anderen Module');
+  assert(/fillRecipeDetail\(detail, recipe\)/.test(sheet), 'derselbe Inhalt wie die Detailspalte');
+  assert(/narrow: 'sheet'/.test(recipesSrc), 'der Baustein fuehrt die Rezepte unter der Schwelle als Blatt');
+  assert(!/class="recipe-detail"[^]*?hidden = true|detail\.hidden = true/.test(recipesSrc), 'kein verstecktes Panel je Zeile');
 });
 
 // Re-Critique 2026-09-28 (P7 / A4 P2-7): die Mahlzeit-Typen im
@@ -1840,8 +1909,45 @@ test('Zutatenzeile: Name allein in Zeile eins, Menge und Kategorie teilen Zeile 
     'der Entfernen-Knopf steht in Zeile eins neben dem Namen');
 });
 
+// R19 (Critique 2026-10-16): "Rezepte-Werkzeugzeile mobil 65px nur fuer die
+// Lupe". Die Zeile unter der Kuechen-Leiste traegt nur die Suche - dort bleibt
+// sie ein Feld (`.page-search--field`), statt zur Icon-Form zu schrumpfen.
+test('R19: die Rezeptsuche ist mobil ein Feld, keine Lupe in einer eigenen Zeile', () => {
+  const recipes = readFileSync(new URL('../public/pages/recipes.js', import.meta.url), 'utf8');
+  assert(/className: 'recipes-search page-toolbar__center page-search--field'/.test(recipes), 'die Rezeptsuche traegt --field');
+  // R20 (Re-Critique 2026-10-17 a2 P2-4): der Vorrat ebenso - seine Zeile trug
+  // nur Lupe und Ortsnadel (65px fuer zwei Icons).
+  const pantry = readFileSync(new URL('../public/pages/pantry.js', import.meta.url), 'utf8');
+  assert(/className: 'pantry-search page-toolbar__center page-search--field'/.test(pantry), 'die Vorratssuche traegt --field');
+  const layout = [...eachRule(readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8'))];
+  const phone = layout.filter((r) => r.at.some((a) => /max-width:\s*767px/.test(a)));
+  const iconForm = phone.filter((r) => /\.page-toolbar \.page-search:[^,{]*:not\(:focus-within\)/.test(r.selector));
+  assert(iconForm.length >= 4, `Icon-Form-Regeln gefunden: ${iconForm.length}`);
+  for (const r of iconForm) {
+    for (const part of r.selector.split(',').filter((x) => /\.page-toolbar/.test(x))) {
+      assert(/\.page-search:not\(\.page-search--field\)/.test(part), `Icon-Form ohne Ausnahme: ${part.trim()}`);
+    }
+  }
+  assert(phone.some((r) => /\.page-toolbar \.page-search\.page-search--field/.test(r.selector) && /flex:\s*1 1 auto/.test(r.body)), 'das Feld fuellt die Zeile');
+});
+
 // --------------------------------------------------------
 // Ergebnis
 // --------------------------------------------------------
 console.log(`\n[Meals-Test] Ergebnis: ${passed} bestanden, ${failed} fehlgeschlagen\n`);
 if (failed > 0) process.exit(1);
+
+// R20 (Re-Critique 2026-10-17 a2 P3): die Typ-Chips im Mahlzeit- und im
+// Rezept-Dialog standen ohne die Mahlzeit-Toene des Plans.
+test('R20: die Typ-Chips tragen den Punkt ihres Mahlzeit-Tons, in beiden Dialogen', () => {
+  const css = readFileSync(new URL('../public/styles/filter-chip.css', import.meta.url), 'utf8');
+  for (const type of ['breakfast', 'lunch', 'dinner', 'snack']) {
+    assert(new RegExp(`\\.filter-chip\\[data-meal-type="${type}"\\]\\s+\\{ --meal-type-dot: var\\(--meal-${type}\\); \\}`).test(css), `${type} hat seinen Ton`);
+  }
+  const dot = [...eachRule(css)].find((r) => r.selector.trim() === '.filter-chip[data-meal-type]::before');
+  assert(/background:\s*var\(--meal-type-dot/.test(dot?.body ?? ''), 'der Punkt nimmt den Ton');
+  const html = mealsUi.buildModalContent({ mode: 'create', date: '2026-09-21', mealType: 'dinner' });
+  assert(/class="filter-chip meal-type-chip[^"]*"[^>]*data-meal-type="dinner"/.test(html), 'der Mahlzeit-Dialog baut die Chips mit data-meal-type');
+  const recipes = readFileSync(new URL('../public/pages/recipes.js', import.meta.url), 'utf8');
+  assert(/class="filter-chip recipe-meal-types__chip" data-meal-type=/.test(recipes), 'der Rezept-Dialog ebenso');
+});

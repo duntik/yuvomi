@@ -272,7 +272,7 @@ test('R18 Aktivitaet: Balken oben voll gerundet und unten gerade, heute im Vollt
   const bars = html.match(/<path class="health-activity-chart__bar[^"]*"/g) ?? [];
   assert.equal(bars.length, 2, 'gestern und heute');
   assert.equal(bars.filter((b) => /health-activity-chart__bar--today/.test(b)).length, 1, 'genau EIN Balken ist heute');
-  assert.match(html, /<path class="health-activity-chart__bar health-activity-chart__bar--today" d="M[\d.]+,174\.0 V/, 'der Balken steht auf der Grundlinie');
+  assert.match(html, /<path class="health-activity-chart__bar health-activity-chart__bar--today chart__bar" d="M[\d.]+,174\.0 V/, 'der Balken steht auf der Grundlinie und waechst aus ihr ein (chart__bar, drawChartOnce)');
   assert.doesNotMatch(html, /fill="var\(/, 'die Farbe steht im Stylesheet, nicht im Markup');
   // Der Wert steht nur am heutigen Balken; die sieben Werte bleiben in der Tabelle.
   assert.equal(html.match(/class="chart__axis health-activity-chart__value"/g)?.length, 1);
@@ -324,4 +324,27 @@ test('R18 Aktivitaet: der getoente Balken haelt 3:1 gegen die Karte, hell und du
   }
   // Gegenprobe: bei der blanken Tinten-Stufe (70 %) reisst der dunkle Balken die 3:1.
   assert.ok(contrastRatio(mix('#DB60CB', '#2B2825', 0.7), '#2B2825') < 3, 'deshalb die fuenf Punkte darueber');
+});
+
+// Critique 2026-10-16: die Intensitaet war ein Freitextfeld, der Bestand
+// schreibt aber `low`/`moderate`/`high` - in der Liste stand englisches
+// „high". Jetzt eine Auswahl mit uebersetzten Stufen; ein freier Altwert
+// bleibt als eigene Option erhalten und wird wie geschrieben gezeigt.
+test('Aktivitaet: Intensitaet ist eine uebersetzte Auswahl, kein Freitext (Critique 2026-10-16)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /id="activity-intensity" type="text"/, 'kein Freitextfeld mehr');
+  // Seit der Re-Kritik 2026-10-17 eine Zeile im Dialog-Traeger: die randlose
+  // Auswahl der Formularzeile liest `.form-input` (layout.css).
+  assert.match(src, /<select class="form-input" id="activity-intensity">\$\{intensityOptionsHtml\(row\?\.intensity\)\}<\/select>/);
+  assert.match(src, /const INTENSITY_LEVELS = \['low', 'moderate', 'high'\];/);
+  assert.match(src, /if \(row\.intensity\) meta\.push\(intensityLabel\(row\.intensity\)\);/, 'die Liste zeigt die Uebersetzung');
+  assert.match(src, /const legacy = raw && !known \? `<option value="\$\{esc\(raw\)\}" selected>\$\{esc\(raw\)\}<\/option>` : '';/,
+    'ein freier Altwert bleibt gewaehlt und lesbar');
+  for (const file of ['de', 'en', 'fr']) {
+    const loc = JSON.parse(readFileSync(new URL(`../public/locales/${file}.json`, import.meta.url), 'utf8'));
+    for (const key of ['none', 'low', 'moderate', 'high']) {
+      assert.ok(loc.health.activity.intensity?.[key], `${file}: health.activity.intensity.${key}`);
+    }
+  }
 });

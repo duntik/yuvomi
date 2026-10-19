@@ -77,6 +77,17 @@
   }
 }
 
+/* VIER TEXT-REITER PASSEN AUF 390px (Critique 2026-10-16). Ohne Zeichen (D3)
+ * waren es noch 363px Inhalt in 358px Leiste - „Haushaltshilfen" lief in die
+ * Fade-Maske. Die Luft zwischen den Kapseln traegt ihr eigenes 12px-Polster;
+ * die 4px Abstand dazu geben die fehlenden 12px frei. Schmaler als 375px
+ * scrollt die Leiste wie jede andere (Shell, `.page-toolbar__bar`). */
+@media (max-width: 639px) {
+  .housekeeping-tabs {
+    gap: 0;
+  }
+}
+
 /* Aktiv-Optik kommt vollstaendig aus der geteilten sub-tab-Grammatik
  * (.sub-tab--active: Akzent-Tint + Ink + semibold) - keine Sonderfarbe hier. */
 .housekeeping-tab {
@@ -318,6 +329,10 @@
   }
 }
 
+/* DIE SECHS MONATE FUELLEN DIE KARTE (R19, Critique 2026-10-16): zwei 24px-
+ * Balken standen links in 570px, der Rest war leer. Jetzt immer sechs Monate
+ * (Server), jeder nimmt seinen Anteil der Breite; der Balken wird mit ihm
+ * breiter, bis --space-10. */
 .housekeeping-chart {
   min-height: 126px;
   display: flex;
@@ -328,6 +343,7 @@
 }
 
 .housekeeping-chart__bar-wrap {
+  flex: 1 1 0;
   min-width: 44px;
   display: grid;
   justify-items: center;
@@ -338,7 +354,7 @@
 }
 
 .housekeeping-chart__value {
-  font-size: var(--text-2xs);
+  font-size: var(--type-micro);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -357,14 +373,19 @@
   --chart-bar-height: 88px;
 }
 
+/* SAEULE UEBER EINER GRUNDLINIE, KEINE KAPSEL IN EINER BAHN (R20,
+ * Re-Critique 2026-10-17 a5 P2-5). Die volle, runde Bahn aus der Fassung
+ * davor las sich wie sechs Fortschrittsbalken - "wie voll" statt "wieviel".
+ * Jetzt traegt jede Spalte eine Haarlinie als Achse, die Saeule waechst
+ * daraus, und ein leerer Monat ist nur die Linie. Die Hoehe bleibt per
+ * `scaleY` (frontend-audit); deshalb kein runder Kopf, der sich beim
+ * Stauchen zum Oval verzoege (bei 145 € von 380 € gemessen). */
 .housekeeping-chart__track {
-  width: 24px;
+  width: min(100%, var(--space-10));
   height: var(--chart-bar-height);
   display: flex;
   align-items: flex-end;
-  border-radius: var(--radius-full) var(--radius-full) 0 0;
-  background: var(--color-fill-well);
-  overflow: hidden;
+  border-block-end: 1px solid var(--color-border);
 }
 
 .housekeeping-chart__bar {
@@ -372,15 +393,45 @@
   /* `scaleY` statt `height`: projektweite Konvention fuer Fuellstaende
    * (budget/dashboard/tasks), vom frontend-audit erzwungen. */
   height: 100%;
-  border-radius: inherit;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
   /* Serie 1 statt der Stimme: der Balken ist eine DATENREIHE (Zahlungen in
    * Euro), und Datenreihen nehmen die Chart-Palette - die Stimme sagt „was
    * tut das hier", nicht „wieviel wurde gezahlt" (Chart-Serien-Regel,
    * DESIGN.md; Critique 2026-08-27, P3). Serie 1 heisst in der
    * Kontofarben-Wahl bewusst „Violett" - die Naehe ist dort die Zusage. */
-  background: var(--chart-series-1);
+  background: linear-gradient(to top,
+    var(--chart-series-1) 0 var(--paid-share, 100%),
+    color-mix(in srgb, var(--chart-series-1) var(--tint-hint), transparent) var(--paid-share, 100%) 100%);
   transform-origin: bottom center;
   transform: scaleY(var(--bar-scale, 0));
+}
+
+.housekeeping-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.housekeeping-chart__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.housekeeping-chart__swatch {
+  inline-size: var(--space-3);
+  block-size: var(--space-3);
+  border-radius: var(--radius-xs);
+  background: var(--chart-series-1);
+}
+
+.housekeeping-chart__swatch--pending {
+  background: color-mix(in srgb, var(--chart-series-1) var(--tint-hint), transparent);
 }
 
 .housekeeping-field {
@@ -456,6 +507,13 @@
 
 .housekeeping-form-grid--wide {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Ohne Betragsrecht (R20) blendet der Besuchsdialog das Raster mit Satz und
+ * Extras aus - `display: grid` schlaegt sonst das UA-`[hidden]`, wie oben bei
+ * `.housekeeping-field`. */
+.housekeeping-form-grid[hidden] {
+  display: none;
 }
 
 /* Bereich und Rhythmus im Anlegedialog: zwei kurze Felder nebeneinander, auch
@@ -560,10 +618,6 @@
  * Ring und Titel 16px. */
 .housekeeping-task {
   gap: var(--space-1);
-}
-
-.housekeeping-report-item > .list-row__actions {
-  margin-inline-end: calc(-1 * var(--space-2));
 }
 
 /* DIE ZEILE FUEHRT KEINE AKTIONEN MEHR (Critique 2026-10-05, R16): der Tipp
@@ -719,11 +773,8 @@
  * Zeilengroesse (`.housekeeping-avatar--row`) ist damit entfallen - zehnmal
  * dasselbe Gesicht untereinander sagte nichts, was das Meta nicht sagt. */
 
-/* Die Aktionen ruecken wie in der Aufgabenzeile naeher - ihre 48px-Flaechen
- * tragen die Luft selbst. */
-.housekeeping-report-item > .list-row__actions {
-  margin-inline-start: calc(-1 * var(--space-1));
-}
+/* Seit R18/D6 traegt jede Besuchszeile nur noch den Mehr-Knopf (kein
+ * Aktionstraeger mehr); er rueckt wie ueberall per 48px-Flaeche an die Kante. */
 
 .housekeeping-report-modal {
   display: grid;
@@ -1023,6 +1074,12 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
+}
+
+/* Ohne Betragsrecht (R20, neue Kinderkonten) gibt es keine Zahlungskarte -
+ * die Besuche nehmen dann die ganze Zeile, statt neben einer Luecke zu stehen. */
+.housekeeping-dashboard-columns--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* Die Kennzahlen der Aufgaben (housekeeping.js, taskSummaryHtml) bleiben unter

@@ -21,6 +21,7 @@ const {
   rememberFocus,
   __test: modalTest,
   restoreFocusAfterClose, refocusAfterRender, forgetRestore, renderKeepingFocus,
+  reportFieldErrors, reportFieldError, clearFieldError,
 } = await import('../public/components/modal.js');
 
 // matchMedia und document.createElementNS werden von btnSuccess/btnError benötigt
@@ -2153,4 +2154,182 @@ test('#1976: ein Formular ohne id bekommt eine, und die Knoepfe zeigen auf genau
   const id = form.getAttribute('id');
   assert.match(id ?? '', /^modal-form-\d+$/);
   for (const b of buttons) assert.equal(b.getAttribute('form'), id);
+});
+
+
+// ── Alle Feldfehler auf einmal (Critique R19, 2026-10-16) ───────────────────
+//
+// Der Budget-Dialog pruefte Titel -> Betrag -> Kategorie und brach beim ersten
+// Fehler ab, obwohl der Betrag oben steht: ein Fehler je Klick, und der Fokus
+// sprang in Pruefreihenfolge statt in Bildreihenfolge.
+function fakeField(id, position) {
+  const classes = new Set();
+  const attrs = {};
+  const field = {
+    id,
+    position,
+    focused: 0,
+    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    setAttribute: (k, v) => { attrs[k] = v; },
+    getAttribute: (k) => attrs[k] ?? null,
+    addEventListener() {},
+    removeEventListener() {},
+    matches: () => true,
+    focus() { field.focused += 1; },
+    // Wie Node.compareDocumentPosition: 4 = das andere steht dahinter.
+    compareDocumentPosition: (other) => (other.position > position ? 4 : 2),
+  };
+  field.closest = () => field;
+  field.attrs = attrs;
+  field.classes = classes;
+  return field;
+}
+
+test('reportFieldErrors: meldet jeden Fehler und fokussiert das erste Feld im Bild', () => {
+  const amount = fakeField('amount', 1);
+  const title = fakeField('title', 2);
+  const category = fakeField('category', 3);
+  // In Pruefreihenfolge: Titel zuerst - im Bild steht der Betrag oben.
+  const any = reportFieldErrors([
+    [title, 'Titel fehlt'],
+    false,
+    [amount, 'Betrag fehlt'],
+    null,
+    [category, 'Kategorie fehlt'],
+    [amount, 'zweite Meldung am selben Feld'],
+  ]);
+  assert.equal(any, true);
+  for (const f of [amount, title, category]) {
+    assert.equal(f.attrs['aria-invalid'], 'true', `${f.id} nicht als fehlerhaft markiert`);
+    assert.ok(f.classes.has('form-field--error'), `${f.id} ohne Fehlerrahmen`);
+  }
+  assert.deepEqual([amount.focused, title.focused, category.focused], [1, 0, 0],
+    'der Fokus gehoert dem ersten Feld in Dokumentreihenfolge, und nur ihm');
+});
+
+test('reportFieldErrors: ohne Fehler meldet es nichts und sagt false', () => {
+  const field = fakeField('x', 1);
+  assert.equal(reportFieldErrors([false, null, [null, 'Feld fehlt'], undefined]), false);
+  assert.equal(reportFieldErrors([]), false);
+  assert.equal(field.focused, 0);
+});
+
+// ── Eine Ansage beim Speichern (Critique R19 Nachlese) ──────────────────────
+//
+// Gemessen am leeren Budget-Dialog: drei sichtbare role="alert" auf einmal,
+// und der Fokus auf dem Betrag las dessen Meldung ueber aria-describedby ein
+// zweites Mal (Guide accessible-error-announcement: "avoid double
+// announcement"). Springt der Fokus aufs Feld, ist die Meldung keine
+// Live-Region; nur ein Feld, das seine Beschreibung beim Fokus nicht selbst
+// liest (Datepicker), behaelt sie - und beim Verlassen (Blur) bleibt sie eine.
+function ariaField(id, position, { native = true } = {}) {
+  const attrs = {};
+  const children = [];
+  const classes = new Set();
+  const group = {
+    dataset: {},
+    offsetWidth: 0,
+    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c), toggle: (c, f) => (f ? classes.add(c) : classes.delete(c)) },
+    querySelector: (sel) => children.find((c) => `.${c.className}` === sel) ?? null,
+    appendChild: (node) => { children.push(node); return node; },
+  };
+  const field = {
+    id, position, value: '', focused: 0,
+    setAttribute: (k, v) => { attrs[k] = String(v); },
+    getAttribute: (k) => attrs[k] ?? null,
+    removeAttribute: (k) => { delete attrs[k]; },
+    addEventListener() {}, removeEventListener() {},
+    matches: (sel) => native && /input/.test(sel),
+    querySelector: () => null,
+    closest: () => group,
+    focus() { field.focused += 1; },
+    compareDocumentPosition: (other) => (other.position > position ? 4 : 2),
+    message: () => children.find((c) => c.className === 'form-field__error'),
+  };
+  return field;
+}
+
+function withAttrDocument(fn) {
+  const before = global.document.createElement;
+  global.document.createElement = (tag) => {
+    const attrs = {};
+    return {
+      tagName: tag.toUpperCase(), className: '', id: '', textContent: '', dataset: {},
+      setAttribute: (k, v) => { attrs[k] = String(v); },
+      getAttribute: (k) => attrs[k] ?? null,
+      removeAttribute: (k) => { delete attrs[k]; },
+    };
+  };
+  try { return fn(); } finally { global.document.createElement = before; }
+}
+
+test('reportFieldErrors: beim Speichern keine Alarm-Rolle neben dem Fokus, ausser am Datepicker', () => withAttrDocument(() => {
+  const amount = ariaField('amount', 1);
+  const title = ariaField('title', 2);
+  reportFieldErrors([[title, 'Titel fehlt'], [amount, 'Betrag fehlt']]);
+  assert.equal(amount.focused, 1);
+  assert.equal(amount.message().getAttribute('role'), null, 'der fokussierte Betrag sagt seine Meldung doppelt an');
+  assert.equal(title.message().getAttribute('role'), null, 'eine zweite Meldung laeuft als Alarm in die erste');
+  assert.match(amount.getAttribute('aria-describedby'), /amount-error/, 'die Meldung haengt nicht mehr am Feld');
+
+  const date = ariaField('date', 1, { native: false });
+  const other = ariaField('other', 2);
+  reportFieldErrors([[other, 'x'], [date, 'Datum fehlt']]);
+  assert.equal(date.message().getAttribute('role'), 'alert', 'der Datepicker liest seine Beschreibung beim Fokus nicht - er braucht den Alarm');
+  assert.equal(other.message().getAttribute('role'), null);
+}));
+
+test('reportFieldError ohne Fokussprung bleibt eine Live-Region (Critique R19 Nachlese)', async () => {
+  const { reportFieldError } = await import('../public/components/modal.js');
+  withAttrDocument(() => {
+    const quiet = ariaField('a', 1);
+    reportFieldError(quiet, 'x', { focus: false });
+    assert.equal(quiet.message().getAttribute('role'), 'alert', 'ohne Fokus hoert niemand die Meldung');
+    const jumped = ariaField('b', 1);
+    reportFieldError(jumped, 'y');
+    assert.equal(jumped.focused, 1);
+    assert.equal(jumped.message().getAttribute('role'), null, 'Fokus und Alarm sagen dieselbe Meldung zweimal');
+  });
+});
+
+test('validateAll: beim Absenden keine Alarm-Rolle je leerem Pflichtfeld (Critique R19 Nachlese)', () => withAttrDocument(() => {
+  const a = ariaField('first', 1);
+  const b = ariaField('second', 2);
+  // _validateField liest closest('.form-field') und toggelt Klassen am Traeger.
+  assert.equal(validateAll({ querySelectorAll: () => [a, b] }), false);
+  assert.equal(a.focused, 1);
+  assert.equal(a.message().getAttribute('role'), null);
+  assert.equal(b.message().getAttribute('role'), null, 'zwei Alarme laufen beim Absenden ineinander');
+}));
+
+// R19 (Einstellungen B7): in der Formularzeile (`.form-row`) steht das Feld in
+// der rechten Spalte. Die Meldung direkt hinter dem Feld drueckte es auf 52px
+// (CardDAV-Dialog bei 390) - sie gehoert unter die Zeile, ueber beide Spalten.
+test('wireBlurValidation: in einer Formularzeile steht die Meldung unter der Zeile, nicht neben dem Feld', () => {
+  const place = (asRow) => {
+    const input = makeInput({ value: '' });
+    input.id = asRow ? 'row-field' : 'stacked-field';
+    if (asRow) input._field.classList.add('form-row');
+    let besideField = 0;
+    input.insertAdjacentElement = () => { besideField += 1; };
+    wireBlurValidation(makeContainer([input]));
+    input._listeners['input']();
+    input._listeners['blur']();
+    return { besideField, inRow: input._field._children.some((c) => c.className === 'form-field__error') };
+  };
+  assert.deepEqual(place(true), { besideField: 0, inRow: true }, 'Zeile: ans Ende der Zeile');
+  assert.deepEqual(place(false), { besideField: 1, inRow: false }, 'gestapeltes Feld: direkt hinter das Feld wie bisher');
+});
+
+// Codex-Review PR #2053, zweite Runde: ein Handler, der denselben Wert neu
+// prueft (die Ortssuche), raeumt den alten Fehler ohne Eingabe im Feld.
+test('clearFieldError: nimmt Rahmen und aria-invalid, die reportFieldError gesetzt hat', () => {
+  const field = fakeField('place', 1);
+  reportFieldError(field, 'Ort nicht gefunden', { focus: false });
+  assert.equal(field.attrs['aria-invalid'], 'true', 'Reichweite: der Fehler steht');
+  assert.ok(field.classes.has('form-field--error'));
+  clearFieldError(field);
+  assert.equal(field.attrs['aria-invalid'], 'false');
+  assert.equal(field.classes.has('form-field--error'), false);
+  clearFieldError(null);
 });

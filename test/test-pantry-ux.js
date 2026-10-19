@@ -524,7 +524,7 @@ test('renderList zeichnet das Panel mit - unabhaengig von Suche und aktivem Filt
   assert.equal(watch.children[0].textContent, 'pantry.watchEmpty');
 });
 
-test('das Panel steht nur ab 60rem Vorratsflaeche, und die Liste fuellt die Spalte bis zu ihm', async () => {
+test('das Panel steht nur ab 60rem Vorratsflaeche, die Liste auf dem Lesemass, das Panel nimmt den Rest', async () => {
   const { eachRule } = await import('./css-rules.js');
   const css = readFileSync(new URL('../public/styles/pantry.css', import.meta.url), 'utf8');
   const rules = [...eachRule(css)];
@@ -538,6 +538,18 @@ test('das Panel steht nur ab 60rem Vorratsflaeche, und die Liste fuellt die Spal
   assert.match(wide('.pantry-body')?.body ?? '', /flex-direction:\s*row/);
   assert.match(wide('.pantry-body > .pantry-list')?.body ?? '', /--page-measure:\s*100%/,
     'die Gruppen kappen auf die Spalte, ueber dieselbe Variable wie ueberall');
+  // Critique R19: das Seitenpolster stand IN der 20rem-Basis des Panels - bei
+  // 1920 blieben 110px Inhalt. Es gehoert einmal an den Koerper; die Liste
+  // steht auf dem Lesemass, das Panel nimmt den Rest (Geometrie von .page-columns).
+  assert.match(wide('.pantry-body')?.body ?? '', /padding-inline:\s*var\(--page-inline-pad\)/,
+    'der Koerper zieht Liste und Panel auf die Inhaltsspalte');
+  assert.doesNotMatch(wide('.pantry-watch:not([hidden])')?.body ?? '', /padding-inline/,
+    'das Panel polstert nicht selbst - sonst frisst das Seitenpolster seine Breite');
+  assert.match(wide('.pantry-body > .pantry-list')?.body ?? '', /flex:\s*0 1 var\(--layout-reading\)/,
+    'die Liste steht auf dem Lesemass statt sich bis zum Panel zu strecken');
+  assert.match(wide('.pantry-body > .pantry-list')?.body ?? '', /padding-inline:\s*0\b/);
+  assert.match(wide('.pantry-watch:not([hidden])')?.body ?? '', /min-width:\s*var\(--layout-rail-min\)/,
+    'das Panel wird nie schmaler als eine Seitenspalte');
   const src = readFileSync(new URL('../public/pages/pantry.js', import.meta.url), 'utf8');
   assert.match(src, /body\.append\(list, watch\)/, 'Liste und Panel teilen den Koerper');
   assert.match(src, /watch\.addEventListener\('click', onWatchClick\)/, 'eine Panelzeile oeffnet ihren Artikel');
@@ -643,4 +655,26 @@ test('R16: ein Werkzeugmenue mit einem einzigen Eintrag ist ein direkter Knopf',
   assert.match(zwei, /popovertarget="x-menu"[\s\S]*role="menu"/, 'ab zwei Eintraegen das Menue');
   const schalter = pageToolsMenuHtml({ id: 'x-menu', label: 'Mehr', items: [{ action: 'a', label: 'A', icon: 'tag', checked: true }] });
   assert.match(schalter, /role="menuitemcheckbox"/, 'ein Schalter bleibt im Menue - sein Zustand braucht den Haken');
+});
+
+// Critique 2026-10-16: zwei beringte 48px-Kreise je Zeile machten den Stepper
+// zum lautesten Element der Vorratsliste. Er traegt die Haut der Zeilenaktion
+// (keine Kante, keine Flaeche in Ruhe), die Trefferflaeche bleibt.
+test('Vorrat: der Mengen-Stepper ist ruhig wie die Zeilenaktion, Trefferflaeche unveraendert (Critique 2026-10-16)', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/pantry.css', import.meta.url), 'utf8');
+  const btn = [...eachRule(css)].find((r) => !r.at.length && r.selector.trim() === '.pantry-stepper__btn');
+  assert.match(btn?.body ?? '', /border:\s*none/, 'kein Ring');
+  assert.match(btn?.body ?? '', /background-color:\s*transparent/, 'keine Flaeche in Ruhe');
+  assert.match(btn?.body ?? '', /width:\s*var\(--pantry-step-btn\);\s*height:\s*var\(--pantry-step-btn\)/, 'Trefferflaeche bleibt');
+  assert.ok([...eachRule(css)].some((r) => r.at.some((a) => /hover:\s*none/.test(a)) && /--pantry-step-btn:\s*var\(--target-base\)/.test(r.body)),
+    'am Finger weiter das Fingermass');
+});
+
+// R20 (Re-Critique 2026-10-17 a2 P3): "Vorrat -/+ als 12px-Glyphe in 48px".
+test('Vorrat: die Stepper-Zeichen haben Knopfmass (--icon-md), keine Inline-Marker', () => {
+  const src = readFileSync(new URL('../public/pages/pantry.js', import.meta.url), 'utf8');
+  assert.match(src, /data-lucide="minus" class="icon-md"/);
+  assert.match(src, /data-lucide="plus" class="icon-md"/);
+  assert.doesNotMatch(src, /data-lucide="(minus|plus)" class="icon-sm"/);
 });

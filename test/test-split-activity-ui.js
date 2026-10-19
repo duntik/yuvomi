@@ -484,27 +484,45 @@ test('der Verlauf nennt die Ausgabe und den Betrag von damals - nicht fuenfmal �
   }
 });
 
-test('die Gruppenzahl steht am Kopf der Liste, mobil entfaellt ihre Kennzahlkarte', async () => {
+test('die Gruppenzahl steht am Kopf der Liste, die Kennzahlen nennen ihre Gruppe', async () => {
+  // Critique R19: „Du schuldest 24,14 €" galt der gewaehlten Gruppe, die
+  // Nachbarkachel „Aktive Gruppen 2" allen Gruppen - ohne Bereichsangabe. Die
+  // Betraege nennen jetzt ihre Gruppe, die Zahl steht nur am Kopf der Liste.
   const summary = { html: '', replaceChildren() { this.html = ''; }, insertAdjacentHTML(_p, h) { this.html += h; } };
   const zaehler = { textContent: '' };
+  const glance = { html: '', replaceChildren() { this.html = ''; }, insertAdjacentHTML(_p, h) { this.html += h; }, querySelector: () => null };
   const vorher = { ...split.state };
-  Object.assign(split.state, {
-    groupStatus: 'active', groups: [{ id: 1 }, { id: 2 }],
-    dashboard: { total_owed: [], total_owing: [] }, meta: { currencies: ['EUR'], default_currency: 'EUR' },
-  });
+  const render = (extra) => {
+    summary.html = '';
+    Object.assign(split.state, {
+      groupStatus: 'active', groups: [{ id: 1, name: 'Haus <&>' }, { id: 2, name: 'Urlaub' }], activeGroupId: 1,
+      balances: { balances: [{ user_id: 7, net: '-24.14', net_minor: -2414, currency: 'EUR' }] }, user: { id: 7 },
+      dashboard: { total_owed: [], total_owing: [] }, meta: { currencies: ['EUR'], default_currency: 'EUR' }, ...extra,
+    });
+    glance.html = '';
+    split.renderSummaryForTest({ querySelector: (sel) => (sel === '#split-summary' ? summary : sel === '#split-group-count' ? zaehler : sel === '#split-glance' ? glance : null) });
+  };
   try {
-    split.renderSummaryForTest({ querySelector: (sel) => (sel === '#split-summary' ? summary : sel === '#split-group-count' ? zaehler : null) });
+    render();
+    assert.equal(zaehler.textContent, '2', 'der Kopf „Gruppen" traegt die Zahl');
+    assert.doesNotMatch(summary.html, /split-summary-groups|splitExpenses\.activeGroups/, 'keine Kachel ueber alle Gruppen neben denen der gewaehlten');
+    assert.equal((summary.html.match(/class="metric-card[ "]/g) ?? []).length, 2, 'zwei Kacheln: bekommen und schulden');
+    assert.match(summary.html, /metric-card__label">splitExpenses\.youAreOwedInGroup\{&quot;group&quot;:&quot;Haus &lt;&amp;&gt;&quot;\}</, 'der Name der Gruppe steht escaped im Label');
+    assert.match(summary.html, /metric-card__label">splitExpenses\.youOweInGroup\{&quot;group&quot;:&quot;Haus &lt;&amp;&gt;&quot;\}</);
+    // R19: die Kurzzeile (nur schmal, direkt ueber der Gruppenwahl) nennt die
+    // Gruppe NICHT - mit ihr brach "Du bekommst in Haushalt" bei 390px um.
+    assert.match(glance.html, /budget-glance__label">splitExpenses\.youAreOwed</, 'die Kurzzeile sagt nur die Richtung');
+    assert.match(glance.html, /budget-glance__flow[^"]*">splitExpenses\.youOwe </);
+    assert.doesNotMatch(glance.html, /InGroup/, 'kein Gruppenname in der Kurzzeile');
+    render({ activeGroupId: null, groups: [] });
+    assert.match(summary.html, /metric-card__label">splitExpenses\.youOwe</, 'ohne Gruppe das schlichte Label');
   } finally {
     Object.assign(split.state, vorher);
   }
-  assert.equal(zaehler.textContent, '2', 'der Kopf „Gruppen" traegt die Zahl');
-  assert.match(summary.html, /class="metric-card split-summary-groups"/, 'die Karte ist benennbar, damit mobil nur sie entfaellt');
   const { readFileSync } = await import('node:fs');
   const { eachRule } = await import('./css-rules.js');
   const css = readFileSync(new URL('../public/styles/split-expenses.css', import.meta.url), 'utf8');
-  const regel = [...eachRule(css)].find((r) => r.selector.trim() === '.split-summary-groups');
-  assert.ok(regel?.at.includes('@container split-page (max-width: 639px)'), 'nur schmal - am Desktop bleibt die Dreierreihe');
-  assert.match(regel.body, /display:\s*none/, 'keine volle Zeile fuer eine Ziffer (59px fuer „2", 390x844)');
+  assert.ok(![...eachRule(css)].some((r) => r.selector.includes('.split-summary-groups')), 'keine Regel fuer eine Karte, die es nicht mehr gibt');
   const src = readFileSync(new URL('../public/pages/split-expenses.js', import.meta.url), 'utf8');
   assert.match(src, /class="split-panel-title u-section-title">\$\{t\('splitExpenses\.groups'\)\}<span class="list-group__count split-panel-count" id="split-group-count">/);
 });
@@ -521,4 +539,29 @@ test('Einstieg ohne Gruppe leert die Salden der zuletzt gesehenen Gruppe', async
   assert.ok(fn.length > 0, 'loadInitial nicht gefunden - der Scanner greift nicht');
   assert.doesNotMatch(fn, /if\s*\(state\.activeGroupId\)\s*await loadGroupData\(\)/, 'nicht nur mit aktiver Gruppe');
   assert.match(fn, /^\s*await loadGroupData\(\);/m);
+});
+
+// Re-Critique 2026-10-17 (A4 P3): ein Saldo liest sich aus Sicht dessen, der
+// die Seite offen hat. Linda las "Linda Johnson schuldet Alex Johnson".
+test('R20: der eigene Saldo heisst "Du schuldest ..." bzw. "... schuldet dir", fremde nennen beide', async () => {
+  const { debtSentence } = await import('../public/pages/split-expenses.js');
+  const debt = { from_user_id: 1, from_name: 'Linda Johnson', to_user_id: 2, to_name: 'Alex Johnson' };
+  assert.equal(debtSentence(debt, 1), 'splitExpenses.debtYouOwe{"name":"Alex Johnson"}');
+  assert.equal(debtSentence(debt, '2'), 'splitExpenses.debtOwesYou{"name":"Linda Johnson"}');
+  assert.equal(debtSentence(debt, 3), 'splitExpenses.debtOwes{"from":"Linda Johnson","to":"Alex Johnson"}');
+  assert.equal(debtSentence(debt, null), 'splitExpenses.debtOwes{"from":"Linda Johnson","to":"Alex Johnson"}');
+
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const dir = new URL('../public/locales/', import.meta.url);
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+    const s = JSON.parse(readFileSync(new URL(file, dir), 'utf8')).splitExpenses;
+    assert.equal(s.owes, undefined, `${file}: das zusammengesetzte Verb ist weg`);
+    assert.match(s.debtOwes, /\{\{from\}\}[\s\S]*\{\{to\}\}|\{\{to\}\}[\s\S]*\{\{from\}\}/, `${file}: debtOwes nennt beide`);
+    assert.match(s.debtYouOwe, /\{\{name\}\}/);
+    assert.match(s.debtOwesYou, /\{\{name\}\}/);
+    // Der Gruppenname ist ein Eigenname ohne Artikel: kein "in Haushalt".
+    for (const key of ['youOweInGroup', 'youAreOwedInGroup']) {
+      assert.match(s[key], /^\{\{group\}\}\s?[:：]/, `${file}: ${key} fuehrt mit dem Gruppennamen (${s[key]})`);
+    }
+  }
 });

@@ -9,18 +9,17 @@ import { openModal as openSharedModal, closeModal, advancedSection, refocusAfter
 import { openDetailView } from '/components/detail-view.js';
 import { stagger, vibrate, wireScrollFade, scheduleUndoableDelete } from '/utils/ux.js';
 import { t, formatDate } from '/i18n.js';
-import { esc, REQUIRED_MARK } from '/utils/html.js';
+import { esc, REQUIRED_MARK, externalHref } from '/utils/html.js';
 import { initials } from '/utils/initials.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { pageToolsMenuHtml, pageToolsActionEl, popoverMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
-import { setBulkPill, clearBulkPill } from '/utils/bulk-pill.js';
 import { parseVCards } from '/utils/vcard.js';
 import { getReadableTextColor, AVATAR_FALLBACK_COLOR } from '/utils/color.js';
 import { composeDisplayName, contactSortKey, splitDisplayName } from '/utils/contact-name.js';
 import { getPhoneFormatter, createAsYouType, countryFromRegion } from '/utils/phone.js';
-import { emptyStateHTML } from '/utils/empty-state.js';
-import { splitViewDetailHtml, mountMasterDetail } from '/utils/master-detail.js';
+import { emptyStateHTML, searchEmptyHTML } from '/utils/empty-state.js';
+import { splitViewDetailHtml, mountMasterDetail, setSelectionBulk } from '/utils/master-detail.js';
 import { redrawList, collapseRow } from '/utils/list-motion.js';
 import '/components/category-manager.js';
 import { findPageFab } from '/utils/fab.js';
@@ -99,8 +98,13 @@ function catTintStyle(key) {
 // Vollton-Scheibe; hat sie keinen (benutzerdefinierte Kategorie), bleibt die
 // Marke neutral. Beides steht in contacts.css an den Kategorie-Toenen.
 function contactAvatar(c) {
+  // DIE PERSON, NICHT IHRE KATEGORIE (R19, Critique 2026-10-16): hier stand
+  // das Kategoriezeichen, und eine Liste aus zwoelf Arzt- und Familien-Glyphen
+  // sagte, in welcher Schublade jemand liegt, nicht wer es ist. Wie in Apples
+  // Kontakten traegt jede Scheibe die Initialen, ruhig auf neutraler Flaeche;
+  // die Kategorie steht als Filter darueber und im Detail.
   if (!c.family_user_id) {
-    return `<span class="contact-item__icon vivid-mark">${categoryIcon(c.category, 'icon-lg')}</span>`;
+    return `<span class="contact-item__icon contact-item__icon--initials" aria-hidden="true">${esc(initials(c.name, '?'))}</span>`;
   }
   const color = c.family_avatar_color || AVATAR_FALLBACK_COLOR;
   const name  = c.family_display_name || c.name;
@@ -523,10 +527,10 @@ function renderCategoryFilters() {
   // Stand der Fokus auf einem Chip, bekommt ihn derselbe Chip im Neubau.
   const focusedCat = bar.contains(document.activeElement) ? document.activeElement?.dataset?.cat : undefined;
   if (!keys.length) { bar.replaceChildren(); return; }
-  const allChip = `<button class="filter-chip contact-filter-chip${active ? '' : ' filter-chip--active contact-filter-chip--active'}" data-cat="" aria-pressed="${active ? 'false' : 'true'}">${esc(t('contacts.filterAll'))}</button>`;
+  const allChip = `<button class="filter-chip filter-chip--sm contact-filter-chip${active ? '' : ' filter-chip--active contact-filter-chip--active'}" data-cat="" aria-pressed="${active ? 'false' : 'true'}">${esc(t('contacts.filterAll'))}</button>`;
   const catChips = state.categories.filter((c) => keys.includes(c.key)).map((c) => {
     const on = active === c.key;
-    return `<button class="filter-chip contact-filter-chip${on ? ' filter-chip--active contact-filter-chip--active' : ''}" data-cat="${esc(c.key)}" aria-pressed="${on ? 'true' : 'false'}">${categoryIcon(c.key)} ${esc(catLabel(c.key))}</button>`;
+    return `<button class="filter-chip filter-chip--sm contact-filter-chip${on ? ' filter-chip--active contact-filter-chip--active' : ''}" data-cat="${esc(c.key)}" aria-pressed="${on ? 'true' : 'false'}">${categoryIcon(c.key)} ${esc(catLabel(c.key))}</button>`;
   }).join('');
   bar.replaceChildren();
   bar.insertAdjacentHTML('beforeend', allChip + catChips);
@@ -637,17 +641,13 @@ function filterContacts() {
  * die Auskunft ueber den Zustand (Regel fuer alle Pakete aus #1265).
  */
 function contactsEmptyStateHtml(filtered) {
+  // Der EINE Leerzustand einer leeren Suche (R19): Begriff und Kategorie als
+  // Chips, „Suche zuruecksetzen" hebt beide auf (reset-filters).
   if (filtered) {
-    return emptyStateHTML({
-      variant: 'no-results',
-      icon: 'search',
-      title: t('contacts.noResultsTitle'),
-      description: t('contacts.noResultsDescription'),
-      action: {
-        label: t('contacts.resetSearch'),
-        icon: 'x',
-        attrs: { 'data-action': 'reset-filters' },
-      },
+    return searchEmptyHTML({
+      query: state.searchQuery,
+      filters: state.activeCategory ? [catLabel(state.activeCategory)] : [],
+      resetAttrs: { 'data-action': 'reset-filters' },
     });
   }
   const ro = readOnly();
@@ -719,7 +719,11 @@ function drawList(container, { animate = false } = {}) {
     .sort(([a], [b]) => catSortIndex(a) - catSortIndex(b))
     .map(([cat, items]) => `
       <div class="contact-group"${catTintStyle(cat)}>
-        <div class="contact-group__header">${categoryIcon(cat)} ${esc(catLabel(cat))}</div>
+        ${/* EIN LISTEN-GRUPPENKOPF (D8, Critique 2026-10-16): Versal-Mikro-
+              Label ohne Zeichen wie in Aufgaben und Einkauf. Das Kategorie-
+              Zeichen davor war der einzige Gruppenkopf der App mit Icon -
+              jede Zeile darunter traegt es ohnehin in ihrer Marke. */ ''}
+        <h2 class="list-group__title contact-group__header">${esc(catLabel(cat))}</h2>
         <div class="contact-group__list row-carrier">${items.map((c) => renderContactItem(c)).join('')}</div>
       </div>
     `).join(''));
@@ -987,14 +991,18 @@ function contactLinksNode(entries) {
     const line = document.createElement('div');
     line.className = 'contact-detail__value';
 
-    const a = document.createElement('a');
-    a.className = 'contact-detail__link';
-    a.href = href;
+    // Ohne sicheres Ziel (eine Website ohne http(s), etwa aus einer vCard)
+    // steht der Wert als Text da statt als Link.
+    const a = document.createElement(href ? 'a' : 'span');
+    if (href) {
+      a.className = 'contact-detail__link';
+      a.href = href;
+    }
     a.textContent = text;
     // enhancePhones() ersetzt danach nur den Anzeigetext; der Rohwert im href
     // und im data-Attribut bleibt unberührt.
     if (phoneRaw) a.dataset.phoneRaw = phoneRaw;
-    if (external) { a.target = '_blank'; a.rel = 'noopener'; }
+    if (external && href) { a.target = '_blank'; a.rel = 'noopener'; }
     line.appendChild(a);
 
     if (sub) {
@@ -1091,7 +1099,7 @@ function renderContactDetail(contact) {
       icon: 'globe',
       label: t('contacts.websiteLabel'),
       node: contactLinksNode(contact.website
-        ? [{ href: contact.website, text: contact.website, external: true }]
+        ? [{ href: externalHref(contact.website), text: contact.website, external: true }]
         : []),
     },
     { icon: 'quote',      label: t('contacts.nicknameLabel'), value: contact.nickname || '' },
@@ -1201,10 +1209,8 @@ function openContactDetail(contact, { inPane = null } = {}) {
     edit: readOnly() ? null : {
       label: t('common.edit'),
       title: t('contacts.editContact'),
-      // Im Blatt ist Bearbeiten die Hauptaktion und steht unten am Ende des
-      // Fusses, wie im Termin und im Inventar (R17, E7: EINE Stelle). In der
-      // Detailspalte bleibt es die Kopfaktion - dort gibt es keine Daumenzone.
-      primary: true,
+      // Bearbeiten ist ueberall die Hauptaktion am Ende des Fusses - im
+      // Blatt, im Popover und in der Detailspalte (R19, withPrimaryEdit).
       ready,
       mount: (panel, pane) => {
         const form = buildContactForm({ mode: 'edit', contact: full });
@@ -1701,7 +1707,7 @@ function exitSelectMode() {
   syncSelectChrome();
   if (refocus) _container.querySelector('.contacts-toolbar .page-tools-btn')?.focus();
   _container.querySelector('.contacts-page')?.classList.remove('is-selecting');
-  clearBulkPill();
+  setSelectionBulk(md, null);
   renderList();
 }
 
@@ -1717,7 +1723,7 @@ function syncSelectChrome() {
 }
 
 function updateSelectUI() {
-  if (!state.selectMode) { clearBulkPill(); return; }
+  if (!state.selectMode) { setSelectionBulk(md, null); return; }
   const n = state.selected.size;
   const actions = [{ label: t('contacts.selectAll'), onClick: () => toggleSelectAll() }];
   // Ohne Auswahl gibt es nichts zu löschen, und die Kapsel steht dann gar nicht
@@ -1737,7 +1743,8 @@ function updateSelectUI() {
       onClick: () => deleteSelected(),
     });
   }
-  setBulkPill({ label: t('contacts.selectCount', { count: n }), actions });
+  // In der Spalte „N ausgewaehlt" (Muster Mail), darunter die Pille (R19).
+  setSelectionBulk(md, { label: t('contacts.selectCount', { count: n }), actions });
 }
 
 /** Ein Tipp im Auswahlmodus: den Kontakt in die Auswahl oder heraus. */

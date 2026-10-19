@@ -98,7 +98,11 @@ test('M1: der Statuskreis wird mobil schmaler, trifft aber weiter voll', () => {
 // Die Flaeche waechst deshalb per Polster und hebt es mit dem Rand wieder auf:
 // der Text bleibt, wo er ist, die Box reicht bis an die Zeilenkante.
 test('M1: mobil reicht die Trefferflaeche des Titels ins Zeilenpolster, trotz Ellipse', () => {
-  const base = declarations(tasksCss, '.task-card__title');
+  // Seit R19 setzt die EINE Titelregel in typography.css die Kappung
+  // (hoechstens zwei Zeilen, `overflow: hidden`), nicht mehr tasks.css - die
+  // Voraussetzung liest deshalb dort. Sie gilt unveraendert: was kappt, klippt
+  // auch ein ::before.
+  const base = declarations(css('typography.css'), '.task-card__title');
   assert.equal(base.overflow, 'hidden', 'Voraussetzung: die Ellipse beschneidet ein ::before');
   const title = declarations(tasksCss, '.task-card__main .task-card__title', { media: MOBILE });
   const pad = title['padding-block-start'];
@@ -220,16 +224,21 @@ test('M5: der Kopf traegt ein Ansichtsmenue mit genau einer gewaehlten Ansicht',
   }
 });
 
+// D1 (Critique 2026-10-16): der Ausloeser ist ein Pop-up-Knopf mit dem Wort der
+// Ansicht (`.cal-toolbar__view-menu`) und steht mit dem Zeitraum in Zeile 2;
+// Lupe und Filter folgen dem Titel in Zeile 1 (DOM-Reihenfolge, der Zeitraum
+// rueckt per `order` dahinter).
 test('M5: mobil ersetzt das Menue das Segment, und der Kopf hat zwei Zeilen', () => {
-  assert.equal(declarations(calendarCss, '.cal-toolbar__tools-btn').display, 'none', 'am Desktop waehlt das Segment');
-  assert.equal(declarations(calendarCss, '.cal-toolbar__tools-btn', { media: MOBILE }).display, 'inline-flex');
+  assert.equal(declarations(calendarCss, '.cal-toolbar__view-menu').display, 'none', 'am Desktop waehlt das Segment');
+  assert.equal(declarations(calendarCss, '.cal-toolbar__view-menu', { media: MOBILE }).display, 'inline-flex');
   assert.equal(declarations(calendarCss, '.cal-toolbar__views', { media: MOBILE }).display, 'none');
   const bar = declarations(calendarCss, '.page-toolbar--period-title.cal-toolbar > .cal-toolbar__bar', { media: MOBILE });
   assert.equal(bar.display, 'contents', 'die Bar-Zeile loest sich auf - ihre Werkzeuge ruecken in die Titelzeile');
   const center = declarations(calendarCss, '.page-toolbar.cal-toolbar.page-toolbar--wrap > .page-toolbar__center', { media: MOBILE });
   assert.equal(center['flex-basis'], '100%', 'der Zeitraum behaelt die zweite Zeile fuer sich (Label nicht angeschnitten)');
-  assert.equal(declarations(calendarCss, '.cal-toolbar__tools-btn', { media: MOBILE }).order, '1');
   assert.equal(center.order, '2', 'Werkzeuge vor dem Zeitraum: sie stehen in Zeile 1');
+  const stepper = declarations(calendarCss, '.cal-toolbar__stepper', { media: MOBILE });
+  assert.equal(stepper.flex, '1 1 0', 'der Stepper nimmt den Rest der Zeile neben dem Pop-up-Knopf');
 });
 
 test('M5: Termintitel der Woche brechen nach Blockhoehe um statt nowrap', () => {
@@ -284,9 +293,10 @@ test('M13: der Titel ist nicht kleiner als der Text, auf keiner Breite', () => {
 test('M13: mobil ist die Karte kompakt - drei Zeilen Vorschau, Fusszeile ohne Kreisflaeche', () => {
   const content = declarations(notesCss, '.note-card__content', { media: MOBILE });
   assert.equal(content['-webkit-line-clamp'], '3', 'Vorschau drei Zeilen statt zwoelf');
-  const del = declarations(notesCss, '.note-card__delete', { media: MOBILE });
-  assert.match(del['margin-block'] ?? '', /var\(--target-base\)/,
-    'Loeschen haengt seine volle Trefflaeche in die Polsterung statt die Zeile zu strecken');
+  // Seit D6 (Critique 2026-10-16) steht Loeschen im Mehr-Knopf der Karte.
+  const more = declarations(notesCss, '.note-card__more', { media: MOBILE });
+  assert.match(more['margin-block'] ?? '', /var\(--target-base\)/,
+    'der Mehr-Knopf haengt seine volle Trefflaeche in die Polsterung statt die Zeile zu strecken');
 });
 
 // Re-Critique 2026-09-28 (P8 / A3 P3-2): mobil brach der Detail-Fuss einer
@@ -294,16 +304,16 @@ test('M13: mobil ist die Karte kompakt - drei Zeilen Vorschau, Fusszeile ohne Kr
 // Archivieren - gemessen 133px, "Aufgabe archivieren" allein 188px breit).
 // Starten und Archivieren gehen mobil in EIN Mehr-Menue; ihre Knoepfe bleiben
 // im DOM (Sperrlogik der Statusknoepfe, Handler), das Menue loest sie aus.
-test('P8: mobil ist der Detail-Fuss einer Aufgabe eine Reihe - Starten und Archivieren im Mehr-Menue', () => {
+test('P8: der Detail-Fuss einer Aufgabe ist eine Reihe - Starten und Archivieren im Mehr-Menue', () => {
   const dv = css('detail-view.css');
-  const hidden = [...eachRule(dv)].filter((r) => /display:\s*none/.test(r.body));
-  const base = hidden.find((r) => !r.at.length && r.selector.trim() === '.detail-view__footer > .task-detail__more');
-  assert.ok(base, 'am Desktop gibt es den Mehr-Knopf nicht - dort passen alle Aktionen');
-  const mobil = hidden.find((r) => r.at.some((a) => a.includes(MOBILE))
-    && r.selector.includes('.detail-view__footer:has(> .task-detail__more) > .task-detail__overflow'));
-  assert.ok(mobil, 'mobil treten Starten und Archivieren in das Menue');
-  const show = [...eachRule(dv)].find((r) => r.at.some((a) => a.includes(MOBILE))
-    && r.selector.trim() === '.detail-view__footer > .task-detail__more');
+  const all = [...eachRule(dv)];
+  // Re-Kritik 2026-10-17: bis dahin galt das Menue nur mobil ("am Desktop
+  // passen alle Aktionen"). Mit Erledigen als Primaerknopf passten sie dort
+  // nicht mehr (Spalte 756 > 670px bei 1440, Blatt bei 834px zwei Reihen) -
+  // das Menue gilt jetzt in jeder Breite (test:master-detail).
+  const hide = all.find((r) => r.selector.includes('.detail-view__footer:has(> .task-detail__more) > .task-detail__overflow'));
+  assert.ok(hide && /display:\s*none/.test(hide.body), 'Starten und Archivieren treten in das Menue');
+  const show = all.find((r) => r.selector.trim() === '.detail-view__footer > .task-detail__more');
   assert.match(show?.body ?? '', /display:\s*inline-flex/);
   const src = readFileSync(new URL('../public/components/task-detail.js', import.meta.url), 'utf8');
   assert.match(src, /id: MORE_BUTTON_ID/, 'der Mehr-Knopf ist eine Aktion des Fusses');

@@ -166,8 +166,7 @@ test('R18: Dialog, Mehr-Blatt und Such-Palette tragen die Stufe der schwebenden 
   }
   // Die kleine Stufe: Menues.
   for (const [css, selector] of [[LAYOUT, '.popover-menu'], [LAYOUT, '.filter-popover'],
-    [read('../public/styles/documents.css'), '.documents-context-menu'],
-    [read('../public/styles/calendar.css'), '.cal-filters-popover']]) {
+    [read('../public/styles/documents.css'), '.documents-context-menu']]) {
     const radii = rulesFor(css, selector).map(radiusOf).filter(Boolean);
     assert.deepEqual([...new Set(radii)], ['var(--radius-glass-inner)'], `${selector} traegt ${radii.join(', ')}`);
   }
@@ -197,7 +196,9 @@ test('R18: die Innenradien der schwebenden Flaechen sind konzentrisch', () => {
   const menu = px('var(--radius-glass-inner)');
   // [innen, aussen, Abstand zur Kante der Flaeche, Name]
   const pairs = [
-    [first(LAYOUT, '.more-item'), outer, px('var(--space-3)'), 'Kachel im Mehr-Blatt (12px Seitenpolster)'],
+    // R19: das Mehr-Blatt ist eine gruppierte Zeilenliste - die Rundung traegt
+    // der Traeger der Zeilen, nicht mehr jede Kachel.
+    [first(LAYOUT, '.more-sheet__list'), outer, px('var(--space-3)'), 'Zeilenliste im Mehr-Blatt (12px Seitenpolster)'],
     [first(LAYOUT, '.more-action'), outer, px('var(--space-4)'), 'Systemzeile im Mehr-Blatt (16px Polster unten)'],
     [first(LAYOUT, '.search-section__rows', (at) => /min-width:\s*768px/.test(at)), outer, px('var(--space-4)'),
       'Treffertraeger der Palette (16px Polster)'],
@@ -427,8 +428,10 @@ test('R18: das Marken-Lichtfeld steht still, ohne Filter, und faellt unter den a
   assert.equal(DARK_ATTR.get('--_brand-field-opacity'), DARK_MEDIA.get('--_brand-field-opacity'), 'beide Dark-Bloecke gleich');
   assert.ok(DARK_ATTR.get('--_brand-field-opacity'), 'das Feld hat einen Dark-Wert');
 
-  // Traeger: die Shell der Zugangsseiten und das Ladebild - und nichts, was
-  // sich bewegt.
+  // Traeger: die Shell der Zugangsseiten, das Ladebild und der Zustand, der
+  // das Ladebild ersetzt, wenn die Sitzung gerade nicht pruefbar ist
+  // (Critique R19, utils/session-unreachable.js) - alle drei VOR der App -
+  // und nichts, was sich bewegt.
   const carriers = [];
   for (const file of styleFiles()) {
     for (const rule of eachRule(read(`../public/styles/${file}`))) {
@@ -437,7 +440,7 @@ test('R18: das Marken-Lichtfeld steht still, ohne Filter, und faellt unter den a
       assert.doesNotMatch(rule.body, /animation|(?:^|;)\s*filter\s*:|transform\s*:/, `${rule.selector}: das Feld steht still`);
     }
   }
-  assert.deepEqual(carriers.sort(), ['.app-loading', '.app-shell:has(.auth-page)'], 'das Feld lebt nur vor der App');
+  assert.deepEqual(carriers.sort(), ['.app-loading', '.app-shell:has(.auth-page)', '.app-shell:has(> .session-unreachable)'].sort(), 'das Feld lebt nur vor der App');
 });
 
 /**
@@ -509,6 +512,15 @@ test('R18: auf der Zugangstafel halten Text und Feldkante ihre Schwelle, direkt 
 
   assert.match(rulesFor(LAYOUT, '.app-loading__logo')[0].body, /(?:^|;)\s*color:\s*var\(--color-text-primary\)/,
     'der Schriftzug des Ladebilds steht in Tinte, nicht im Akzent');
+  // R20 (Re-Critique 2026-10-17 a6 P2/P3): 4,8 s pulsierte am kalten Telefon nur
+  // der Schriftzug, und sein Name war fest deutsch ("Lade Yuvomi…").
+  assert.doesNotMatch(rulesFor(LAYOUT, '.app-loading__logo')[0].body, /animation/, 'das Ladebild pulsiert wieder');
+  const index = read('../public/index.html');
+  assert.match(index, /<div id="app-loading" class="app-loading" role="progressbar" aria-label="Yuvomi">/,
+    'das Ladebild traegt einen festen deutschen Namen statt der Marke');
+  for (const part of ['app-loading__seal', 'app-loading__card', 'app-loading__capsule', 'app-loading__rail']) {
+    assert.ok(index.includes(`class="${part}`), `die Skizze der Shell hat kein ${part}`);
+  }
   // Auf den Seiten steht alles in der Tafel: der Kopf ist ein Kind von
   // `main.auth-page` (test:auth-pages-ui haelt, dass jede Seite so beginnt),
   // und die Versionszeile steht vor dem schliessenden </main>.
