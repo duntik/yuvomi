@@ -1319,7 +1319,10 @@ router.post('/:listId/import-meal-plan', (req, res) => {
 // --------------------------------------------------------
 // POST /api/v1/shopping/:listId/import-pantry
 // Setzt Vorratsartikel auf die Einkaufsliste (leer oder unter Mindestbestand).
-// Body: { items: [{ pantry_item_id, quantity? }] }
+// Body: { items: [{ pantry_item_id, quantity? } | { pantry_product_id }] }
+//
+// `pantry_product_id` hands over a household product without batches (#1448):
+// its name and category, no quantity, like an empty batch without a minimum.
 //
 // Die Mengen-Angabe kommt als fertiger Anzeigetext vom Client: shopping_items.quantity
 // ist Freitext, und die Einheiten des Vorrats ('pcs', 'can', …) sind erst über t()
@@ -1367,12 +1370,18 @@ router.post('/:listId/import-pantry', (req, res) => {
     // ASCII kennt: "Öl" und "öl" waren zwei Artikel.
     const result = db.transaction(() => {
       const findPantryItem = db.get().prepare('SELECT name, category FROM pantry_items WHERE id = ?');
+      const findPantryProduct = db.get().prepare('SELECT name, category FROM pantry_products WHERE id = ?');
       let missing = 0;
       const rows = [];
       for (const entry of entries) {
-        const pantryItem = findPantryItem.get(Number(entry?.pantry_item_id));
+        const byProduct = entry?.pantry_item_id == null && entry?.pantry_product_id != null;
+        const pantryItem = byProduct
+          ? findPantryProduct.get(Number(entry.pantry_product_id))
+          : findPantryItem.get(Number(entry?.pantry_item_id));
         if (!pantryItem) { missing += 1; continue; }
-        const vQty = str(entry.quantity, 'Menge', { max: MAX_SHORT, required: false });
+        // A product without batches has no stock to measure a shortfall
+        // against: it goes over without a quantity.
+        const vQty = byProduct ? { value: null } : str(entry.quantity, 'Menge', { max: MAX_SHORT, required: false });
         const category = validNames.includes(pantryItem.category) ? pantryItem.category : defaultCat;
         rows.push({ name: pantryItem.name, quantity: vQty.value, category });
       }
