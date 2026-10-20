@@ -6598,8 +6598,9 @@ test('Critique 2026-10-16: Kurzzeile einzeilig bis aufgeklappt, Startsaldo beim 
   budgetUi.state.meta = { ...vorherMeta, expenseCategories: [{ key: 'housing', name: 'Housing' }, { key: 'food', name: 'Food' }] };
   let bars;
   try { bars = budgetUi.renderCategoryBars(summe.byCategory); } finally { budgetUi.state.meta = vorherMeta; }
-  assert.match(bars, /style="--bar-scale:[\d.]+;--bar-fill:var\(--chart-series-1\)" data-bar-key="expenses:housing"/, 'Wohnen: Serie 1');
-  assert.match(bars, /style="--bar-scale:[\d.]+;--bar-fill:var\(--chart-series-2\)" data-bar-key="expenses:food"/, 'Ernaehrung: Serie 2');
+  // Die Farbe steht am Track (#2084), das Fuell-Element erbt sie.
+  assert.match(bars, /;--bar-fill:var\(--chart-series-1\)">\s*<span class="budget-bar-row__fill[^>]*data-bar-key="expenses:housing"/, 'Wohnen: Serie 1');
+  assert.match(bars, /;--bar-fill:var\(--chart-series-2\)">\s*<span class="budget-bar-row__fill[^>]*data-bar-key="expenses:food"/, 'Ernaehrung: Serie 2');
   // Plan: der Balken traegt die Kategoriefarbe, nicht den Zustand.
   const plans = read('../public/pages/budget-plans.js');
   assert.match(plans, /const fill = view\.ctx\.categoryColor\?\.\(p\.category\);/);
@@ -6802,4 +6803,236 @@ test('Budget einspaltig: jeder Reiter endet an der Kante des Kopfs', () => {
   assert.ok(rule, 'die einspaltige Regel fehlt');
   assert.ok(rule.selector.split(',').map((x) => x.trim()).includes('.budget-tab-panel'));
   assert.match(rule.body, /--page-measure:\s*100%/);
+});
+
+// #2084: der Mindest-Stummel am Bahnanfang (::after am Track) stand immer im
+// Modulton, die Kategoriefarbe sass nur am Fuell-Element - jeder Ausgabenbalken
+// begann mit einem andersfarbigen 2px-Strich. Die Farbe gehoert an den TRACK:
+// das Fuell-Element erbt sie, und der Stummel liest dieselbe Eigenschaft.
+const expenseBarStyles = (html) => [...html.matchAll(
+  /class="budget-bar-row__track"(?: style="([^"]*)")?>\s*<(?:span|div) class="budget-bar-row__fill budget-bar-row__fill--expenses"\s+style="([^"]*)"/g,
+)].map(([, track = '', fill]) => ({ track, fill }));
+
+test('#2084: der Stummel am Bahnanfang traegt die Farbe der Kategorie', async () => {
+  const stub = [...eachRule(budgetCss)].find((r) => r.selector === '.budget-chart-block .budget-bar-row__track::after');
+  assert.ok(stub, 'Stummel-Regel fehlt');
+  assert.match(stub.body, /background-color:\s*var\(--bar-fill,\s*var\(--bar-stub-color\)\)/,
+    'der Stummel liest die Kategoriefarbe, der Blockton ist nur der Rueckfall');
+
+  const state = budgetUi.state;
+  const previous = { ...state };
+  let subHtml;
+  try {
+    Object.assign(state, {
+      currency: 'EUR', categoryFilter: 'housing', subcategoryFilter: null, responsibleFilterId: null,
+      meta: {
+        expenseCategories: [{ key: 'housing', name: 'Wohnen' }], incomeCategories: [],
+        subcategories: { housing: [{ key: 'rent_mortgage' }, { key: 'utilities' }] },
+      },
+      entries: [
+        { category: 'housing', subcategory: 'utilities', amount: -100 },
+        { category: 'housing', subcategory: 'rent_mortgage', amount: -700 },
+      ],
+      summary: { byCategory: [{ category: 'housing', income: 0, expenses: -800, total: -800 }] },
+    });
+    subHtml = budgetUi.renderSubcategoryBreakdowns();
+  } finally {
+    Object.assign(state, previous);
+  }
+  const statsHtml = await renderCatBarsWith({
+    byCategory: [{ category: 'food', expenses: -1200 }, { category: 'rent', expenses: -600 }],
+  });
+
+  for (const [where, html] of [
+    ['Uebersicht', budgetUi.renderCategoryBars(kategorien())],
+    ['Unterkategorien', subHtml],
+    ['Statistik', statsHtml],
+  ]) {
+    const rows = expenseBarStyles(html);
+    assert.ok(rows.length >= 2, `${where}: keine Ausgabenbalken gefunden`);
+    for (const { track, fill } of rows) {
+      assert.match(track, /--bar-fill:/, `${where}: die Kategoriefarbe steht am Track, wo der Stummel sie liest`);
+      assert.doesNotMatch(fill, /--bar-fill:/, `${where}: das Fuell-Element erbt sie, statt sie allein zu tragen`);
+    }
+  }
+});
+
+// #2084: die Schraffur der Serien 6/7 stand im Balken fast senkrecht. Ein
+// fester Winkel (135deg) bleibt in der um 1/Skala verbreiterten Kachel 45 Grad
+// und wird vom scaleX in die Senkrechte gestaucht. Das Eckwort `to bottom right`
+// legt die Linien auf die Diagonale der KACHEL - nach dem Stauchen ist die
+// Kachel quadratisch und die Diagonale 45 Grad.
+test('#2084: die Balkenschraffur folgt der Kacheldiagonale, nicht einem festen Winkel', () => {
+  const fill = [...eachRule(budgetCss)].find((r) => r.selector.split(',').map((x) => x.trim()).includes('.budget-bar-row__fill[data-texture="hatch"]') && /background-image:/.test(r.body));
+  assert.ok(fill, 'Schraffur-Regel fehlt');
+  assert.match(fill.body, /linear-gradient\(\s*to bottom right,/);
+  assert.doesNotMatch(fill.body, /linear-gradient\(\s*-?[\d.]+(deg|turn|rad)/);
+});
+
+// -------------------------------------------------------------------------
+// #1997: eine spaete Erfolgsantwort schliesst nur ihren EIGENEN Dialog
+// -------------------------------------------------------------------------
+
+// Kommt die Antwort erst, nachdem der Nutzer den Dialog geschlossen und einen
+// anderen geoeffnet hat, darf das force-Schliessen nur den eigenen treffen. Ob
+// der Slot noch denselben Dialog haelt, entscheidet closeModal({ context }) in
+// components/modal.js (am echten Modul gemessen in test-modal-dead-time.js);
+// hier zaehlt die Verdrahtung: jeder Weg der Seite, der nach einer Anfrage
+// schliesst, reicht den VOR der Anfrage gemerkten Kontext hinein. Gefahren wird
+// je Weg der echte Handler an einem Attrappen-Panel; die schreibende Anfrage
+// wechselt den Kontext, wie es ein inzwischen geoeffneter Dialog tut.
+
+/**
+ * Ein Attrappen-Panel: jedes Element entsteht beim ersten Griff, `werte` belegt
+ * es vor. Die Typ-Leiste fehlt: die geteilten Bausteine (wireTablist,
+ * attachSegmentIndicator) sind bei fehlender Leiste ein No-op.
+ */
+function attrappenPanel(werte = {}) {
+  const handlers = {};
+  const els = {};
+  const fehlt = new Set(['.budget-type-toggle']);
+  const el = (sel) => {
+    if (fehlt.has(sel)) return null;
+    if (!els[sel]) {
+      els[sel] = Object.assign({
+        value: '', checked: false, hidden: false, disabled: false, textContent: '', dataset: {}, style: {},
+        classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+        setAttribute() {}, removeAttribute() {}, getAttribute: () => null, hasAttribute: () => false,
+        addEventListener(type, fn) { handlers[`${sel}:${type}`] = fn; },
+        removeEventListener() {},
+        querySelector: (inner) => el(`${sel} ${inner}`), querySelectorAll: () => [],
+        replaceChildren() {}, append() {}, prepend() {}, appendChild() {}, insertAdjacentHTML() {}, focus() {},
+        closest: () => null, contains: () => false, getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }),
+      }, werte[sel] ?? {});
+    }
+    return els[sel];
+  };
+  const panel = { querySelector: el, querySelectorAll: () => [], addEventListener() {}, contains: () => false };
+  const ausloesen = (sel, type = 'click') => handlers[`${sel}:${type}`]({ preventDefault() {}, currentTarget: el(sel), target: el(sel) });
+  return { panel, ausloesen };
+}
+
+/** Oeffnet einen Dialog ueber den Modal-Stub und verdrahtet ihn am Attrappen-Panel. */
+async function budgetDialog(oeffne, werte) {
+  let opts = null;
+  globalThis.__openModal = (o) => { opts = o; };
+  try { await oeffne(); } finally { delete globalThis.__openModal; }
+  assert.ok(opts, 'der Dialog wurde geoeffnet');
+  const { panel, ausloesen } = attrappenPanel(werte);
+  opts.onSave(panel);
+  return ausloesen;
+}
+
+const BUDGET_KONTO = () => ({ id: 3, name: 'Giro', type: 'checking', starting_balance: 0, current_balance: 0, archived: 0, color: null });
+const BUDGET_BUCHUNG = (extra = {}) => ({
+  id: 21, title: 'Miete', amount: -800, category: 'misc', subcategory: '', date: '2026-06-03',
+  is_recurring: 0, recurrence_parent_id: null, ...extra,
+});
+const BUDGET_BUCHUNG_WERTE = {
+  '#bm-title': { value: 'Miete' }, '#bm-amount': { value: '800' }, '#bm-category': { value: 'misc' },
+  '#bm-date': { value: '2026-06-03' }, '#bm-interval': { value: 'monthly' }, '#bm-interval-count': { value: '1' },
+};
+const BUDGET_DARLEHEN_WERTE = {
+  '#lm-borrower': { value: 'Mia' }, '#lm-start': { value: '2026-06' }, '#lm-interest-mode': { value: 'none' },
+  '#lm-amount': { value: '1200' }, '#lm-installments': { value: '12' },
+};
+
+/** [Name, Vorbereitung (liefert den Ausloeser)]: jeder Weg, der nach seiner Anfrage schliesst. */
+const BUDGET_ERFOLGSWEGE = [
+  ['Konto archivieren', async () => {
+    const klick = await budgetDialog(() => budgetUi.openAccountModal(BUDGET_KONTO()));
+    return () => klick('#am-archive');
+  }],
+  ['Konto speichern', async () => {
+    const klick = await budgetDialog(() => budgetUi.openAccountModal(BUDGET_KONTO()), {
+      '#am-name': { value: 'Giro' }, '#am-type': { value: 'checking' }, '#am-balance': { value: '0' },
+    });
+    return () => klick('#am-save');
+  }],
+  ['Buchung anlegen', async () => {
+    const klick = await budgetDialog(() => budgetUi.openBudgetModal({ mode: 'create' }), BUDGET_BUCHUNG_WERTE);
+    return () => klick('#bm-save');
+  }],
+  ['Buchung einer Serie bearbeiten (vor der Umfangsfrage)', async () => {
+    const entry = BUDGET_BUCHUNG({ is_recurring: 1 });
+    const klick = await budgetDialog(() => budgetUi.openBudgetModal({ mode: 'edit', entry }),
+      { ...BUDGET_BUCHUNG_WERTE, '#bm-recurring': { checked: true } });
+    return () => klick('#bm-save');
+  }],
+  ['Buchung bearbeiten', async () => {
+    const entry = BUDGET_BUCHUNG();
+    const klick = await budgetDialog(() => budgetUi.openBudgetModal({ mode: 'edit', entry }), BUDGET_BUCHUNG_WERTE);
+    return () => klick('#bm-save');
+  }],
+  ['Darlehen aus dem Buchungsdialog anlegen', async () => {
+    const klick = await budgetDialog(() => budgetUi.openBudgetModal({ mode: 'create', initialType: 'loan' }), BUDGET_DARLEHEN_WERTE);
+    return () => klick('#bm-save');
+  }],
+  ['Darlehen im eigenen Dialog speichern', async () => {
+    const klick = await budgetDialog(() => budgetUi.openLoanModal(), BUDGET_DARLEHEN_WERTE);
+    return () => klick('#lm-save');
+  }],
+  ['Vorgemerkte Buchung bestaetigen', async () => {
+    budgetUi.state.entries = [BUDGET_BUCHUNG({ id: 22 })];
+    const klick = await budgetDialog(() => budgetUi.openConfirmBookingModal(22), {
+      '#cb-amount': { value: '800' }, '#cb-date': { value: '2026-06-03' },
+    });
+    return () => klick('#cb-save');
+  }],
+];
+
+test('Erfolg nach Dialogwechsel - jeder Weg schliesst nur mit dem Kontext von VOR der Anfrage (#1997)', async () => {
+  const s = budgetUi.state;
+  const zuvor = { ...s };
+  const vorherToast = globalThis.window.yuvomi.showToast;
+  const toasts = [];
+  globalThis.window.yuvomi.showToast = (text, kind) => { toasts.push([text, kind]); };
+  budgetUi.updateTabsForTest({ classList: { toggle() {} }, querySelector: () => null });
+  try {
+    for (const [name, vorbereiten] of BUDGET_ERFOLGSWEGE) {
+      Object.assign(s, {
+        month: '2026-06', activeTab: 'budget', budgetMode: 'shared', currency: 'EUR', entries: [], accounts: [],
+        members: [], loans: [],
+        meta: { expenseCategories: [{ key: 'misc', name: 'Sonstiges' }], incomeCategories: [], subcategories: {} },
+      });
+      const ausloesen = await vorbereiten();
+      toasts.length = 0;
+      let kontext = 'eigener-dialog';
+      const geschlossen = [];
+      const geschrieben = [];
+      globalThis.__modalContextId = () => kontext;
+      globalThis.__closeModal = (opts) => { geschlossen.push(opts); };
+      // Die Umfangsfrage einer Serie bricht ab; der Weg zaehlt bis zu ihr.
+      globalThis.__openModal = (o) => { o.onClose?.(); };
+      const schreibe = (verb) => async (path) => {
+        geschrieben.push(`${verb} ${path}`);
+        kontext = 'ein-anderer-dialog';
+        return { data: { id: 99 } };
+      };
+      globalThis.__apiStub = {
+        get: async () => ({ data: [] }),
+        post: schreibe('POST'), put: schreibe('PUT'), patch: schreibe('PATCH'), delete: schreibe('DELETE'),
+      };
+      try {
+        await ausloesen();
+        // Die Serie schliesst VOR der Umfangsfrage, also vor ihrer Anfrage;
+        // jeder andere Weg schreibt erst und schliesst dann.
+        if (!name.includes('Umfangsfrage')) assert.ok(geschrieben.length > 0, `${name}: der Weg schreibt`);
+        assert.equal(toasts.some(([, art]) => art === 'danger'), false,
+          `${name}: der Erfolg ist kein Fehler (${JSON.stringify(toasts)})`);
+        assert.ok(geschlossen.length >= 1, `${name}: der Weg schliesst (${JSON.stringify(geschlossen)}, ${JSON.stringify(geschrieben)})`);
+        assert.equal(geschlossen[0].force, true, `${name}: force wie bisher`);
+        assert.equal(geschlossen[0].context, 'eigener-dialog',
+          `${name}: geschlossen wird ohne den Kontext von vor der Anfrage - die spaete Antwort traefe den Dialog, der jetzt offen ist`);
+      } finally {
+        delete globalThis.__modalContextId;
+        delete globalThis.__closeModal;
+        delete globalThis.__openModal;
+        delete globalThis.__apiStub;
+      }
+    }
+  } finally {
+    globalThis.window.yuvomi.showToast = vorherToast;
+    Object.assign(s, zuvor);
+  }
 });

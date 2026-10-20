@@ -629,7 +629,10 @@
         "kanbanColExpand": "Fäll ut kolumnen",
         "kanbanArchiveDone": "Arkivera allt klart",
         "kanbanArchiveDoneConfirm": "Arkivera alla klara uppgifter i den här kolumnen?",
-        "kanbanArchiveDoneAction": "Arkivera"
+        "kanbanArchiveDoneAction": "Arkivera",
+        "errorTaskGone": "Den här uppgiften finns inte längre.",
+        "errorParentGone": "Uppgiften som den här deluppgiften hör till finns inte längre.",
+        "errorCommentGone": "Den här kommentaren finns inte längre."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} vara borttagen.",
@@ -927,6 +930,8 @@
         "loadError": "Händelser kunde inte laddas.",
         "saveError": "Det gick inte att spara",
         "deleteError": "Fel vid borttagning",
+        "occurrenceGoneError": "Den här förekomsten ingår inte längre i serien. Ladda om kalendern och välj den igen.",
+        "occurrenceMalformedError": "Förekomsten i serien angavs inte korrekt. Ladda om kalendern och välj den igen.",
         "titleRequired": "Titel krävs",
         "monthJanuary": "Januari",
         "monthFebruary": "Februari",
@@ -1238,7 +1243,9 @@
         "checkConflict": "Anteckningen har ändrats under tiden. Den laddas om.",
         "pinnedState": "Fäst",
         "checklistDone": "Klart",
-        "checklistOpen": "Öppet"
+        "checklistOpen": "Öppet",
+        "errorNoteGone": "Den här anteckningen finns inte längre.",
+        "errorSelectedCategoryGone": "En vald kategori finns inte längre."
     },
     "markdown": {
         "bold": "Fet (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "Välj {{name}}",
         "bulkDeleteConfirm": "Radera {{count}} kontakter?",
         "bulkDeleteConfirm_one": "Radera {{count}} kontakt?",
-        "bulkDeletedToast": "{{count}} kontakter raderade"
+        "bulkDeletedToast": "{{count}} kontakter raderade",
+        "errorContactGone": "Den här kontakten finns inte längre.",
+        "errorSelectedCategoryGone": "Den valda kategorin finns inte längre."
     },
     "budget": {
         "title": "Budget",
@@ -3476,7 +3485,8 @@
         "importSubmit": "Lägg till {{count}}",
         "importSuccess": "{{count}} födelsedagar tillagda.",
         "importNothingSelected": "Välj minst en kontakt.",
-        "importSelected": "{{count}} kontakter valda"
+        "importSelected": "{{count}} kontakter valda",
+        "errorBirthdayGone": "Den här födelsedagen finns inte längre."
     },
     "reminders": {
         "sectionTitle": "Påminnelse",
@@ -3866,6 +3876,10 @@
         "deleted": "Snabblänk borttagen",
         "loadError": "Snabblänkarna kunde inte laddas.",
         "orderError": "Ordningen kunde inte sparas.",
+        "errorLinkGone": "Den här snabblänken finns inte längre.",
+        "errorLimitReached": "Översikten rymmer högst {{limit}} snabblänkar.",
+        "saveError": "Snabblänken kunde inte sparas.",
+        "deleteError": "Snabblänken kunde inte tas bort.",
         "iconSymbol": "Välj ikon",
         "iconChoose": "Välj ikon eller bild"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Bara den som får se beloppen för hushållshjälpen kan markera en betalning.",
         "notHereToday": "Inte här än i dag",
         "tabVisits": "Besök",
-        "tabChores": "Sysslor"
+        "tabChores": "Sysslor",
+        "errorWorkerGone": "Den här städaren finns inte längre.",
+        "errorVisitGone": "Det här besöket finns inte längre.",
+        "errorTaskGone": "Den här uppgiften finns inte längre.",
+        "errorAlreadyCheckedOut": "Den här städaren är redan utcheckad.",
+        "errorAlreadyCheckedIn": "Den här städaren är redan incheckad."
     },
     "userMultiSelect": {
         "moreUsers": "mer",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} kalenderpost saknade UID; en reservidentitet baserad på etikett och datum användes.",
         "importDiagnosticDuplicateInstance": "{{count}} dubblerade hämtningstillfällen (samma identitet) slogs samman till ett.",
         "importDiagnosticDuplicateInstance_one": "{{count}} dubblerat hämtningstillfälle (samma identitet) slogs samman till ett.",
+        "importDiagnosticOther": "En kalenderpost har inte det förväntade formatet.",
         "importUnresolvedBlockingError": "Åtgärda alla blockerande varningar först, eller hoppa uttryckligen över de berörda händelserna.",
         "importIgnoreLabel": "Ignorera",
         "importCreateNewType": "Skapa en ny avfallstyp",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Stäng konto",
             "confirmCloseAccount": "Stänga kontot för {{name}}?",
             "closeAccountDetail": "Historiken finns kvar. Ett konto som öppnas på nytt börjar i den valuta hushållet använder då.",
-            "accountNotEmpty": "Kontot kan stängas först när det inte har något saldo, ingen plan och ingen öppen förfrågan."
-        }
+            "accountNotEmpty": "Kontot kan stängas först när det inte har något saldo, ingen plan och ingen öppen förfrågan.",
+            "errorAccountDeactivated": "Det här kontot är inaktiverat och kan bara betalas ut.",
+            "errorBalanceTooLarge": "Saldot skulle bli för stort. Förfrågan ligger kvar.",
+            "errorAccountExists": "Den här personen har redan ett veckopengskonto.",
+            "errorNoAccount": "Den här personen har inget veckopengskonto.",
+            "errorCurrencyChanged": "Valutan för det här kontot har ändrats."
+        },
+        "errorRewardGone": "Den här belöningen är inte längre tillgänglig.",
+        "errorRequestGone": "Den här förfrågan finns inte längre.",
+        "errorRequestDecided": "Den här förfrågan är redan avgjord.",
+        "errorNotEnoughPoints": "Poängen räcker inte till det här.",
+        "errorNotParticipating": "Den här personen samlar inte poäng.",
+        "errorMoneyAccountGone": "Det här kontot finns inte längre.",
+        "errorMoneyPlanGone": "Den här planen finns inte längre."
     },
     "datepicker": {
         "openCalendar": "Öppna kalender",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Detaljer om saken",
         "pickOne": "Välj en sak",
         "pickOneHint": "Uppgifter, tidsfrister och historik visas här.",
-        "moreDetailsHint": "Köp, garanti, foto, dokument"
+        "moreDetailsHint": "Köp, garanti, foto, dokument",
+        "errorItemGone": "Det här föremålet finns inte längre.",
+        "errorTrackedDateGone": "Det här datumet finns inte längre.",
+        "errorSelectedLocationGone": "Den valda platsen finns inte längre.",
+        "errorBookingGone": "Den här transaktionen finns inte längre.",
+        "errorBookingAlreadyLinked": "Den här transaktionen är redan kopplad.",
+        "errorLocationExists": "Den här platsen finns redan här. Välj ett annat namn.",
+        "errorLocationGone": "Den här platsen finns inte längre.",
+        "errorCategoryGone": "Den här kategorin finns inte längre."
     },
     "documentAttach": {
         "label": "Bilagor",
@@ -6414,7 +6454,13 @@
             "seminar": "SEM",
             "lab": "LAB"
         },
-        "typesWithTime": "Med tider"
+        "typesWithTime": "Med tider",
+        "errorShiftTypeGone": "Den här skifttypen finns inte längre.",
+        "errorSelectedShiftTypeGone": "Den valda skifttypen finns inte längre.",
+        "errorCustomFieldGone": "Det här fältet finns inte längre.",
+        "errorSelectedCustomFieldGone": "Ett av de valda fälten finns inte längre.",
+        "errorPatternGone": "Den här skiftcykeln finns inte längre.",
+        "errorEntryGone": "Den här posten finns inte längre."
     },
     "pairDisplay": {
         "title": "Parkoppla platta",

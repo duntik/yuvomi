@@ -679,7 +679,10 @@
         "kanbanColExpand": "Rozbalit sloupec",
         "kanbanArchiveDone": "Archivovat vše hotové",
         "kanbanArchiveDoneConfirm": "Archivovat všechny hotové úkoly v tomto sloupci?",
-        "kanbanArchiveDoneAction": "Archivovat"
+        "kanbanArchiveDoneAction": "Archivovat",
+        "errorTaskGone": "Tento úkol už neexistuje.",
+        "errorParentGone": "Nadřazený úkol tohoto podúkolu už neexistuje.",
+        "errorCommentGone": "Tento komentář už neexistuje."
     },
     "shopping": {
         "importMealsPreviewMeals_few": "{{count}} jídla",
@@ -995,6 +998,8 @@
         "loadError": "Události se nepodařilo načíst.",
         "saveError": "Chyba při ukládání",
         "deleteError": "Chyba při mazání",
+        "occurrenceGoneError": "Tento termín už do série nepatří. Znovu načtěte kalendář a vyberte ho znovu.",
+        "occurrenceMalformedError": "Termín série nebyl zadán správně. Znovu načtěte kalendář a vyberte ho znovu.",
         "titleRequired": "Název je povinný",
         "monthJanuary": "Leden",
         "monthFebruary": "Únor",
@@ -1311,7 +1316,9 @@
         "checkConflict": "Poznámka byla mezitím změněna. Bude znovu načtena.",
         "pinnedState": "Připnuto",
         "checklistDone": "Hotovo",
-        "checklistOpen": "Otevřeno"
+        "checklistOpen": "Otevřeno",
+        "errorNoteGone": "Tato poznámka už neexistuje.",
+        "errorSelectedCategoryGone": "Jedna z vybraných kategorií už neexistuje."
     },
     "markdown": {
         "bold": "Tučné (Ctrl+B)",
@@ -1434,7 +1441,9 @@
         "bulkDeleteConfirm": "Smazat {{count}} kontaktů?",
         "bulkDeleteConfirm_one": "Smazat {{count}} kontakt?",
         "bulkDeleteConfirm_few": "Smazat {{count}} kontakty?",
-        "bulkDeletedToast": "Smazáno {{count}} kontaktů"
+        "bulkDeletedToast": "Smazáno {{count}} kontaktů",
+        "errorContactGone": "Tento kontakt už neexistuje.",
+        "errorSelectedCategoryGone": "Vybraná kategorie už neexistuje."
     },
     "budget": {
         "title": "Rozpočet",
@@ -3467,6 +3476,10 @@
         "deleted": "Rychlý odkaz smazán",
         "loadError": "Rychlé odkazy se nepodařilo načíst.",
         "orderError": "Pořadí se nepodařilo uložit.",
+        "errorLinkGone": "Tento rychlý odkaz už neexistuje.",
+        "errorLimitReached": "Na přehled se nevejde více než {{limit}} rychlých odkazů.",
+        "saveError": "Rychlý odkaz se nepodařilo uložit.",
+        "deleteError": "Rychlý odkaz se nepodařilo smazat.",
         "iconSymbol": "Vybrat ikonu",
         "iconChoose": "Vybrat ikonu nebo obrázek"
     },
@@ -3684,7 +3697,12 @@
         "errorAmountsHidden": "Platbu může označit jen ten, kdo smí vidět částky za pomoc v domácnosti.",
         "notHereToday": "Dnes ještě nedorazila",
         "tabVisits": "Návštěvy",
-        "tabChores": "Práce"
+        "tabChores": "Práce",
+        "errorWorkerGone": "Tento pracovník už neexistuje.",
+        "errorVisitGone": "Tato návštěva už neexistuje.",
+        "errorTaskGone": "Tento úkol už neexistuje.",
+        "errorAlreadyCheckedOut": "Tento pracovník je už odhlášen.",
+        "errorAlreadyCheckedIn": "Tento pracovník je už přihlášen."
     },
     "splitExpenses": {
         "title": "Společné výdaje",
@@ -4240,7 +4258,8 @@
         "importSubmit": "Přidat {{count}}",
         "importSuccess": "Přidáno narozenin: {{count}}.",
         "importNothingSelected": "Vyberte alespoň jeden kontakt.",
-        "importSelected": "Vybráno kontaktů: {{count}}"
+        "importSelected": "Vybráno kontaktů: {{count}}",
+        "errorBirthdayGone": "Tyto narozeniny už neexistují."
     },
     "rrule": {
         "freqNone": "Bez opakování",
@@ -5807,6 +5826,7 @@
         "importDiagnosticMissingUidFallback_few": "{{count}} položky kalendáře neměly UID; byla použita náhradní identita na základě štítku a data.",
         "importDiagnosticDuplicateInstance": "{{count}} duplicitních termínů svozu (stejná identita) bylo sloučeno do jednoho.",
         "importDiagnosticDuplicateInstance_one": "{{count}} duplicitní termín svozu (stejná identita) byl sloučen do jednoho.",
+        "importDiagnosticOther": "Jedna položka kalendáře neodpovídá očekávanému formátu.",
         "importDiagnosticDuplicateInstance_few": "{{count}} duplicitní termíny svozu (stejná identita) byly sloučeny do jednoho.",
         "importUnresolvedBlockingError": "Nejprve vyřešte všechna blokující upozornění, nebo explicitně přeskočte dotčené události.",
         "importIgnoreLabel": "Ignorovat",
@@ -6048,8 +6068,20 @@
             "closeAccount": "Zavřít účet",
             "confirmCloseAccount": "Zavřít účet uživatele {{name}}?",
             "closeAccountDetail": "Historie zůstane. Znovu otevřený účet začne v měně, kterou domácnost v tu chvíli používá.",
-            "accountNotEmpty": "Účet lze zavřít až tehdy, když na něm není zůstatek, plán ani otevřená žádost."
-        }
+            "accountNotEmpty": "Účet lze zavřít až tehdy, když na něm není zůstatek, plán ani otevřená žádost.",
+            "errorAccountDeactivated": "Tento účet je deaktivovaný a lze ho už jen vyplatit.",
+            "errorBalanceTooLarge": "Zůstatek by byl příliš vysoký. Žádost zůstává otevřená.",
+            "errorAccountExists": "Tato osoba už má účet s kapesným.",
+            "errorNoAccount": "Tato osoba nemá účet s kapesným.",
+            "errorCurrencyChanged": "Měna tohoto účtu se změnila."
+        },
+        "errorRewardGone": "Tato odměna už není k dispozici.",
+        "errorRequestGone": "Tato žádost už neexistuje.",
+        "errorRequestDecided": "O této žádosti už bylo rozhodnuto.",
+        "errorNotEnoughPoints": "Na to nestačí body.",
+        "errorNotParticipating": "Tato osoba nesbírá body.",
+        "errorMoneyAccountGone": "Tento účet už neexistuje.",
+        "errorMoneyPlanGone": "Tento plán už neexistuje."
     },
     "datepicker": {
         "openCalendar": "Otevřít kalendář",
@@ -6307,7 +6339,15 @@
         "detailPaneLabel": "Podrobnosti předmětu",
         "pickOne": "Vyberte předmět",
         "pickOneHint": "Údaje, termíny a historie se zobrazí zde.",
-        "moreDetailsHint": "Nákup, záruka, fotka, dokumenty"
+        "moreDetailsHint": "Nákup, záruka, fotka, dokumenty",
+        "errorItemGone": "Tato věc už neexistuje.",
+        "errorTrackedDateGone": "Tato lhůta už neexistuje.",
+        "errorSelectedLocationGone": "Vybrané místo už neexistuje.",
+        "errorBookingGone": "Tato transakce už neexistuje.",
+        "errorBookingAlreadyLinked": "Tato transakce už je propojená.",
+        "errorLocationExists": "Toto místo tu již existuje. Zvolte jiný název.",
+        "errorLocationGone": "Toto místo už neexistuje.",
+        "errorCategoryGone": "Tato kategorie už neexistuje."
     },
     "documentAttach": {
         "label": "Přílohy",
@@ -6576,7 +6616,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "S časem"
+        "typesWithTime": "S časem",
+        "errorShiftTypeGone": "Tento typ směny už neexistuje.",
+        "errorSelectedShiftTypeGone": "Vybraný typ směny už neexistuje.",
+        "errorCustomFieldGone": "Toto pole už neexistuje.",
+        "errorSelectedCustomFieldGone": "Jedno z vybraných polí už neexistuje.",
+        "errorPatternGone": "Tento cyklus směn už neexistuje.",
+        "errorEntryGone": "Tento záznam už neexistuje."
     },
     "pairDisplay": {
         "title": "Spárovat tablet",

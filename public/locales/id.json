@@ -645,7 +645,10 @@
         "kanbanColExpand": "Bentangkan kolom",
         "kanbanArchiveDone": "Arsipkan semua yang selesai",
         "kanbanArchiveDoneConfirm": "Arsipkan semua tugas selesai di kolom ini?",
-        "kanbanArchiveDoneAction": "Arsipkan"
+        "kanbanArchiveDoneAction": "Arsipkan",
+        "errorTaskGone": "Tugas ini sudah tidak ada.",
+        "errorParentGone": "Tugas induk subtugas ini sudah tidak ada.",
+        "errorCommentGone": "Komentar ini sudah tidak ada."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} item dihapus.",
@@ -953,6 +956,8 @@
         "loadError": "Acara tidak dapat dimuat.",
         "saveError": "Kesalahan saat menyimpan",
         "deleteError": "Kesalahan saat menghapus",
+        "occurrenceGoneError": "Kejadian ini bukan lagi bagian dari seri. Muat ulang kalender dan pilih lagi.",
+        "occurrenceMalformedError": "Kejadian seri tidak diberikan dengan benar. Muat ulang kalender dan pilih lagi.",
         "titleRequired": "Judul wajib diisi",
         "monthJanuary": "Januari",
         "monthFebruary": "Februari",
@@ -1254,7 +1259,9 @@
         "checkConflict": "Catatan telah berubah sementara itu. Catatan akan dimuat ulang.",
         "pinnedState": "Disematkan",
         "checklistDone": "Selesai",
-        "checklistOpen": "Terbuka"
+        "checklistOpen": "Terbuka",
+        "errorNoteGone": "Catatan ini sudah tidak ada.",
+        "errorSelectedCategoryGone": "Salah satu kategori yang dipilih sudah tidak ada."
     },
     "markdown": {
         "bold": "Tebal (Ctrl+B)",
@@ -1376,7 +1383,9 @@
         "selectNamed": "Pilih {{name}}",
         "bulkDeleteConfirm": "Hapus {{count}} kontak?",
         "bulkDeleteConfirm_one": "Hapus {{count}} kontak?",
-        "bulkDeletedToast": "{{count}} kontak dihapus"
+        "bulkDeletedToast": "{{count}} kontak dihapus",
+        "errorContactGone": "Kontak ini sudah tidak ada.",
+        "errorSelectedCategoryGone": "Kategori yang dipilih sudah tidak ada."
     },
     "budget": {
         "title": "Anggaran",
@@ -3453,7 +3462,8 @@
         "importSubmit": "Tambahkan {{count}}",
         "importSuccess": "{{count}} ulang tahun ditambahkan.",
         "importNothingSelected": "Pilih setidaknya satu kontak.",
-        "importSelected": "{{count}} kontak dipilih"
+        "importSelected": "{{count}} kontak dipilih",
+        "errorBirthdayGone": "Ulang tahun ini sudah tidak ada."
     },
     "recipes": {
         "mealTypeNone": "Tanpa waktu makan",
@@ -3607,6 +3617,10 @@
         "deleted": "Tautan cepat dihapus",
         "loadError": "Tautan cepat tidak dapat dimuat.",
         "orderError": "Urutan tidak dapat disimpan.",
+        "errorLinkGone": "Tautan cepat ini sudah tidak ada.",
+        "errorLimitReached": "Ringkasan hanya memuat paling banyak {{limit}} tautan cepat.",
+        "saveError": "Tautan cepat tidak dapat disimpan.",
+        "deleteError": "Tautan cepat tidak dapat dihapus.",
         "iconSymbol": "Pilih ikon",
         "iconChoose": "Pilih ikon atau gambar"
     },
@@ -4052,7 +4066,12 @@
         "errorAmountsHidden": "Hanya yang boleh melihat jumlah untuk asisten rumah tangga yang dapat menandai pembayaran.",
         "notHereToday": "Hari ini belum datang",
         "tabVisits": "Kunjungan",
-        "tabChores": "Pekerjaan rumah"
+        "tabChores": "Pekerjaan rumah",
+        "errorWorkerGone": "Asisten rumah tangga ini sudah tidak ada.",
+        "errorVisitGone": "Kunjungan ini sudah tidak ada.",
+        "errorTaskGone": "Tugas ini sudah tidak ada.",
+        "errorAlreadyCheckedOut": "Asisten rumah tangga ini sudah check-out.",
+        "errorAlreadyCheckedIn": "Asisten rumah tangga ini sudah check-in."
     },
     "splitExpenses": {
         "title": "Pengeluaran Bersama",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} entri kalender tidak memiliki UID; identitas cadangan berdasarkan label dan tanggal digunakan.",
         "importDiagnosticDuplicateInstance": "{{count}} kejadian penjemputan duplikat (identitas sama) digabung menjadi satu.",
         "importDiagnosticDuplicateInstance_one": "{{count}} kejadian penjemputan duplikat (identitas sama) digabung menjadi satu.",
+        "importDiagnosticOther": "Satu entri kalender tidak sesuai dengan format yang diharapkan.",
         "importUnresolvedBlockingError": "Selesaikan dahulu setiap peringatan yang memblokir, atau lewati acara yang terpengaruh secara eksplisit.",
         "importIgnoreLabel": "Abaikan",
         "importCreateNewType": "Buat jenis sampah baru",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Tutup rekening",
             "confirmCloseAccount": "Tutup rekening {{name}}?",
             "closeAccountDetail": "Riwayat tetap disimpan. Rekening yang dibuka lagi dimulai dalam mata uang yang dipakai rumah tangga saat itu.",
-            "accountNotEmpty": "Rekening baru bisa ditutup jika tidak ada saldo, rencana, atau permintaan terbuka."
-        }
+            "accountNotEmpty": "Rekening baru bisa ditutup jika tidak ada saldo, rencana, atau permintaan terbuka.",
+            "errorAccountDeactivated": "Rekening ini dinonaktifkan dan hanya bisa dicairkan.",
+            "errorBalanceTooLarge": "Saldo akan menjadi terlalu besar. Permintaan tetap terbuka.",
+            "errorAccountExists": "Orang ini sudah punya rekening uang saku.",
+            "errorNoAccount": "Orang ini tidak punya rekening uang saku.",
+            "errorCurrencyChanged": "Mata uang rekening ini telah berubah."
+        },
+        "errorRewardGone": "Hadiah ini sudah tidak tersedia.",
+        "errorRequestGone": "Permintaan ini sudah tidak ada.",
+        "errorRequestDecided": "Permintaan ini sudah diputuskan.",
+        "errorNotEnoughPoints": "Poin tidak cukup untuk ini.",
+        "errorNotParticipating": "Orang ini tidak mengumpulkan poin.",
+        "errorMoneyAccountGone": "Rekening ini sudah tidak ada.",
+        "errorMoneyPlanGone": "Rencana ini sudah tidak ada."
     },
     "datepicker": {
         "openCalendar": "Buka kalender",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Detail barang",
         "pickOne": "Pilih barang",
         "pickOneHint": "Detail, tenggat, dan riwayat muncul di sini.",
-        "moreDetailsHint": "Pembelian, garansi, foto, dokumen"
+        "moreDetailsHint": "Pembelian, garansi, foto, dokumen",
+        "errorItemGone": "Barang ini sudah tidak ada.",
+        "errorTrackedDateGone": "Tanggal ini sudah tidak ada.",
+        "errorSelectedLocationGone": "Lokasi yang dipilih sudah tidak ada.",
+        "errorBookingGone": "Transaksi ini sudah tidak ada.",
+        "errorBookingAlreadyLinked": "Transaksi ini sudah ditautkan.",
+        "errorLocationExists": "Lokasi ini sudah ada di sini. Pilih nama lain.",
+        "errorLocationGone": "Lokasi ini sudah tidak ada.",
+        "errorCategoryGone": "Kategori ini sudah tidak ada."
     },
     "documentAttach": {
         "label": "Lampiran",
@@ -6414,7 +6454,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "Dengan jam"
+        "typesWithTime": "Dengan jam",
+        "errorShiftTypeGone": "Jenis shift ini sudah tidak ada.",
+        "errorSelectedShiftTypeGone": "Jenis shift yang dipilih sudah tidak ada.",
+        "errorCustomFieldGone": "Bidang ini sudah tidak ada.",
+        "errorSelectedCustomFieldGone": "Salah satu bidang yang dipilih sudah tidak ada.",
+        "errorPatternGone": "Pola shift ini sudah tidak ada.",
+        "errorEntryGone": "Entri ini sudah tidak ada."
     },
     "pairDisplay": {
         "title": "Pasangkan tablet",

@@ -629,7 +629,10 @@
         "kanbanColExpand": "Vis kolonne",
         "kanbanArchiveDone": "Arkiver alle fullførte",
         "kanbanArchiveDoneConfirm": "Arkivere alle fullførte oppgaver i denne kolonnen?",
-        "kanbanArchiveDoneAction": "Arkiver"
+        "kanbanArchiveDoneAction": "Arkiver",
+        "errorTaskGone": "Denne oppgaven finnes ikke lenger.",
+        "errorParentGone": "Oppgaven denne underoppgaven hører til finnes ikke lenger.",
+        "errorCommentGone": "Denne kommentaren finnes ikke lenger."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} vare slettet.",
@@ -927,6 +930,8 @@
         "loadError": "Kunne ikke laste inn hendelser.",
         "saveError": "Feil ved lagring",
         "deleteError": "Feil ved sletting",
+        "occurrenceGoneError": "Denne forekomsten er ikke lenger en del av serien. Last inn kalenderen på nytt og velg den igjen.",
+        "occurrenceMalformedError": "Forekomsten i serien ble ikke angitt riktig. Last inn kalenderen på nytt og velg den igjen.",
         "titleRequired": "Tittel er påkrevd",
         "monthJanuary": "Januar",
         "monthFebruary": "Februar",
@@ -1238,7 +1243,9 @@
         "checkConflict": "Notatet har endret seg i mellomtiden. Det vil bli lastet på nytt.",
         "pinnedState": "Festet",
         "checklistDone": "Ferdig",
-        "checklistOpen": "Åpen"
+        "checklistOpen": "Åpen",
+        "errorNoteGone": "Dette notatet finnes ikke lenger.",
+        "errorSelectedCategoryGone": "En valgt kategori finnes ikke lenger."
     },
     "markdown": {
         "bold": "Fet (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "Velg {{name}}",
         "bulkDeleteConfirm": "Slett {{count}} kontakter?",
         "bulkDeleteConfirm_one": "Slett {{count}} kontakt?",
-        "bulkDeletedToast": "{{count}} kontakter slettet"
+        "bulkDeletedToast": "{{count}} kontakter slettet",
+        "errorContactGone": "Denne kontakten finnes ikke lenger.",
+        "errorSelectedCategoryGone": "Den valgte kategorien finnes ikke lenger."
     },
     "budget": {
         "title": "Budsjett",
@@ -3437,7 +3446,8 @@
         "importSubmit": "Legg til {{count}}",
         "importSuccess": "{{count}} fødselsdager lagt til.",
         "importNothingSelected": "Vennligst velg minst én kontakt.",
-        "importSelected": "{{count}} kontakter valgt"
+        "importSelected": "{{count}} kontakter valgt",
+        "errorBirthdayGone": "Denne fødselsdagen finnes ikke lenger."
     },
     "recipes": {
         "mealTypeNone": "Intet måltid",
@@ -3596,6 +3606,10 @@
         "deleted": "Hurtiglenke slettet",
         "loadError": "Hurtiglenkene kunne ikke lastes.",
         "orderError": "Ordren kunne ikke lagres.",
+        "errorLinkGone": "Denne hurtiglenken finnes ikke lenger.",
+        "errorLimitReached": "Oversikten har plass til høyst {{limit}} hurtiglenker.",
+        "saveError": "Hurtiglenken kunne ikke lagres.",
+        "deleteError": "Hurtiglenken kunne ikke slettes.",
         "iconSymbol": "Velg ikon",
         "iconChoose": "Velg ikon eller bilde"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Bare den som kan se beløpene for husholdningshjelpen, kan registrere en betaling.",
         "notHereToday": "Ikke kommet ennå i dag",
         "tabVisits": "Besøk",
-        "tabChores": "Gjøremål"
+        "tabChores": "Gjøremål",
+        "errorWorkerGone": "Denne vaskehjelpen finnes ikke lenger.",
+        "errorVisitGone": "Dette besøket finnes ikke lenger.",
+        "errorTaskGone": "Denne oppgaven finnes ikke lenger.",
+        "errorAlreadyCheckedOut": "Denne vaskehjelpen er allerede sjekket ut.",
+        "errorAlreadyCheckedIn": "Denne vaskehjelpen er allerede sjekket inn."
     },
     "userMultiSelect": {
         "moreUsers": "mer",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} kalenderoppføring hadde ingen UID; en alternativ identitet basert på etikett og date ble brukt.",
         "importDiagnosticDuplicateInstance": "{{count}} duplikate hentinger (samme identitet) ble slått sammen til én.",
         "importDiagnosticDuplicateInstance_one": "{{count}} duplikate hentinger tilfeller (samme identitet) ble slått sammen til ett.",
+        "importDiagnosticOther": "En kalenderoppføring har ikke det forventede formatet.",
         "importUnresolvedBlockingError": "Løs alle blokkerende feilmeldinger først, eller hopp over de berørte hendelsene eksplisitt.",
         "importIgnoreLabel": "Ignorer",
         "importCreateNewType": "Opprett en ny avfallstype",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Lukk konto",
             "confirmCloseAccount": "Lukke kontoen til {{name}}?",
             "closeAccountDetail": "Historikken beholdes. En konto som åpnes på nytt, starter i valutaen husholdningen bruker da.",
-            "accountNotEmpty": "Kontoen kan først lukkes når den ikke har saldo, plan eller åpne forespørsler."
-        }
+            "accountNotEmpty": "Kontoen kan først lukkes når den ikke har saldo, plan eller åpne forespørsler.",
+            "errorAccountDeactivated": "Denne kontoen er deaktivert og kan bare utbetales.",
+            "errorBalanceTooLarge": "Saldoen ville blitt for stor. Forespørselen står åpen.",
+            "errorAccountExists": "Denne personen har allerede en lommepengekonto.",
+            "errorNoAccount": "Denne personen har ingen lommepengekonto.",
+            "errorCurrencyChanged": "Valutaen for denne kontoen er endret."
+        },
+        "errorRewardGone": "Denne belønningen er ikke lenger tilgjengelig.",
+        "errorRequestGone": "Denne forespørselen finnes ikke lenger.",
+        "errorRequestDecided": "Denne forespørselen er allerede avgjort.",
+        "errorNotEnoughPoints": "Poengene strekker ikke til for dette.",
+        "errorNotParticipating": "Denne personen samler ikke poeng.",
+        "errorMoneyAccountGone": "Denne kontoen finnes ikke lenger.",
+        "errorMoneyPlanGone": "Denne planen finnes ikke lenger."
     },
     "datepicker": {
         "openCalendar": "Åpne kalender",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Elementdetaljer",
         "pickOne": "Velg et element",
         "pickOneHint": "Detaljer, frister og historikk vises her.",
-        "moreDetailsHint": "Kjøp, garanti, bilde, dokumenter"
+        "moreDetailsHint": "Kjøp, garanti, bilde, dokumenter",
+        "errorItemGone": "Denne gjenstanden finnes ikke lenger.",
+        "errorTrackedDateGone": "Denne datoen finnes ikke lenger.",
+        "errorSelectedLocationGone": "Det valgte stedet finnes ikke lenger.",
+        "errorBookingGone": "Denne bestillingen finnes ikke lenger.",
+        "errorBookingAlreadyLinked": "Denne bestillingen er allerede koblet.",
+        "errorLocationExists": "Denne lokasjonen finnes allerede her. Velg et annet navn.",
+        "errorLocationGone": "Denne lokasjonen finnes ikke lenger.",
+        "errorCategoryGone": "Denne kategorien finnes ikke lenger."
     },
     "documentAttach": {
         "label": "Vedlegg",
@@ -6414,7 +6454,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "Med klokkeslett"
+        "typesWithTime": "Med klokkeslett",
+        "errorShiftTypeGone": "Denne vakttypen finnes ikke lenger.",
+        "errorSelectedShiftTypeGone": "Den valgte vakttypen finnes ikke lenger.",
+        "errorCustomFieldGone": "Dette feltet finnes ikke lenger.",
+        "errorSelectedCustomFieldGone": "Ett av de valgte feltene finnes ikke lenger.",
+        "errorPatternGone": "Denne planen finnes ikke lenger.",
+        "errorEntryGone": "Denne oppføringen finnes ikke lenger."
     },
     "pairDisplay": {
         "title": "Par nettbrett",

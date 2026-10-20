@@ -645,7 +645,10 @@
         "kanbanColExpand": "Ilabas ang column",
         "kanbanArchiveDone": "I-archive lahat ng tapos na",
         "kanbanArchiveDoneConfirm": "I-archive ang lahat ng tapos na gawain sa column na ito?",
-        "kanbanArchiveDoneAction": "I-archive"
+        "kanbanArchiveDoneAction": "I-archive",
+        "errorTaskGone": "Wala na ang gawaing ito.",
+        "errorParentGone": "Wala na ang gawaing kinabibilangan ng subtask na ito.",
+        "errorCommentGone": "Wala na ang komentong ito."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} ang item na natanggal.",
@@ -953,6 +956,8 @@
         "loadError": "Hindi ma-load ang mga kaganapan.",
         "saveError": "Error sa pag-save",
         "deleteError": "Error sa pagtanggal",
+        "occurrenceGoneError": "Hindi na bahagi ng serye ang pangyayaring ito. I-reload ang kalendaryo at piliin itong muli.",
+        "occurrenceMalformedError": "Hindi tama ang pagkakabigay sa pangyayari ng serye. I-reload ang kalendaryo at piliin itong muli.",
         "titleRequired": "Kailangan ang pamagat",
         "monthJanuary": "Enero",
         "monthFebruary": "Pebrero",
@@ -1254,7 +1259,9 @@
         "checkConflict": "Nabago ang tala samantala. Iri-reload ito.",
         "pinnedState": "Naka-pin",
         "checklistDone": "Tapos",
-        "checklistOpen": "Bukas"
+        "checklistOpen": "Bukas",
+        "errorNoteGone": "Wala na ang talang ito.",
+        "errorSelectedCategoryGone": "Wala na ang isa sa mga napiling kategorya."
     },
     "markdown": {
         "bold": "Bold (Ctrl+B)",
@@ -1376,7 +1383,9 @@
         "selectNamed": "Piliin si {{name}}",
         "bulkDeleteConfirm": "Burahin ang {{count}} kontak?",
         "bulkDeleteConfirm_one": "Burahin ang {{count}} kontak?",
-        "bulkDeletedToast": "{{count}} kontak ang natanggal"
+        "bulkDeletedToast": "{{count}} kontak ang natanggal",
+        "errorContactGone": "Wala na ang kontak na ito.",
+        "errorSelectedCategoryGone": "Wala na ang napiling kategorya."
     },
     "budget": {
         "title": "Badyet",
@@ -3453,7 +3462,8 @@
         "importSubmit": "Idagdag ang {{count}}",
         "importSuccess": "{{count}} kaarawan ang naidagdag.",
         "importNothingSelected": "Pumili ng kahit isang kontak.",
-        "importSelected": "{{count}} kontak ang napili"
+        "importSelected": "{{count}} kontak ang napili",
+        "errorBirthdayGone": "Wala na ang kaarawang ito."
     },
     "recipes": {
         "mealTypeNone": "Walang pagkain",
@@ -3607,6 +3617,10 @@
         "deleted": "Nabura ang mabilisang link",
         "loadError": "Hindi ma-load ang mga mabilisang link.",
         "orderError": "Hindi ma-save ang pagkakasunod-sunod.",
+        "errorLinkGone": "Wala na ang mabilisang link na ito.",
+        "errorLimitReached": "Hanggang {{limit}} mabilisang link lang ang kasya sa overview.",
+        "saveError": "Hindi ma-save ang mabilisang link.",
+        "deleteError": "Hindi mabura ang mabilisang link.",
         "iconSymbol": "Pumili ng icon",
         "iconChoose": "Pumili ng icon o larawan"
     },
@@ -4052,7 +4066,12 @@
         "errorAmountsHidden": "Ang may pahintulot lang na makita ang halaga para sa kasambahay ang makakapagmarka ng bayad.",
         "notHereToday": "Wala pa ngayong araw",
         "tabVisits": "Mga pagbisita",
-        "tabChores": "Gawaing-bahay"
+        "tabChores": "Gawaing-bahay",
+        "errorWorkerGone": "Wala na ang katulong na ito.",
+        "errorVisitGone": "Wala na ang pagbisitang ito.",
+        "errorTaskGone": "Wala na ang gawaing ito.",
+        "errorAlreadyCheckedOut": "Naka-check out na ang katulong na ito.",
+        "errorAlreadyCheckedIn": "Naka-check in na ang katulong na ito."
     },
     "splitExpenses": {
         "title": "Mga hinating gastos",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "Walang UID ang {{count}} entry sa kalendaryo; ginamit ang kapalit na pagkakakilanlan batay sa label at petsa.",
         "importDiagnosticDuplicateInstance": "{{count}} duplicadong pagkuha (parehong pagkakakilanlan) ang pinagsama sa isa.",
         "importDiagnosticDuplicateInstance_one": "{{count}} duplicadong pagkuha (parehong pagkakakilanlan) ang pinagsama sa isa.",
+        "importDiagnosticOther": "May entry sa kalendaryo na hindi tugma sa inaasahang format.",
         "importUnresolvedBlockingError": "Ayusin muna ang bawat blocking na babala, o tahasang laktawan ang mga apektadong event.",
         "importIgnoreLabel": "Balewalain",
         "importCreateNewType": "Gumawa ng bagong uri ng basura",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Isara ang account",
             "confirmCloseAccount": "Isara ang account ni {{name}}?",
             "closeAccountDetail": "Mananatili ang kasaysayan. Ang account na muling bubuksan ay magsisimula sa currency na gamit ng sambahayan sa panahong iyon.",
-            "accountNotEmpty": "Maisasara lang ang account kapag wala na itong balanse, plano, o bukas na kahilingan."
-        }
+            "accountNotEmpty": "Maisasara lang ang account kapag wala na itong balanse, plano, o bukas na kahilingan.",
+            "errorAccountDeactivated": "Naka-deactivate ang account na ito at maibabayad na lang ang laman nito.",
+            "errorBalanceTooLarge": "Magiging masyadong malaki ang balanse. Nananatiling bukas ang kahilingan.",
+            "errorAccountExists": "May baon account na ang taong ito.",
+            "errorNoAccount": "Walang baon account ang taong ito.",
+            "errorCurrencyChanged": "Nagbago ang currency ng account na ito."
+        },
+        "errorRewardGone": "Hindi na available ang gantimpalang ito.",
+        "errorRequestGone": "Wala na ang kahilingang ito.",
+        "errorRequestDecided": "Napagpasyahan na ang kahilingang ito.",
+        "errorNotEnoughPoints": "Hindi sapat ang mga puntos para dito.",
+        "errorNotParticipating": "Hindi nangongolekta ng puntos ang taong ito.",
+        "errorMoneyAccountGone": "Wala na ang account na ito.",
+        "errorMoneyPlanGone": "Wala na ang planong ito."
     },
     "datepicker": {
         "openCalendar": "Buksan ang kalendaryo",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Detalye ng gamit",
         "pickOne": "Pumili ng gamit",
         "pickOneHint": "Dito lalabas ang mga detalye, deadline at kasaysayan.",
-        "moreDetailsHint": "Pagbili, warranty, larawan, mga dokumento"
+        "moreDetailsHint": "Pagbili, warranty, larawan, mga dokumento",
+        "errorItemGone": "Wala na ang gamit na ito.",
+        "errorTrackedDateGone": "Wala na ang petsang ito.",
+        "errorSelectedLocationGone": "Wala na ang napiling lokasyon.",
+        "errorBookingGone": "Wala na ang transaksyong ito.",
+        "errorBookingAlreadyLinked": "Naka-link na ang transaksyong ito.",
+        "errorLocationExists": "Umiiral na ang lokasyong ito rito. Pumili ng ibang pangalan.",
+        "errorLocationGone": "Wala na ang lokasyong ito.",
+        "errorCategoryGone": "Wala na ang kategoryang ito."
     },
     "documentAttach": {
         "label": "Mga kalakip",
@@ -6414,7 +6454,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "May oras"
+        "typesWithTime": "May oras",
+        "errorShiftTypeGone": "Wala na ang uri ng shift na ito.",
+        "errorSelectedShiftTypeGone": "Wala na ang napiling uri ng shift.",
+        "errorCustomFieldGone": "Wala na ang field na ito.",
+        "errorSelectedCustomFieldGone": "Wala na ang isa sa mga napiling field.",
+        "errorPatternGone": "Wala na ang pattern ng shift na ito.",
+        "errorEntryGone": "Wala na ang entry na ito."
     },
     "pairDisplay": {
         "title": "Ipares ang tablet",

@@ -645,7 +645,10 @@
         "kanbanColExpand": "باز کردن ستون",
         "kanbanArchiveDone": "بایگانی همه کارهای انجام‌شده",
         "kanbanArchiveDoneConfirm": "همه کارهای انجام‌شده در این ستون بایگانی شوند؟",
-        "kanbanArchiveDoneAction": "بایگانی"
+        "kanbanArchiveDoneAction": "بایگانی",
+        "errorTaskGone": "این کار دیگر وجود ندارد.",
+        "errorParentGone": "کاری که این زیرکار به آن تعلق دارد دیگر وجود ندارد.",
+        "errorCommentGone": "این دیدگاه دیگر وجود ندارد."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} مورد حذف شد.",
@@ -953,6 +956,8 @@
         "loadError": "رویدادها بارگذاری نشدند.",
         "saveError": "خطا در ذخیره",
         "deleteError": "خطا در حذف",
+        "occurrenceGoneError": "این رویداد دیگر جزو این سری نیست. تقویم را دوباره بارگیری کنید و آن را دوباره انتخاب کنید.",
+        "occurrenceMalformedError": "رویداد سری به‌درستی مشخص نشده است. تقویم را دوباره بارگیری کنید و آن را دوباره انتخاب کنید.",
         "titleRequired": "عنوان الزامی است",
         "monthJanuary": "ژانویه",
         "monthFebruary": "فوریه",
@@ -1254,7 +1259,9 @@
         "checkConflict": "یادداشت در این میان تغییر کرده است. دوباره بارگذاری می‌شود.",
         "pinnedState": "سنجاق‌شده",
         "checklistDone": "انجام‌شده",
-        "checklistOpen": "باز"
+        "checklistOpen": "باز",
+        "errorNoteGone": "این یادداشت دیگر وجود ندارد.",
+        "errorSelectedCategoryGone": "یکی از دسته‌های انتخاب‌شده دیگر وجود ندارد."
     },
     "markdown": {
         "bold": "توپر (Ctrl+B)",
@@ -1376,7 +1383,9 @@
         "selectNamed": "انتخاب {{name}}",
         "bulkDeleteConfirm": "حذف {{count}} مخاطب؟",
         "bulkDeleteConfirm_one": "حذف {{count}} مخاطب؟",
-        "bulkDeletedToast": "{{count}} مخاطب حذف شد"
+        "bulkDeletedToast": "{{count}} مخاطب حذف شد",
+        "errorContactGone": "این مخاطب دیگر وجود ندارد.",
+        "errorSelectedCategoryGone": "دستهٔ انتخاب‌شده دیگر وجود ندارد."
     },
     "budget": {
         "title": "بودجه",
@@ -3453,7 +3462,8 @@
         "importSubmit": "افزودن {{count}}",
         "importSuccess": "{{count}} تولد افزوده شد.",
         "importNothingSelected": "لطفاً حداقل یک مخاطب انتخاب کنید.",
-        "importSelected": "{{count}} مخاطب انتخاب شد"
+        "importSelected": "{{count}} مخاطب انتخاب شد",
+        "errorBirthdayGone": "این تولد دیگر وجود ندارد."
     },
     "recipes": {
         "mealTypeNone": "بدون وعده",
@@ -3607,6 +3617,10 @@
         "deleted": "پیوند سریع حذف شد",
         "loadError": "پیوندهای سریع بارگیری نشد.",
         "orderError": "ترتیب ذخیره نشد.",
+        "errorLinkGone": "این پیوند سریع دیگر وجود ندارد.",
+        "errorLimitReached": "در نمای کلی بیش از {{limit}} پیوند سریع جا نمی‌شود.",
+        "saveError": "پیوند سریع ذخیره نشد.",
+        "deleteError": "پیوند سریع حذف نشد.",
         "iconSymbol": "انتخاب آیکون",
         "iconChoose": "انتخاب آیکون یا تصویر"
     },
@@ -4052,7 +4066,12 @@
         "errorAmountsHidden": "فقط کسی که اجازه دیدن مبالغ کمک منزل را دارد می‌تواند پرداخت را ثبت کند.",
         "notHereToday": "امروز هنوز نیامده",
         "tabVisits": "بازدیدها",
-        "tabChores": "کارهای خانه"
+        "tabChores": "کارهای خانه",
+        "errorWorkerGone": "این خدمتکار خانه دیگر وجود ندارد.",
+        "errorVisitGone": "این بازدید دیگر وجود ندارد.",
+        "errorTaskGone": "این کار دیگر وجود ندارد.",
+        "errorAlreadyCheckedOut": "خروج این خدمتکار خانه قبلاً ثبت شده است.",
+        "errorAlreadyCheckedIn": "ورود این خدمتکار خانه قبلاً ثبت شده است."
     },
     "splitExpenses": {
         "title": "هزینه‌های مشترک",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} مورد از رویدادهای تقویم UID نداشتند؛ از یک شناسه جایگزین بر اساس برچسب و تاریخ استفاده شد.",
         "importDiagnosticDuplicateInstance": "{{count}} مورد تکراری از زمان‌های جمع‌آوری (با شناسه یکسان) در یک مورد ادغام شد.",
         "importDiagnosticDuplicateInstance_one": "{{count}} مورد تکراری از زمان‌های جمع‌آوری (با شناسه یکسان) در یک مورد ادغام شد.",
+        "importDiagnosticOther": "یکی از رویدادهای تقویم با قالب مورد انتظار مطابقت ندارد.",
         "importUnresolvedBlockingError": "ابتدا همه هشدارهای مسدودکننده را برطرف کنید، یا رویدادهای مربوطه را به‌صراحت رد کنید.",
         "importIgnoreLabel": "نادیده گرفتن",
         "importCreateNewType": "ایجاد نوع جدید زباله",
@@ -5912,8 +5932,20 @@
             "closeAccount": "بستن حساب",
             "confirmCloseAccount": "حساب {{name}} بسته شود؟",
             "closeAccountDetail": "سابقه حفظ می‌شود. حسابی که دوباره باز شود با ارزی شروع می‌شود که خانواده در آن زمان استفاده می‌کند.",
-            "accountNotEmpty": "حساب فقط وقتی بسته می‌شود که موجودی، برنامه و درخواست باز نداشته باشد."
-        }
+            "accountNotEmpty": "حساب فقط وقتی بسته می‌شود که موجودی، برنامه و درخواست باز نداشته باشد.",
+            "errorAccountDeactivated": "این حساب غیرفعال است و فقط می‌توان موجودی آن را پرداخت کرد.",
+            "errorBalanceTooLarge": "موجودی بیش از حد زیاد می‌شود. درخواست باز می‌ماند.",
+            "errorAccountExists": "این شخص از قبل حساب پول توجیبی دارد.",
+            "errorNoAccount": "این شخص حساب پول توجیبی ندارد.",
+            "errorCurrencyChanged": "واحد پول این حساب تغییر کرده است."
+        },
+        "errorRewardGone": "این جایزه دیگر در دسترس نیست.",
+        "errorRequestGone": "این درخواست دیگر وجود ندارد.",
+        "errorRequestDecided": "درباره این درخواست قبلاً تصمیم گرفته شده است.",
+        "errorNotEnoughPoints": "امتیازها برای این کافی نیست.",
+        "errorNotParticipating": "این شخص امتیاز جمع نمی‌کند.",
+        "errorMoneyAccountGone": "این حساب دیگر وجود ندارد.",
+        "errorMoneyPlanGone": "این برنامه دیگر وجود ندارد."
     },
     "datepicker": {
         "openCalendar": "باز کردن تقویم",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "جزئیات وسیله",
         "pickOne": "یک وسیله انتخاب کنید",
         "pickOneHint": "جزئیات، مهلت‌ها و سابقه اینجا نمایش داده می‌شوند.",
-        "moreDetailsHint": "خرید، ضمانت، عکس، اسناد"
+        "moreDetailsHint": "خرید، ضمانت، عکس، اسناد",
+        "errorItemGone": "این وسیله دیگر وجود ندارد.",
+        "errorTrackedDateGone": "این مهلت دیگر وجود ندارد.",
+        "errorSelectedLocationGone": "محل انتخاب‌شده دیگر وجود ندارد.",
+        "errorBookingGone": "این تراکنش دیگر وجود ندارد.",
+        "errorBookingAlreadyLinked": "این تراکنش قبلاً مرتبط شده است.",
+        "errorLocationExists": "این محل از قبل اینجا وجود دارد. نام دیگری انتخاب کنید.",
+        "errorLocationGone": "این محل دیگر وجود ندارد.",
+        "errorCategoryGone": "این دسته دیگر وجود ندارد."
     },
     "documentAttach": {
         "label": "پیوست‌ها",
@@ -6414,7 +6454,13 @@
             "seminar": "سم",
             "lab": "آز"
         },
-        "typesWithTime": "با ساعت"
+        "typesWithTime": "با ساعت",
+        "errorShiftTypeGone": "این نوع شیفت دیگر وجود ندارد.",
+        "errorSelectedShiftTypeGone": "نوع شیفت انتخاب‌شده دیگر وجود ندارد.",
+        "errorCustomFieldGone": "این فیلد دیگر وجود ندارد.",
+        "errorSelectedCustomFieldGone": "یکی از فیلدهای انتخاب‌شده دیگر وجود ندارد.",
+        "errorPatternGone": "این چرخه شیفت دیگر وجود ندارد.",
+        "errorEntryGone": "این مورد دیگر وجود ندارد."
     },
     "pairDisplay": {
         "title": "جفت‌سازی تبلت",

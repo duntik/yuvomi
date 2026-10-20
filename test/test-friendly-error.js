@@ -290,7 +290,25 @@ test('jeder Fall hat seinen Satz in jeder Sprache, und der Server nennt ihn', ()
   // Die Abos ebenso; dass eine ECHTE Antwort sie traegt, misst
   // test:subscriptions-errors.
   const subscriptionsServer = read('../server/routes/subscriptions.js');
-  const routes = `${read('../server/routes/shopping.js')}\n${healthServer}\n${documentsServer}\n${recipesServer}\n${subscriptionsServer}\n${wasteServer.replace(/,\s*'([a-z_]+)'\s*[),]/g, ", reason: '$1')")}\n${importCodes}`;
+  // Inventar, Notizen, Kontakte und Geburtstage ebenso (dazu die Dienste, die
+  // den Grund an ihre Route zurueckgeben); dass eine ECHTE Antwort ihn traegt,
+  // misst test:inventory-notes-errors.
+  const restServer = [
+    ...readdirSync(new URL('../server/routes/inventory/', import.meta.url)).map((name) => `../server/routes/inventory/${name}`),
+    '../server/routes/notes.js', '../server/services/note-categories.js',
+    '../server/routes/contacts.js', '../server/routes/birthdays.js',
+    // Aufgaben (#1909); die echte Antwort misst test:tasks-errors, Teilaufgabe
+    // und Kommentar test:task-detail-errors.
+    '../server/routes/tasks.js',
+    // Dienstplan (#1909); die echte Antwort misst test:task-detail-errors.
+    '../server/routes/schedule.js', '../server/routes/schedule-extras.js',
+    // Haushaltshilfe und Belohnungen (#1909); die echte Antwort messen
+    // test:housekeeping-routes und test:rewards-routes.
+    '../server/routes/housekeeping.js', '../server/routes/rewards.js',
+    // Schnellzugriffe (#1909); die echte Antwort misst test:quick-links.
+    '../server/routes/quick-links.js',
+  ].map(read).join('\n').replace(/NoteCategoryInputError\([^)]*?,\s*\d+,\s*'([a-z_]+)'\)/g, "reason: '$1'");
+  const routes = `${read('../server/routes/shopping.js')}\n${healthServer}\n${documentsServer}\n${recipesServer}\n${subscriptionsServer}\n${restServer}\n${wasteServer.replace(/,\s*'([a-z_]+)'\s*[),]/g, ", reason: '$1')")}\n${importCodes}`;
   return load().then(({ CASE_MESSAGES, REFUSAL_MESSAGES }) => {
     for (const [reason, key] of CASE_MESSAGES) {
       assert.equal(REFUSAL_MESSAGES.has(reason), false, `${reason} steht in beiden Listen`);
@@ -323,6 +341,19 @@ test('isGone: nur die bekannten "gibt es nicht mehr"-Gruende, nie der blanke Sta
     'meals_selected_recipe_not_found',
     'subscriptions_subscription_not_found', 'subscriptions_category_not_found', 'subscriptions_payment_method_not_found',
     'subscriptions_selected_category_not_found', 'subscriptions_selected_payment_method_not_found',
+    'inventory_item_not_found', 'inventory_tracked_date_not_found', 'inventory_selected_location_not_found',
+    'inventory_booking_not_found', 'notes_note_not_found', 'notes_selected_category_not_found',
+    'contacts_contact_not_found', 'birthdays_birthday_not_found',
+    'contacts_selected_category_not_found', 'inventory_location_not_found', 'inventory_category_not_found',
+    'tasks_task_not_found', 'tasks_parent_not_found', 'tasks_comment_not_found',
+    'schedule_shift_type_not_found', 'schedule_custom_field_not_found', 'schedule_pattern_not_found',
+    'schedule_override_not_found', 'schedule_extra_shift_not_found',
+    'schedule_selected_shift_type_not_found', 'schedule_selected_custom_field_not_found',
+    'housekeeping_worker_not_found', 'housekeeping_visit_not_found', 'housekeeping_task_not_found',
+    'housekeeping_open_session_not_found',
+    'rewards_reward_not_found', 'rewards_redemption_not_found',
+    'rewards_money_account_not_found', 'rewards_money_plan_not_found',
+    'quick_links_link_not_found',
   ].sort());
   for (const reason of GONE_REASONS) {
     assert.ok(CASE_MESSAGES.has(reason), `${reason}: ohne Satz`);

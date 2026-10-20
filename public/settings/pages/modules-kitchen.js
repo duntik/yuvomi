@@ -1,6 +1,6 @@
 import { recipeProviders } from '/api.js';
 import { formatDate, formatTime, t } from '/i18n.js';
-import { closeModal, confirmModal, openModal, refocusAfterRender } from '/components/modal.js';
+import { captureModalContext, closeModal, confirmModal, openModal, refocusAfterRender } from '/components/modal.js';
 import {
   createInlineError,
   createRetryState,
@@ -151,9 +151,13 @@ function renderProviderAccount(container, account, refresh) {
       // syncAccount() wirft nie bei einem fehlgeschlagenen Provider-Abruf (Netzwerk/
       // Auth) - der Fehler steckt dann in result.data.failed/error, HTTP bleibt 200.
       // Nur ein echter Request-Fehler (Server down, 500) landet im catch.
+      //
+      // Der Toast sagt den Satz der App, nie den Text des Abrufs (#1909): der
+      // ist der rohe Fehler des Adapters, englisch. Die Ursache steht nach dem
+      // Nachladen gleich darunter an der Karte des Kontos (`lastError`).
       const res = await recipeProviders.syncAccount(account.id);
       if (res.data?.failed) {
-        showToast(res.data.error || t('settings.recipeProviderSyncFailed'), 'danger');
+        showToast(t('settings.recipeProviderSyncFailed'), 'danger');
       } else {
         showToast(t('settings.recipeProviderSyncSuccess'), 'success');
       }
@@ -261,9 +265,12 @@ function openProviderLinkModal(account, refresh) {
         e.preventDefault();
         errorEl.hidden = true;
         const external_url = panel.querySelector('#recipe-provider-link-external-url').value.trim();
+        // Geschlossen wird nur dieser Dialog, nicht einer, der waehrend der
+        // Anfrage aufgegangen ist (#1997).
+        const modalContext = captureModalContext();
         try {
           await recipeProviders.updateAccount(account.id, { external_url });
-          closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           showToast(t('settings.recipeProviderAccountUpdated'), 'success');
           await refresh();
           refocusAfterRender();
@@ -391,9 +398,10 @@ function bindProviderAddButton(container) {
             return;
           }
 
+          const modalContext = captureModalContext();
           try {
             await recipeProviders.createAccount({ provider, name, base_url, external_url, api_token });
-            closeModal({ force: true });
+            closeModal({ force: true, context: modalContext });
             showToast(t('settings.recipeProviderAccountAdded'), 'success');
             await loadProviderAccounts(container);
             refocusAfterRender();
@@ -484,3 +492,6 @@ export async function render(container, { user }) {
   bindProviderAddButton(container);
   await loadProviderAccounts(container);
 }
+
+// #1997: die beiden Dialoge der Rezeptquellen, bis in ihren Speichern-Weg.
+export const __test = { openProviderLinkModal, bindProviderAddButton };

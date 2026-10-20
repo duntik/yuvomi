@@ -629,7 +629,10 @@
         "kanbanColExpand": "Sütunu genişlet",
         "kanbanArchiveDone": "Tamamlananların hepsini arşivle",
         "kanbanArchiveDoneConfirm": "Bu sütundaki tüm tamamlanan görevler arşivlensin mi?",
-        "kanbanArchiveDoneAction": "Arşivle"
+        "kanbanArchiveDoneAction": "Arşivle",
+        "errorTaskGone": "Bu görev artık yok.",
+        "errorParentGone": "Bu alt görevin ait olduğu görev artık yok.",
+        "errorCommentGone": "Bu yorum artık yok."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} ürün silindi.",
@@ -927,6 +930,8 @@
         "loadError": "Etkinlikler yüklenemedi.",
         "saveError": "Kaydetme hatası",
         "deleteError": "Silme hatası",
+        "occurrenceGoneError": "Bu tekrar artık serinin parçası değil. Takvimi yeniden yükleyip tekrar seçin.",
+        "occurrenceMalformedError": "Serideki tekrar doğru belirtilmedi. Takvimi yeniden yükleyip tekrar seçin.",
         "titleRequired": "Başlık zorunludur",
         "monthJanuary": "Ocak",
         "monthFebruary": "Şubat",
@@ -1238,7 +1243,9 @@
         "checkConflict": "Not bu arada değişti. Yeniden yüklenecek.",
         "pinnedState": "Sabitlenmiş",
         "checklistDone": "Tamamlandı",
-        "checklistOpen": "Açık"
+        "checklistOpen": "Açık",
+        "errorNoteGone": "Bu not artık yok.",
+        "errorSelectedCategoryGone": "Seçilen kategorilerden biri artık mevcut değil."
     },
     "markdown": {
         "bold": "Kalın (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "{{name}} kişisini seç",
         "bulkDeleteConfirm": "{{count}} kişi silinsin mi?",
         "bulkDeleteConfirm_one": "{{count}} kişi silinsin mi?",
-        "bulkDeletedToast": "{{count}} kişi silindi"
+        "bulkDeletedToast": "{{count}} kişi silindi",
+        "errorContactGone": "Bu kişi artık yok.",
+        "errorSelectedCategoryGone": "Seçilen kategori artık mevcut değil."
     },
     "budget": {
         "title": "Bütçe",
@@ -3476,7 +3485,8 @@
         "importSubmit": "{{count}} ekle",
         "importSuccess": "{{count}} doğum günü eklendi.",
         "importNothingSelected": "Lütfen en az bir kişi seçin.",
-        "importSelected": "{{count}} kişi seçildi"
+        "importSelected": "{{count}} kişi seçildi",
+        "errorBirthdayGone": "Bu doğum günü artık yok."
     },
     "reminders": {
         "sectionTitle": "Hatırlatıcı",
@@ -3866,6 +3876,10 @@
         "deleted": "Hızlı bağlantı silindi",
         "loadError": "Hızlı bağlantılar yüklenemedi.",
         "orderError": "Sıralama kaydedilemedi.",
+        "errorLinkGone": "Bu hızlı bağlantı artık yok.",
+        "errorLimitReached": "Genel bakışa en fazla {{limit}} hızlı bağlantı sığar.",
+        "saveError": "Hızlı bağlantı kaydedilemedi.",
+        "deleteError": "Hızlı bağlantı silinemedi.",
         "iconSymbol": "Simge seç",
         "iconChoose": "Simge ya da görsel seç"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Ödemeyi yalnızca ev yardımcısı tutarlarını görebilen kişi işaretleyebilir.",
         "notHereToday": "Bugün henüz gelmedi",
         "tabVisits": "Ziyaretler",
-        "tabChores": "Ev işleri"
+        "tabChores": "Ev işleri",
+        "errorWorkerGone": "Bu yardımcı artık yok.",
+        "errorVisitGone": "Bu ziyaret artık yok.",
+        "errorTaskGone": "Bu görev artık yok.",
+        "errorAlreadyCheckedOut": "Bu yardımcının çıkışı zaten yapıldı.",
+        "errorAlreadyCheckedIn": "Bu yardımcının girişi zaten yapıldı."
     },
     "userMultiSelect": {
         "moreUsers": "daha",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} takvim girişinde UID yoktu; etiket ve tarihe dayalı bir yedek kimlik kullanıldı.",
         "importDiagnosticDuplicateInstance": "{{count}} yinelenen alım örneği (aynı kimlik) tek kayıtta birleştirildi.",
         "importDiagnosticDuplicateInstance_one": "{{count}} yinelenen alım örneği (aynı kimlik) tek kayıtta birleştirildi.",
+        "importDiagnosticOther": "Bir takvim girişi beklenen biçimle eşleşmiyor.",
         "importUnresolvedBlockingError": "Önce tüm engelleyici uyarıları çözün ya da etkilenen etkinlikleri açıkça atlayın.",
         "importIgnoreLabel": "Yok say",
         "importCreateNewType": "Yeni bir atık türü oluştur",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Hesabı kapat",
             "confirmCloseAccount": "{{name}} için hesap kapatılsın mı?",
             "closeAccountDetail": "Geçmiş korunur. Yeniden açılan hesap, evin o sırada kullandığı para biriminde başlar.",
-            "accountNotEmpty": "Hesap ancak bakiyesi, planı ve açık isteği kalmadığında kapatılabilir."
-        }
+            "accountNotEmpty": "Hesap ancak bakiyesi, planı ve açık isteği kalmadığında kapatılabilir.",
+            "errorAccountDeactivated": "Bu hesap devre dışı ve yalnızca ödenerek kapatılabilir.",
+            "errorBalanceTooLarge": "Bakiye çok büyük olurdu. İstek açık kalıyor.",
+            "errorAccountExists": "Bu kişinin zaten bir harçlık hesabı var.",
+            "errorNoAccount": "Bu kişinin harçlık hesabı yok.",
+            "errorCurrencyChanged": "Bu hesabın para birimi değişti."
+        },
+        "errorRewardGone": "Bu ödül artık mevcut değil.",
+        "errorRequestGone": "Bu istek artık yok.",
+        "errorRequestDecided": "Bu istek hakkında zaten karar verildi.",
+        "errorNotEnoughPoints": "Bunun için puan yetmiyor.",
+        "errorNotParticipating": "Bu kişi puan toplamıyor.",
+        "errorMoneyAccountGone": "Bu hesap artık yok.",
+        "errorMoneyPlanGone": "Bu plan artık yok."
     },
     "datepicker": {
         "openCalendar": "Takvimi aç",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Eşya ayrıntıları",
         "pickOne": "Bir eşya seçin",
         "pickOneHint": "Ayrıntılar, süreler ve geçmiş burada görünür.",
-        "moreDetailsHint": "Satın alma, garanti, fotoğraf, belgeler"
+        "moreDetailsHint": "Satın alma, garanti, fotoğraf, belgeler",
+        "errorItemGone": "Bu eşya artık yok.",
+        "errorTrackedDateGone": "Bu tarih artık yok.",
+        "errorSelectedLocationGone": "Seçilen konum artık mevcut değil.",
+        "errorBookingGone": "Bu işlem artık yok.",
+        "errorBookingAlreadyLinked": "Bu işlem zaten bağlı.",
+        "errorLocationExists": "Bu konum burada zaten var. Başka bir ad seçin.",
+        "errorLocationGone": "Bu konum artık yok.",
+        "errorCategoryGone": "Bu kategori artık yok."
     },
     "documentAttach": {
         "label": "Ekler",
@@ -6414,7 +6454,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "Saatli"
+        "typesWithTime": "Saatli",
+        "errorShiftTypeGone": "Bu vardiya türü artık yok.",
+        "errorSelectedShiftTypeGone": "Seçilen vardiya türü artık yok.",
+        "errorCustomFieldGone": "Bu alan artık yok.",
+        "errorSelectedCustomFieldGone": "Seçilen alanlardan biri artık yok.",
+        "errorPatternGone": "Bu vardiya düzeni artık yok.",
+        "errorEntryGone": "Bu kayıt artık yok."
     },
     "pairDisplay": {
         "title": "Tableti eşleştir",

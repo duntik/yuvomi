@@ -629,7 +629,10 @@
         "kanbanColExpand": "Agrandir la colonne",
         "kanbanArchiveDone": "Archiver tout ce qui est terminé",
         "kanbanArchiveDoneConfirm": "Archiver toutes les tâches terminées de cette colonne ?",
-        "kanbanArchiveDoneAction": "Archiver"
+        "kanbanArchiveDoneAction": "Archiver",
+        "errorTaskGone": "Cette tâche n’existe plus.",
+        "errorParentGone": "La tâche dont dépend cette sous-tâche n’existe plus.",
+        "errorCommentGone": "Ce commentaire n’existe plus."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} article supprimé.",
@@ -927,6 +930,8 @@
         "loadError": "Les événements n'ont pas pu être chargés.",
         "saveError": "Erreur lors de l'enregistrement",
         "deleteError": "Erreur lors de la suppression",
+        "occurrenceGoneError": "Cette occurrence ne fait plus partie de la série. Rechargez le calendrier et sélectionnez-la à nouveau.",
+        "occurrenceMalformedError": "L'occurrence de la série n'a pas été indiquée correctement. Rechargez le calendrier et sélectionnez-la à nouveau.",
         "titleRequired": "Le titre est obligatoire",
         "monthJanuary": "Janvier",
         "monthFebruary": "Février",
@@ -1238,7 +1243,9 @@
         "checkConflict": "La note a été modifiée entre-temps. Elle va être rechargée.",
         "pinnedState": "Épinglée",
         "checklistDone": "Terminé",
-        "checklistOpen": "Ouvert"
+        "checklistOpen": "Ouvert",
+        "errorNoteGone": "Cette note n’existe plus.",
+        "errorSelectedCategoryGone": "Une catégorie choisie n’existe plus."
     },
     "markdown": {
         "bold": "Gras (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "Sélectionner {{name}}",
         "bulkDeleteConfirm": "Supprimer {{count}} contacts ?",
         "bulkDeleteConfirm_one": "Supprimer {{count}} contact ?",
-        "bulkDeletedToast": "{{count}} contacts supprimés"
+        "bulkDeletedToast": "{{count}} contacts supprimés",
+        "errorContactGone": "Ce contact n’existe plus.",
+        "errorSelectedCategoryGone": "La catégorie choisie n’existe plus."
     },
     "budget": {
         "title": "Budget",
@@ -3476,7 +3485,8 @@
         "importSubmit": "Ajouter {{count}}",
         "importSuccess": "{{count}} anniversaires ajoutés.",
         "importNothingSelected": "Sélectionnez au moins un contact.",
-        "importSelected": "{{count}} contacts sélectionnés"
+        "importSelected": "{{count}} contacts sélectionnés",
+        "errorBirthdayGone": "Cet anniversaire n’existe plus."
     },
     "reminders": {
         "sectionTitle": "Rappel",
@@ -3866,6 +3876,10 @@
         "deleted": "Accès rapide supprimé",
         "loadError": "Impossible de charger les accès rapides.",
         "orderError": "Impossible d'enregistrer l'ordre.",
+        "errorLinkGone": "Cet accès rapide n’existe plus.",
+        "errorLimitReached": "La vue d’ensemble ne peut pas contenir plus de {{limit}} accès rapides.",
+        "saveError": "Impossible d’enregistrer l’accès rapide.",
+        "deleteError": "Impossible de supprimer l’accès rapide.",
         "iconSymbol": "Choisir une icône",
         "iconChoose": "Choisir une icône ou une image"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Seule une personne autorisée à voir les montants de l’aide ménagère peut marquer un paiement.",
         "notHereToday": "Pas encore là aujourd’hui",
         "tabVisits": "Visites",
-        "tabChores": "Travaux"
+        "tabChores": "Travaux",
+        "errorWorkerGone": "Cette aide ménagère n’existe plus.",
+        "errorVisitGone": "Cette intervention n’existe plus.",
+        "errorTaskGone": "Cette tâche n’existe plus.",
+        "errorAlreadyCheckedOut": "Le départ de cette aide ménagère est déjà enregistré.",
+        "errorAlreadyCheckedIn": "L’arrivée de cette aide ménagère est déjà enregistrée."
     },
     "userMultiSelect": {
         "moreUsers": "autres",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} entrée de calendrier n'avait pas d'UID ; une identité de secours basée sur le libellé et la date a été utilisée.",
         "importDiagnosticDuplicateInstance": "{{count}} occurrences de collecte en double (même identité) ont été fusionnées en une seule.",
         "importDiagnosticDuplicateInstance_one": "{{count}} occurrence de collecte en double (même identité) a été fusionnée en une seule.",
+        "importDiagnosticOther": "Une entrée du calendrier ne correspond pas au format attendu.",
         "importUnresolvedBlockingError": "Résolvez d'abord chaque alerte bloquante, ou ignorez explicitement les événements concernés.",
         "importIgnoreLabel": "Ignorer",
         "importCreateNewType": "Créer un nouveau type de déchet",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Fermer le compte",
             "confirmCloseAccount": "Fermer le compte de {{name}} ?",
             "closeAccountDetail": "L'historique est conservé. Un compte rouvert démarre dans la devise que le foyer utilise à ce moment-là.",
-            "accountNotEmpty": "Le compte ne peut être fermé que s'il n'a plus de solde, de plan ni de demande en attente."
-        }
+            "accountNotEmpty": "Le compte ne peut être fermé que s'il n'a plus de solde, de plan ni de demande en attente.",
+            "errorAccountDeactivated": "Ce compte est désactivé et ne peut plus qu’être soldé.",
+            "errorBalanceTooLarge": "Le solde deviendrait trop élevé. La demande reste ouverte.",
+            "errorAccountExists": "Cette personne a déjà un compte d’argent de poche.",
+            "errorNoAccount": "Cette personne n’a pas de compte d’argent de poche.",
+            "errorCurrencyChanged": "La devise de ce compte a changé."
+        },
+        "errorRewardGone": "Cette récompense n’est plus disponible.",
+        "errorRequestGone": "Cette demande n’existe plus.",
+        "errorRequestDecided": "Cette demande a déjà été tranchée.",
+        "errorNotEnoughPoints": "Les points ne suffisent pas pour cela.",
+        "errorNotParticipating": "Cette personne ne cumule pas de points.",
+        "errorMoneyAccountGone": "Ce compte n’existe plus.",
+        "errorMoneyPlanGone": "Ce plan n’existe plus."
     },
     "datepicker": {
         "openCalendar": "Ouvrir le calendrier",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Détails de l'objet",
         "pickOne": "Choisissez un objet",
         "pickOneHint": "Les détails, échéances et l’historique s’affichent ici.",
-        "moreDetailsHint": "Achat, garantie, photo, documents"
+        "moreDetailsHint": "Achat, garantie, photo, documents",
+        "errorItemGone": "Cet objet n’existe plus.",
+        "errorTrackedDateGone": "Cette échéance n’existe plus.",
+        "errorSelectedLocationGone": "L’emplacement choisi n’existe plus.",
+        "errorBookingGone": "Cette écriture n’existe plus.",
+        "errorBookingAlreadyLinked": "Cette écriture est déjà liée.",
+        "errorLocationExists": "Cet emplacement existe déjà ici. Choisissez un autre nom.",
+        "errorLocationGone": "Cet emplacement n’existe plus.",
+        "errorCategoryGone": "Cette catégorie n’existe plus."
     },
     "documentAttach": {
         "label": "Pièces jointes",
@@ -6414,7 +6454,13 @@
             "seminar": "SÉ",
             "lab": "TP"
         },
-        "typesWithTime": "Avec horaires"
+        "typesWithTime": "Avec horaires",
+        "errorShiftTypeGone": "Ce type de poste n’existe plus.",
+        "errorSelectedShiftTypeGone": "Le type de poste choisi n’existe plus.",
+        "errorCustomFieldGone": "Ce champ n’existe plus.",
+        "errorSelectedCustomFieldGone": "L’un des champs choisis n’existe plus.",
+        "errorPatternGone": "Ce roulement n’existe plus.",
+        "errorEntryGone": "Cette entrée n’existe plus."
     },
     "pairDisplay": {
         "title": "Appairer la tablette",

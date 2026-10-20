@@ -629,7 +629,10 @@
         "kanbanColExpand": "Expand column",
         "kanbanArchiveDone": "Archive all done",
         "kanbanArchiveDoneConfirm": "Archive every done task in this column?",
-        "kanbanArchiveDoneAction": "Archive"
+        "kanbanArchiveDoneAction": "Archive",
+        "errorTaskGone": "This task no longer exists.",
+        "errorParentGone": "The task this subtask belongs to no longer exists.",
+        "errorCommentGone": "This comment no longer exists."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} item deleted.",
@@ -927,6 +930,8 @@
         "loadError": "Events could not be loaded.",
         "saveError": "Error saving",
         "deleteError": "Error deleting",
+        "occurrenceGoneError": "This occurrence is no longer part of the series. Reload the calendar and pick it again.",
+        "occurrenceMalformedError": "The series occurrence was not given correctly. Reload the calendar and pick it again.",
         "titleRequired": "Title is required",
         "monthJanuary": "January",
         "monthFebruary": "February",
@@ -1238,7 +1243,9 @@
         "checkConflict": "The note has changed in the meantime. It will be reloaded.",
         "pinnedState": "Pinned",
         "checklistDone": "Done",
-        "checklistOpen": "Open"
+        "checklistOpen": "Open",
+        "errorNoteGone": "This note no longer exists.",
+        "errorSelectedCategoryGone": "A selected category no longer exists."
     },
     "markdown": {
         "bold": "Bold (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "Select {{name}}",
         "bulkDeleteConfirm": "Delete {{count}} contacts?",
         "bulkDeleteConfirm_one": "Delete {{count}} contact?",
-        "bulkDeletedToast": "{{count}} contacts deleted"
+        "bulkDeletedToast": "{{count}} contacts deleted",
+        "errorContactGone": "This contact no longer exists.",
+        "errorSelectedCategoryGone": "The selected category no longer exists."
     },
     "budget": {
         "title": "Budget",
@@ -3437,7 +3446,8 @@
         "importSubmit": "Add {{count}}",
         "importSuccess": "{{count}} birthdays added.",
         "importNothingSelected": "Please select at least one contact.",
-        "importSelected": "{{count}} contacts selected"
+        "importSelected": "{{count}} contacts selected",
+        "errorBirthdayGone": "This birthday no longer exists."
     },
     "recipes": {
         "mealTypeNone": "No meal",
@@ -3596,6 +3606,10 @@
         "deleted": "Quick link deleted",
         "loadError": "The quick links could not be loaded.",
         "orderError": "The order could not be saved.",
+        "errorLinkGone": "This quick link no longer exists.",
+        "errorLimitReached": "No more than {{limit}} quick links fit on the overview.",
+        "saveError": "The quick link could not be saved.",
+        "deleteError": "The quick link could not be deleted.",
         "iconSymbol": "Choose icon",
         "iconChoose": "Choose icon or image"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Only someone who may see housekeeping amounts can mark a payment.",
         "notHereToday": "Not here yet today",
         "tabVisits": "Visits",
-        "tabChores": "Chores"
+        "tabChores": "Chores",
+        "errorWorkerGone": "This housekeeper no longer exists.",
+        "errorVisitGone": "This visit no longer exists.",
+        "errorTaskGone": "This task no longer exists.",
+        "errorAlreadyCheckedOut": "This housekeeper is already checked out.",
+        "errorAlreadyCheckedIn": "This housekeeper is already checked in."
     },
     "userMultiSelect": {
         "moreUsers": "more",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} calendar entry had no UID; a fallback identity based on label and date was used.",
         "importDiagnosticDuplicateInstance": "{{count}} duplicate pickup instances (same identity) were collapsed into one.",
         "importDiagnosticDuplicateInstance_one": "{{count}} duplicate pickup instance (same identity) was collapsed into one.",
+        "importDiagnosticOther": "A calendar entry does not match the expected format.",
         "importUnresolvedBlockingError": "Resolve every blocking diagnostic first, or explicitly skip the affected events.",
         "importIgnoreLabel": "Ignore",
         "importCreateNewType": "Create a new waste type",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Close account",
             "confirmCloseAccount": "Close the account of {{name}}?",
             "closeAccountDetail": "The history is kept. An account opened again starts in the currency the household uses then.",
-            "accountNotEmpty": "The account can only be closed once it has no balance, no plan and no open request."
-        }
+            "accountNotEmpty": "The account can only be closed once it has no balance, no plan and no open request.",
+            "errorAccountDeactivated": "This account is deactivated and can only be paid out.",
+            "errorBalanceTooLarge": "The balance would become too large. The request stays open.",
+            "errorAccountExists": "This person already has a pocket money account.",
+            "errorNoAccount": "This person has no pocket money account.",
+            "errorCurrencyChanged": "The currency of this account has changed."
+        },
+        "errorRewardGone": "This reward is no longer available.",
+        "errorRequestGone": "This request no longer exists.",
+        "errorRequestDecided": "This request has already been decided.",
+        "errorNotEnoughPoints": "There are not enough points for this.",
+        "errorNotParticipating": "This person does not collect points.",
+        "errorMoneyAccountGone": "This account no longer exists.",
+        "errorMoneyPlanGone": "This plan no longer exists."
     },
     "datepicker": {
         "openCalendar": "Open calendar",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Item details",
         "pickOne": "Choose an item",
         "pickOneHint": "Details, deadlines and history appear here.",
-        "moreDetailsHint": "Purchase, warranty, photo, documents"
+        "moreDetailsHint": "Purchase, warranty, photo, documents",
+        "errorItemGone": "This item no longer exists.",
+        "errorTrackedDateGone": "This deadline no longer exists.",
+        "errorSelectedLocationGone": "The selected location no longer exists.",
+        "errorBookingGone": "This booking no longer exists.",
+        "errorBookingAlreadyLinked": "This booking is already linked.",
+        "errorLocationExists": "This location already exists here. Choose a different name.",
+        "errorLocationGone": "This location no longer exists.",
+        "errorCategoryGone": "This category no longer exists."
     },
     "documentAttach": {
         "label": "Attachments",
@@ -6414,7 +6454,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "With times"
+        "typesWithTime": "With times",
+        "errorShiftTypeGone": "This shift type no longer exists.",
+        "errorSelectedShiftTypeGone": "The chosen shift type no longer exists.",
+        "errorCustomFieldGone": "This field no longer exists.",
+        "errorSelectedCustomFieldGone": "One of the chosen fields no longer exists.",
+        "errorPatternGone": "This schedule plan no longer exists.",
+        "errorEntryGone": "This entry no longer exists."
     },
     "pairDisplay": {
         "title": "Pair tablet",

@@ -12,7 +12,7 @@ import { metricGlanceHtml, wireMetricGlance } from '/utils/metric-glance.js';
 import { initials } from '/utils/initials.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { emptyStateHTML, mountLoadError } from '/utils/empty-state.js';
-import { openModal, closeModal, confirmModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
+import { openModal, closeModal, captureModalContext, confirmModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
 import { createPageFab, setPageFabAction } from '/utils/fab.js';
 import { wireTablist } from '/utils/tablist.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
@@ -32,6 +32,7 @@ import { renderPageColumns } from '/utils/page-layout.js';
 import { rowMenuHtml } from '/utils/row-action.js';
 import { installPopoverMenus } from '/utils/popover-menu.js';
 import { reloadAfterSave } from '/utils/reload-after-save.js';
+import { errorSentence, loadErrorSentence, isGone, isAlreadyDeleted } from '/utils/friendly-error.js';
 
 
 
@@ -500,6 +501,42 @@ function renderCurrentTab(container, { direction = null } = {}) {
   if (window.lucide) window.lucide.createIcons({ el: container });
 }
 
+/* DER SATZ DER APP, NIE DER DES SERVERS (#1909). Bis dahin zeigte jeder
+ * gescheiterte Schreibvorgang hier `err.message` - den englischen Text des
+ * Servers ("Visit not found.") oder den des Browsers. Jetzt nennt der Server
+ * den Fall (`reason`, server/routes/housekeeping.js), und
+ * utils/friendly-error.js haelt den Satz dazu; alles andere bekommt den
+ * allgemeinen Satz.
+ *
+ * Ist das Ziel inzwischen weg (eine andere Person hat den Einsatz oder die
+ * Aufgabe geloescht, schon ausgecheckt) oder schon eingecheckt, kommt die
+ * Seite frisch - sonst stuende der alte Stand weiter da und scheiterte beim
+ * naechsten Versuch genauso. Ein offener Dialog bleibt mit seiner Eingabe. */
+/** Loeschen, das schon erledigt ist, ist kein Fehler: `reason` nennt, was hier geloescht werden sollte. */
+async function deleteUnlessGone(path, reason, options) {
+  try {
+    await api.delete(path, options);
+  } catch (err) {
+    if (!isAlreadyDeleted(err, reason)) throw err;
+  }
+}
+
+async function reportWriteError(err) {
+  window.yuvomi?.showToast(errorSentence(err), 'danger');
+  if (!isGone(err) && err?.data?.reason !== 'housekeeping_already_checked_in') return;
+  try {
+    await loadData();
+    if (state.selectedStaffId) await loadStaffVisits();
+    renderCurrentTab(document.querySelector('.page-transition') || document.body);
+  } catch { /* der Toast oben nennt den Fehler */ }
+}
+
+/* Ein Ladefehler nach dem ersten Aufbau (Monat wechseln, Person waehlen): der
+ * Satz zur Ursache, sonst der Ladesatz der Seite - nie der Text des Servers. */
+function reportLoadError(err) {
+  window.yuvomi?.showToast(loadErrorSentence(err) ?? t('housekeeping.loadError'), 'danger');
+}
+
 async function toggleSession(container, workerId) {
   if (readOnly()) return;
   const worker = state.workers.find((item) => String(item.id) === String(workerId));
@@ -532,7 +569,7 @@ async function toggleSession(container, workerId) {
     // Scrollport liegen, der alte mit veralteter Aktion in der Shell.
     renderCurrentTab(container);
   } catch (err) {
-    window.yuvomi?.showToast(err.message, 'danger');
+    await reportWriteError(err);
   }
 }
 
@@ -796,7 +833,7 @@ async function createTask(payload, content) {
     if (content?.isConnected && state.tab === 'tasks') renderTasks(content);
     return true;
   } catch (err) {
-    window.yuvomi?.showToast(err.message, 'danger');
+    await reportWriteError(err);
     return false;
   }
 }
@@ -947,9 +984,12 @@ function openTaskCreateModal(content) {
         // Doppeltipp auf eine Vorlage legte sie zweimal an.
         if (busy || readOnly()) return;
         busy = true;
+        // Geschlossen wird nur dieser Dialog, nicht einer, der waehrend der
+        // Anfrage aufgegangen ist (#1997).
+        const modalContext = captureModalContext();
         const ok = await createTask(payload, content);
         busy = false;
-        if (ok) closeModal({ force: true });
+        if (ok) closeModal({ force: true, context: modalContext });
       };
       panel.querySelectorAll('[data-template-index]').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -1010,7 +1050,7 @@ async function completeTask(task, content, button = null) {
   } catch (err) {
     button?.classList.remove('housekeeping-task__check--done');
     button?.removeAttribute('aria-busy');
-    window.yuvomi?.showToast(err.message, 'danger');
+    await reportWriteError(err);
   }
 }
 
@@ -1022,7 +1062,7 @@ async function undoCompleteTask(taskId, previous, content) {
     await reloadAfterSave(() => loadData());
     if (content?.isConnected && state.tab === 'tasks') renderTasks(content);
   } catch (err) {
-    window.yuvomi?.showToast(err.message, 'danger');
+    await reportWriteError(err);
   }
 }
 
@@ -1215,7 +1255,7 @@ function deleteTask(task, content, afterRepaint = null) {
     message: t('housekeeping.taskDeletedToast'),
     commit: async ({ keepalive }) => {
       try {
-        await api.delete(`/housekeeping/decay-tasks/${task.id}`, { keepalive });
+        await deleteUnlessGone(`/housekeeping/decay-tasks/${task.id}`, 'housekeeping_task_not_found', { keepalive });
       } finally {
         pendingTaskDeletes.delete(String(task.id));
       }
@@ -1227,7 +1267,7 @@ function deleteTask(task, content, afterRepaint = null) {
         state.tasks = [...state.tasks.slice(0, at), task, ...state.tasks.slice(at)];
       }
       repaint();
-      if (err) window.yuvomi?.showToast(err.message || t('common.unknownError'), 'danger');
+      if (err) window.yuvomi?.showToast(errorSentence(err), 'danger');
     },
   });
 }
@@ -1260,7 +1300,7 @@ async function payVisit(visit, onPaid) {
     await onPaid();
     refocusAfterRender();
   } catch (err) {
-    window.yuvomi?.showToast(err.message, 'danger');
+    await reportWriteError(err);
   }
 }
 
@@ -1281,7 +1321,7 @@ async function unpayVisit(visit, onUnpaid) {
     await onUnpaid();
     refocusAfterRender();
   } catch (err) {
-    window.yuvomi?.showToast(err.message, 'danger');
+    await reportWriteError(err);
   }
 }
 
@@ -1383,12 +1423,13 @@ function wireVisitRows(content, visits, refresh, { onEdit } = {}) {
       if (!await confirmModal(t('housekeeping.deleteVisitConfirm'),
         { danger: true, confirmLabel: t('common.delete'), detail: t('housekeeping.deleteVisitConfirmDetail') })) return;
       try {
-        await api.delete(`/housekeeping/visits/${visit.id}`);
+        // Schon geloescht (eine andere Person war schneller) ist erledigt.
+        await deleteUnlessGone(`/housekeeping/visits/${visit.id}`, 'housekeeping_visit_not_found');
         window.yuvomi?.showToast(t('housekeeping.visitDeletedToast'), 'success');
         await refresh();
         refocusAfterRender();
       } catch (err) {
-        window.yuvomi?.showToast(err.message, 'danger');
+        await reportWriteError(err);
       }
     });
   });
@@ -1590,7 +1631,7 @@ async function showReportMonth(content, monthValue, focusId = null) {
     // auseinander.
     const shown = state.visitReport?.month || currentMonthKey();
     state.reportMonth = shown === currentMonthKey() ? null : shown;
-    window.yuvomi?.showToast(err.message, 'danger');
+    reportLoadError(err);
   }
 }
 
@@ -1863,7 +1904,7 @@ function renderStaff(content) {
         await loadStaffVisits();
         renderStaff(content);
       } catch (err) {
-        window.yuvomi?.showToast(err.message, 'danger');
+        reportLoadError(err);
       }
     };
     // Enter/Space auf dem Namens-Button feuert dessen nativen click und
@@ -1889,7 +1930,7 @@ function renderStaff(content) {
       await loadStaffVisits();
       renderStaff(content);
     } catch (err) {
-      window.yuvomi?.showToast(err.message, 'danger');
+      reportLoadError(err);
     }
   });
   // Die Besuchszeilen (Bericht lesen; Bearbeiten, Bezahlen, Loeschen im
@@ -2005,6 +2046,7 @@ function openTaskEditModal(task, content) {
         const fields = event.currentTarget.elements;
         const frequencyDays = Number(fields.frequency_days.value);
         if (!fields.name.value.trim() || !fields.area.value.trim() || !Number.isInteger(frequencyDays) || frequencyDays < 1) return;
+        const modalContext = captureModalContext();
         try {
           await api.patch(`/housekeeping/decay-tasks/${task.id}`, {
             name: fields.name.value.trim(),
@@ -2013,10 +2055,10 @@ function openTaskEditModal(task, content) {
           });
           window.yuvomi?.showToast(t('housekeeping.taskUpdatedToast'), 'success');
           await reloadAfterSave(() => loadData());
-          closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           renderTasks(content);
         } catch (err) {
-          window.yuvomi?.showToast(err.message, 'danger');
+          await reportWriteError(err);
         }
       });
     },
@@ -2153,6 +2195,7 @@ function openVisitEditModal(visit, content, { onDone } = {}) {
           return;
         }
         let receiptDocumentId = visit.receipt_document_id || null;
+        const modalContext = captureModalContext();
         try {
           // Der zweite Riegel fuer den Beleg: ohne Schreibrecht auf die
           // Dokumente wird nichts hochgeladen, auch wenn ein Feld aus einem
@@ -2199,10 +2242,11 @@ function openVisitEditModal(visit, content, { onDone } = {}) {
           await reloadAfterSave(() => loadData());
           state.staffLogMonth = dateValue.slice(0, 7);
           await reloadAfterSave(() => loadStaffVisits());
-          closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           (onDone || renderStaff)(content);
         } catch (err) {
-          window.yuvomi?.showToast(err.message, 'danger');
+          // Der Dialog bleibt offen mit der Eingabe; nur der Satz (#1909).
+          window.yuvomi?.showToast(errorSentence(err), 'danger');
         }
       });
     },
@@ -2410,6 +2454,7 @@ function openStaffModal(worker, content, options = {}) {
           rateField?.focus();
           return;
         }
+        const modalContext = captureModalContext();
         try {
           await api.post('/housekeeping/worker', {
             id: fields.id.value || null,
@@ -2431,11 +2476,11 @@ function openStaffModal(worker, content, options = {}) {
           await auth.me().catch(() => {});
           window.yuvomi?.showToast(t('housekeeping.workerSavedToast'), 'success');
           await reloadAfterSave(() => loadData());
-          closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           if (typeof options.afterSave === 'function') options.afterSave();
           else renderStaff(content);
         } catch (err) {
-          window.yuvomi?.showToast(err.message, 'danger');
+          await reportWriteError(err);
         }
       });
     },
@@ -2478,8 +2523,10 @@ function openStaffModal(worker, content, options = {}) {
     // stehen, feuert `change` beim nächsten Griff zu DERSELBEN Datei nicht
     // mehr, und „nochmal anders zuschneiden" täte gar nichts.
     avatarFile.value = '';
+    let ImageProblemType = null;
     try {
-      const { pickCroppedImage } = await import('/utils/avatar-crop.js');
+      const { pickCroppedImage, ImageProblem } = await import('/utils/avatar-crop.js');
+      ImageProblemType = ImageProblem;
       const cropped = await pickCroppedImage(file);
       if (cropped === undefined) return; // abgebrochen: bisheriges Bild bleibt
       state.workerAvatar = cropped;
@@ -2488,8 +2535,13 @@ function openStaffModal(worker, content, options = {}) {
     } catch (err) {
       // Vorher verschwand hier JEDER Fehler in einem leeren `catch` - eine zu
       // große oder falsch getypte Datei sah aus wie ein Abbruch, und der
-      // Reader warf ohnehin einen Error ohne Text. Jetzt gibt es eine Meldung.
-      window.yuvomi?.showToast(err.message, 'danger');
+      // Reader warf ohnehin einen Error ohne Text. Jetzt gibt es eine Meldung:
+      // die Pruefung des Bildes sagt ihren Satz, jeder andere Wurf den
+      // allgemeinen, nie seinen eigenen, unuebersetzten Text (#1909).
+      window.yuvomi?.showToast(
+        ImageProblemType && err instanceof ImageProblemType ? err.sentence : t('common.errorGeneric'),
+        'danger',
+      );
     }
   });
   if (window.lucide) window.lucide.createIcons({ el: panel });

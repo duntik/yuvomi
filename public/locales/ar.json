@@ -779,7 +779,10 @@
         "kanbanColExpand": "توسيع العمود",
         "kanbanArchiveDone": "أرشفة كل المهام المنجزة",
         "kanbanArchiveDoneConfirm": "أرشفة جميع المهام المنجزة في هذا العمود؟",
-        "kanbanArchiveDoneAction": "أرشفة"
+        "kanbanArchiveDoneAction": "أرشفة",
+        "errorTaskGone": "هذه المهمة لم تعد موجودة.",
+        "errorParentGone": "المهمة التي تنتمي إليها هذه المهمة الفرعية لم تعد موجودة.",
+        "errorCommentGone": "هذا التعليق لم يعد موجودًا."
     },
     "shopping": {
         "importMealsPreviewMeals_few": "{{count}} وجبات",
@@ -1131,6 +1134,8 @@
         "loadError": "فشل تحميل الأحداث.",
         "saveError": "فشل الحفظ",
         "deleteError": "فشل الحذف",
+        "occurrenceGoneError": "لم يعد هذا الموعد جزءًا من السلسلة. أعد تحميل التقويم واختره مرة أخرى.",
+        "occurrenceMalformedError": "لم يُحدَّد موعد السلسلة بشكل صحيح. أعد تحميل التقويم واختره مرة أخرى.",
         "titleRequired": "العنوان مطلوب",
         "monthJanuary": "يناير",
         "monthFebruary": "فبراير",
@@ -1458,7 +1463,9 @@
         "checkConflict": "تم تغيير الملاحظة في هذه الأثناء. سيتم إعادة تحميلها.",
         "pinnedState": "مثبتة",
         "checklistDone": "منجز",
-        "checklistOpen": "مفتوح"
+        "checklistOpen": "مفتوح",
+        "errorNoteGone": "هذه الملاحظة لم تعد موجودة.",
+        "errorSelectedCategoryGone": "إحدى الفئات المحددة لم تعد موجودة."
     },
     "markdown": {
         "bold": "عريض (Ctrl+B)",
@@ -1583,7 +1590,9 @@
         "bulkDeleteConfirm_few": "حذف {{count}} جهات اتصال؟",
         "bulkDeleteConfirm_two": "حذف جهتي اتصال؟",
         "bulkDeleteConfirm_many": "حذف {{count}} جهة اتصال؟",
-        "bulkDeletedToast": "تم حذف {{count}} جهة اتصال"
+        "bulkDeletedToast": "تم حذف {{count}} جهة اتصال",
+        "errorContactGone": "جهة الاتصال هذه لم تعد موجودة.",
+        "errorSelectedCategoryGone": "الفئة المحددة لم تعد موجودة."
     },
     "budget": {
         "title": "الميزانية",
@@ -3792,7 +3801,8 @@
         "importSubmit": "إضافة {{count}}",
         "importSuccess": "تمت إضافة {{count}} عيد ميلاد.",
         "importNothingSelected": "يرجى اختيار جهة اتصال واحدة على الأقل.",
-        "importSelected": "تم تحديد {{count}} جهة اتصال"
+        "importSelected": "تم تحديد {{count}} جهة اتصال",
+        "errorBirthdayGone": "عيد الميلاد هذا لم يعد موجودًا."
     },
     "reminders": {
         "sectionTitle": "تذكير",
@@ -4209,6 +4219,10 @@
         "deleted": "تم حذف الرابط السريع",
         "loadError": "تعذّر تحميل الروابط السريعة.",
         "orderError": "تعذّر حفظ الترتيب.",
+        "errorLinkGone": "هذا الرابط السريع لم يعد موجودًا.",
+        "errorLimitReached": "لا تتسع النظرة العامة لأكثر من {{limit}} رابطًا سريعًا.",
+        "saveError": "تعذّر حفظ الرابط السريع.",
+        "deleteError": "تعذّر حذف الرابط السريع.",
         "iconSymbol": "اختيار أيقونة",
         "iconChoose": "اختيار أيقونة أو صورة"
     },
@@ -4391,7 +4405,12 @@
         "errorAmountsHidden": "لا يمكن تسجيل الدفع إلا لمن يُسمح له برؤية مبالغ المساعدة المنزلية.",
         "notHereToday": "لم تصل اليوم بعد",
         "tabVisits": "الزيارات",
-        "tabChores": "الأعمال المنزلية"
+        "tabChores": "الأعمال المنزلية",
+        "errorWorkerGone": "عامل التدبير المنزلي هذا لم يعد موجودًا.",
+        "errorVisitGone": "هذه الزيارة لم تعد موجودة.",
+        "errorTaskGone": "هذه المهمة لم تعد موجودة.",
+        "errorAlreadyCheckedOut": "تم تسجيل خروج عامل التدبير المنزلي هذا بالفعل.",
+        "errorAlreadyCheckedIn": "تم تسجيل دخول عامل التدبير المنزلي هذا بالفعل."
     },
     "userMultiSelect": {
         "moreUsers": "آخرون",
@@ -6073,6 +6092,7 @@
         "importDiagnosticMissingUidFallback_many": "لم يكن لدى {{count}} من إدخالات التقويم معرّف UID؛ تم استخدام هوية بديلة بناءً على التسمية والتاريخ.",
         "importDiagnosticDuplicateInstance": "تم دمج {{count}} من حالات الاستحواذ المكررة (نفس الهوية) في حالة واحدة.",
         "importDiagnosticDuplicateInstance_one": "تم دمج {{count}} من حالات الاستحواذ المكررة (نفس الهوية) في حالة واحدة.",
+        "importDiagnosticOther": "أحد إدخالات التقويم لا يطابق التنسيق المتوقع.",
         "importDiagnosticDuplicateInstance_few": "تم دمج {{count}} من حالات الاستحواذ المكررة (نفس الهوية) في حالة واحدة.",
         "importDiagnosticDuplicateInstance_two": "تم دمج {{count}} من حالات الاستحواذ المكررة (نفس الهوية) في حالة واحدة.",
         "importDiagnosticDuplicateInstance_many": "تم دمج {{count}} من حالات الاستحواذ المكررة (نفس الهوية) في حالة واحدة.",
@@ -6318,8 +6338,20 @@
             "closeAccount": "إغلاق الحساب",
             "confirmCloseAccount": "إغلاق حساب {{name}}؟",
             "closeAccountDetail": "يبقى السجل. الحساب الذي يُفتح من جديد يبدأ بالعملة التي تستخدمها الأسرة حينها.",
-            "accountNotEmpty": "لا يمكن إغلاق الحساب إلا إذا لم يبقَ فيه رصيد ولا خطة ولا طلب مفتوح."
-        }
+            "accountNotEmpty": "لا يمكن إغلاق الحساب إلا إذا لم يبقَ فيه رصيد ولا خطة ولا طلب مفتوح.",
+            "errorAccountDeactivated": "هذا الحساب معطّل ولا يمكن إلا صرف رصيده.",
+            "errorBalanceTooLarge": "سيصبح الرصيد كبيرًا جدًا. يبقى الطلب مفتوحًا.",
+            "errorAccountExists": "لدى هذا الشخص حساب مصروف بالفعل.",
+            "errorNoAccount": "ليس لدى هذا الشخص حساب مصروف.",
+            "errorCurrencyChanged": "تغيّرت عملة هذا الحساب."
+        },
+        "errorRewardGone": "هذه الجائزة لم تعد متاحة.",
+        "errorRequestGone": "هذا الطلب لم يعد موجودًا.",
+        "errorRequestDecided": "تم البت في هذا الطلب بالفعل.",
+        "errorNotEnoughPoints": "النقاط لا تكفي لهذا.",
+        "errorNotParticipating": "هذا الشخص لا يجمع النقاط.",
+        "errorMoneyAccountGone": "هذا الحساب لم يعد موجودًا.",
+        "errorMoneyPlanGone": "هذه الخطة لم تعد موجودة."
     },
     "datepicker": {
         "openCalendar": "فتح التقويم",
@@ -6607,7 +6639,15 @@
         "detailPaneLabel": "تفاصيل الغرض",
         "pickOne": "اختر غرضًا",
         "pickOneHint": "تظهر هنا التفاصيل والمواعيد والسجل.",
-        "moreDetailsHint": "الشراء، الضمان، الصورة، المستندات"
+        "moreDetailsHint": "الشراء، الضمان، الصورة، المستندات",
+        "errorItemGone": "هذا الغرض لم يعد موجودًا.",
+        "errorTrackedDateGone": "هذا الموعد لم يعد موجودًا.",
+        "errorSelectedLocationGone": "لم يعد الموقع المحدد موجودًا.",
+        "errorBookingGone": "هذه المعاملة لم تعد موجودة.",
+        "errorBookingAlreadyLinked": "هذه المعاملة مرتبطة بالفعل.",
+        "errorLocationExists": "هذا الموقع موجود هنا بالفعل. اختر اسمًا آخر.",
+        "errorLocationGone": "هذا الموقع لم يعد موجودًا.",
+        "errorCategoryGone": "هذه الفئة لم تعد موجودة."
     },
     "documentAttach": {
         "label": "المرفقات",
@@ -6886,7 +6926,13 @@
             "seminar": "ند",
             "lab": "مع"
         },
-        "typesWithTime": "بمواعيد"
+        "typesWithTime": "بمواعيد",
+        "errorShiftTypeGone": "نوع المناوبة هذا لم يعد موجودًا.",
+        "errorSelectedShiftTypeGone": "نوع المناوبة المختار لم يعد موجودًا.",
+        "errorCustomFieldGone": "هذا الحقل لم يعد موجودًا.",
+        "errorSelectedCustomFieldGone": "أحد الحقول المختارة لم يعد موجودًا.",
+        "errorPatternGone": "دورة المناوبات هذه لم تعد موجودة.",
+        "errorEntryGone": "هذا الإدخال لم يعد موجودًا."
     },
     "pairDisplay": {
         "title": "اقتران الجهاز اللوحي",

@@ -629,7 +629,10 @@
         "kanbanColExpand": "Expandir coluna",
         "kanbanArchiveDone": "Arquivar todas as concluídas",
         "kanbanArchiveDoneConfirm": "Arquivar todas as tarefas concluídas desta coluna?",
-        "kanbanArchiveDoneAction": "Arquivar"
+        "kanbanArchiveDoneAction": "Arquivar",
+        "errorTaskGone": "Esta tarefa não existe mais.",
+        "errorParentGone": "A tarefa à qual esta subtarefa pertence não existe mais.",
+        "errorCommentGone": "Este comentário não existe mais."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} item excluído.",
@@ -925,6 +928,8 @@
         "loadError": "Falha ao carregar eventos.",
         "saveError": "Erro ao salvar",
         "deleteError": "Erro ao excluir",
+        "occurrenceGoneError": "Esta ocorrência não faz mais parte da série. Recarregue o calendário e selecione-a novamente.",
+        "occurrenceMalformedError": "A ocorrência da série não foi informada corretamente. Recarregue o calendário e selecione-a novamente.",
         "titleRequired": "Título é obrigatório",
         "monthJanuary": "Janeiro",
         "monthFebruary": "Fevereiro",
@@ -1238,7 +1243,9 @@
         "checkConflict": "A nota foi alterada entretanto. Ela será recarregada.",
         "pinnedState": "Fixada",
         "checklistDone": "Concluído",
-        "checklistOpen": "Aberto"
+        "checklistOpen": "Aberto",
+        "errorNoteGone": "Esta nota não existe mais.",
+        "errorSelectedCategoryGone": "Uma categoria selecionada não existe mais."
     },
     "markdown": {
         "bold": "Negrito (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "bulkDeleteConfirm": "Eliminar {{count}} contatos?",
         "bulkDeleteConfirm_one": "Eliminar {{count}} contato?",
         "bulkDeletedToast": "{{count}} contatos excluídos",
-        "emailLockedHint": "Estes endereços pertencem à conta deste membro. Apenas o próprio membro ou um administrador pode alterá-los."
+        "emailLockedHint": "Estes endereços pertencem à conta deste membro. Apenas o próprio membro ou um administrador pode alterá-los.",
+        "errorContactGone": "Este contato não existe mais.",
+        "errorSelectedCategoryGone": "A categoria selecionada não existe mais."
     },
     "budget": {
         "title": "Orçamento",
@@ -3476,7 +3485,8 @@
         "importSubmit": "Adicionar {{count}}",
         "importSuccess": "{{count}} aniversários adicionados.",
         "importNothingSelected": "Selecione pelo menos um contato.",
-        "importSelected": "{{count}} contatos selecionados"
+        "importSelected": "{{count}} contatos selecionados",
+        "errorBirthdayGone": "Este aniversário não existe mais."
     },
     "reminders": {
         "sectionTitle": "Lembrete",
@@ -3866,6 +3876,10 @@
         "deleted": "Atalho eliminado",
         "loadError": "Não foi possível carregar os atalhos.",
         "orderError": "Não foi possível salvar a ordem.",
+        "errorLinkGone": "Este atalho não existe mais.",
+        "errorLimitReached": "A visão geral comporta no máximo {{limit}} atalhos.",
+        "saveError": "Não foi possível salvar o atalho.",
+        "deleteError": "Não foi possível excluir o atalho.",
         "iconSymbol": "Escolher ícone",
         "iconChoose": "Escolher ícone ou imagem"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Só quem pode ver os valores da ajuda doméstica pode marcar um pagamento.",
         "notHereToday": "Ainda não chegou hoje",
         "tabVisits": "Visitas",
-        "tabChores": "Afazeres"
+        "tabChores": "Afazeres",
+        "errorWorkerGone": "Esta faxineira não existe mais.",
+        "errorVisitGone": "Esta visita não existe mais.",
+        "errorTaskGone": "Esta tarefa não existe mais.",
+        "errorAlreadyCheckedOut": "Esta faxineira já registrou a saída.",
+        "errorAlreadyCheckedIn": "Esta faxineira já registrou a entrada."
     },
     "userMultiSelect": {
         "moreUsers": "mais",
@@ -5721,7 +5740,15 @@
         "detailPaneLabel": "Detalhes do item",
         "pickOne": "Escolha um item",
         "pickOneHint": "Os detalhes, os prazos e o histórico aparecem aqui.",
-        "moreDetailsHint": "Compra, garantia, foto, documentos"
+        "moreDetailsHint": "Compra, garantia, foto, documentos",
+        "errorItemGone": "Este item não existe mais.",
+        "errorTrackedDateGone": "Este prazo não existe mais.",
+        "errorSelectedLocationGone": "A localização selecionada não existe mais.",
+        "errorBookingGone": "Esta transação não existe mais.",
+        "errorBookingAlreadyLinked": "Esta transação já está vinculada.",
+        "errorLocationExists": "Este local já existe aqui. Escolha outro nome.",
+        "errorLocationGone": "Este local não existe mais.",
+        "errorCategoryGone": "Esta categoria não existe mais."
     },
     "join": {
         "title": "Configure sua conta",
@@ -6011,8 +6038,20 @@
             "closeAccount": "Fechar conta",
             "confirmCloseAccount": "Fechar a conta de {{name}}?",
             "closeAccountDetail": "O histórico é mantido. Uma conta aberta de novo começa na moeda que a casa usar nesse momento.",
-            "accountNotEmpty": "A conta só pode ser fechada quando não tiver saldo, plano nem pedidos em aberto."
-        }
+            "accountNotEmpty": "A conta só pode ser fechada quando não tiver saldo, plano nem pedidos em aberto.",
+            "errorAccountDeactivated": "Esta conta está desativada e só pode ser paga.",
+            "errorBalanceTooLarge": "O saldo ficaria grande demais. O pedido continua aberto.",
+            "errorAccountExists": "Esta pessoa já tem uma conta de mesada.",
+            "errorNoAccount": "Esta pessoa não tem conta de mesada.",
+            "errorCurrencyChanged": "A moeda desta conta mudou."
+        },
+        "errorRewardGone": "Este prêmio não está mais disponível.",
+        "errorRequestGone": "Este pedido não existe mais.",
+        "errorRequestDecided": "Este pedido já foi decidido.",
+        "errorNotEnoughPoints": "Os pontos não são suficientes para isso.",
+        "errorNotParticipating": "Esta pessoa não acumula pontos.",
+        "errorMoneyAccountGone": "Esta conta não existe mais.",
+        "errorMoneyPlanGone": "Este plano não existe mais."
     },
     "schedule": {
         "title": "Turnos",
@@ -6195,7 +6234,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "Com horário"
+        "typesWithTime": "Com horário",
+        "errorShiftTypeGone": "Este tipo de turno não existe mais.",
+        "errorSelectedShiftTypeGone": "O tipo de turno escolhido não existe mais.",
+        "errorCustomFieldGone": "Este campo não existe mais.",
+        "errorSelectedCustomFieldGone": "Um dos campos escolhidos não existe mais.",
+        "errorPatternGone": "Esta escala não existe mais.",
+        "errorEntryGone": "Esta entrada não existe mais."
     },
     "waste": {
         "title": "Coleta de lixo",
@@ -6324,6 +6369,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} evento do calendário não tinha UID; foi gerada uma identificação temporária com base no título e na data.",
         "importDiagnosticDuplicateInstance": "{{count}} coletas duplicadas (mesma identificação) foram unificadas em uma só.",
         "importDiagnosticDuplicateInstance_one": "{{count}} coleta duplicada (mesma identificação) foi unificada em uma só.",
+        "importDiagnosticOther": "Um evento do calendário não tem o formato esperado.",
         "importUnresolvedBlockingError": "Resolva os erros impeditivos primeiro ou ignore os eventos com falha.",
         "importIgnoreLabel": "Ignorar",
         "importCreateNewType": "Criar novo tipo de lixo",

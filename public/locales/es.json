@@ -629,7 +629,10 @@
         "kanbanColExpand": "Expandir columna",
         "kanbanArchiveDone": "Archivar todo lo hecho",
         "kanbanArchiveDoneConfirm": "¿Archivar todas las tareas hechas de esta columna?",
-        "kanbanArchiveDoneAction": "Archivar"
+        "kanbanArchiveDoneAction": "Archivar",
+        "errorTaskGone": "Esta tarea ya no existe.",
+        "errorParentGone": "La tarea a la que pertenece esta subtarea ya no existe.",
+        "errorCommentGone": "Este comentario ya no existe."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} artículo eliminado.",
@@ -927,6 +930,8 @@
         "loadError": "No se pudieron cargar los eventos.",
         "saveError": "Error al guardar",
         "deleteError": "Error al eliminar",
+        "occurrenceGoneError": "Esta repetición ya no forma parte de la serie. Vuelve a cargar el calendario y selecciónala de nuevo.",
+        "occurrenceMalformedError": "La repetición de la serie no se indicó correctamente. Vuelve a cargar el calendario y selecciónala de nuevo.",
         "titleRequired": "El título es obligatorio",
         "monthJanuary": "Enero",
         "monthFebruary": "Febrero",
@@ -1238,7 +1243,9 @@
         "checkConflict": "La nota ha cambiado mientras tanto. Se volverá a cargar.",
         "pinnedState": "Fijada",
         "checklistDone": "Completado",
-        "checklistOpen": "Abierto"
+        "checklistOpen": "Abierto",
+        "errorNoteGone": "Esta nota ya no existe.",
+        "errorSelectedCategoryGone": "Una categoría seleccionada ya no existe."
     },
     "markdown": {
         "bold": "Negrita (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "Seleccionar a {{name}}",
         "bulkDeleteConfirm": "¿Eliminar {{count}} contactos?",
         "bulkDeleteConfirm_one": "¿Eliminar {{count}} contacto?",
-        "bulkDeletedToast": "{{count}} contactos eliminados"
+        "bulkDeletedToast": "{{count}} contactos eliminados",
+        "errorContactGone": "Este contacto ya no existe.",
+        "errorSelectedCategoryGone": "La categoría seleccionada ya no existe."
     },
     "budget": {
         "title": "Presupuesto",
@@ -3476,7 +3485,8 @@
         "importSubmit": "Añadir {{count}}",
         "importSuccess": "{{count}} cumpleaños añadidos.",
         "importNothingSelected": "Selecciona al menos un contacto.",
-        "importSelected": "{{count}} contactos seleccionados"
+        "importSelected": "{{count}} contactos seleccionados",
+        "errorBirthdayGone": "Este cumpleaños ya no existe."
     },
     "reminders": {
         "sectionTitle": "Recordatorio",
@@ -3866,6 +3876,10 @@
         "deleted": "Acceso rápido eliminado",
         "loadError": "No se han podido cargar los accesos rápidos.",
         "orderError": "No se ha podido guardar el orden.",
+        "errorLinkGone": "Este acceso rápido ya no existe.",
+        "errorLimitReached": "En el resumen caben como máximo {{limit}} accesos rápidos.",
+        "saveError": "No se pudo guardar el acceso rápido.",
+        "deleteError": "No se pudo eliminar el acceso rápido.",
         "iconSymbol": "Elegir icono",
         "iconChoose": "Elegir icono o imagen"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Solo puede marcar un pago quien puede ver los importes de la ayuda doméstica.",
         "notHereToday": "Hoy aún no ha llegado",
         "tabVisits": "Visitas",
-        "tabChores": "Labores"
+        "tabChores": "Labores",
+        "errorWorkerGone": "Esta persona de limpieza ya no existe.",
+        "errorVisitGone": "Este servicio ya no existe.",
+        "errorTaskGone": "Esta tarea ya no existe.",
+        "errorAlreadyCheckedOut": "Esta persona de limpieza ya registró su salida.",
+        "errorAlreadyCheckedIn": "Esta persona de limpieza ya registró su entrada."
     },
     "userMultiSelect": {
         "moreUsers": "más",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} entrada del calendario no tenía UID; se usó una identidad alternativa basada en la etiqueta y la fecha.",
         "importDiagnosticDuplicateInstance": "{{count}} instancias de recogida duplicadas (misma identidad) se combinaron en una.",
         "importDiagnosticDuplicateInstance_one": "{{count}} instancia de recogida duplicada (misma identidad) se combinó en una.",
+        "importDiagnosticOther": "Una entrada del calendario no tiene el formato esperado.",
         "importUnresolvedBlockingError": "Resuelve primero todos los avisos bloqueantes, u omite explícitamente los eventos afectados.",
         "importIgnoreLabel": "Ignorar",
         "importCreateNewType": "Crear un nuevo tipo de residuo",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Cerrar cuenta",
             "confirmCloseAccount": "¿Cerrar la cuenta de {{name}}?",
             "closeAccountDetail": "El historial se conserva. Una cuenta abierta de nuevo empieza en la moneda que el hogar use entonces.",
-            "accountNotEmpty": "La cuenta solo se puede cerrar cuando no tenga saldo, plan ni solicitudes abiertas."
-        }
+            "accountNotEmpty": "La cuenta solo se puede cerrar cuando no tenga saldo, plan ni solicitudes abiertas.",
+            "errorAccountDeactivated": "Esta cuenta está desactivada y solo se puede liquidar.",
+            "errorBalanceTooLarge": "El saldo sería demasiado alto. La solicitud sigue abierta.",
+            "errorAccountExists": "Esta persona ya tiene una cuenta de paga.",
+            "errorNoAccount": "Esta persona no tiene cuenta de paga.",
+            "errorCurrencyChanged": "La moneda de esta cuenta ha cambiado."
+        },
+        "errorRewardGone": "Este premio ya no está disponible.",
+        "errorRequestGone": "Esta solicitud ya no existe.",
+        "errorRequestDecided": "Esta solicitud ya se ha decidido.",
+        "errorNotEnoughPoints": "No hay puntos suficientes para esto.",
+        "errorNotParticipating": "Esta persona no acumula puntos.",
+        "errorMoneyAccountGone": "Esta cuenta ya no existe.",
+        "errorMoneyPlanGone": "Este plan ya no existe."
     },
     "datepicker": {
         "openCalendar": "Abrir calendario",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Detalles del objeto",
         "pickOne": "Elige un objeto",
         "pickOneHint": "Aquí aparecen los datos, los plazos y el historial.",
-        "moreDetailsHint": "Compra, garantía, foto, documentos"
+        "moreDetailsHint": "Compra, garantía, foto, documentos",
+        "errorItemGone": "Este objeto ya no existe.",
+        "errorTrackedDateGone": "Esta fecha ya no existe.",
+        "errorSelectedLocationGone": "La ubicación seleccionada ya no existe.",
+        "errorBookingGone": "Este movimiento ya no existe.",
+        "errorBookingAlreadyLinked": "Este movimiento ya está vinculado.",
+        "errorLocationExists": "Esta ubicación ya existe aquí. Elige otro nombre.",
+        "errorLocationGone": "Esta ubicación ya no existe.",
+        "errorCategoryGone": "Esta categoría ya no existe."
     },
     "documentAttach": {
         "label": "Adjuntos",
@@ -6414,7 +6454,13 @@
             "seminar": "SE",
             "lab": "LAB"
         },
-        "typesWithTime": "Con horario"
+        "typesWithTime": "Con horario",
+        "errorShiftTypeGone": "Este tipo de turno ya no existe.",
+        "errorSelectedShiftTypeGone": "El tipo de turno elegido ya no existe.",
+        "errorCustomFieldGone": "Este campo ya no existe.",
+        "errorSelectedCustomFieldGone": "Uno de los campos elegidos ya no existe.",
+        "errorPatternGone": "Esta rotación ya no existe.",
+        "errorEntryGone": "Esta entrada ya no existe."
     },
     "pairDisplay": {
         "title": "Vincular tableta",

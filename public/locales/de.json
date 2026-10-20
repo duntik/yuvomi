@@ -645,7 +645,10 @@
         "kanbanColExpand": "Spalte ausklappen",
         "kanbanArchiveDone": "Alles Erledigte archivieren",
         "kanbanArchiveDoneConfirm": "Alle erledigten Aufgaben in dieser Spalte archivieren?",
-        "kanbanArchiveDoneAction": "Archivieren"
+        "kanbanArchiveDoneAction": "Archivieren",
+        "errorTaskGone": "Diese Aufgabe gibt es nicht mehr.",
+        "errorParentGone": "Die Aufgabe zu dieser Teilaufgabe gibt es nicht mehr.",
+        "errorCommentGone": "Diesen Kommentar gibt es nicht mehr."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} Artikel gelöscht.",
@@ -953,6 +956,8 @@
         "loadError": "Termine konnten nicht geladen werden.",
         "saveError": "Fehler beim Speichern",
         "deleteError": "Fehler beim Löschen",
+        "occurrenceGoneError": "Diesen Termin gibt es in der Serie nicht mehr. Lade den Kalender neu und wähle ihn noch einmal aus.",
+        "occurrenceMalformedError": "Der Serientermin ist nicht richtig angegeben. Lade den Kalender neu und wähle ihn noch einmal aus.",
         "titleRequired": "Titel ist erforderlich",
         "monthJanuary": "Januar",
         "monthFebruary": "Februar",
@@ -1254,7 +1259,9 @@
         "checkConflict": "Die Notiz wurde inzwischen geändert. Sie wird neu geladen.",
         "pinnedState": "Angepinnt",
         "checklistDone": "Erledigt",
-        "checklistOpen": "Offen"
+        "checklistOpen": "Offen",
+        "errorNoteGone": "Diese Notiz gibt es nicht mehr.",
+        "errorSelectedCategoryGone": "Eine gewählte Kategorie gibt es nicht mehr."
     },
     "markdown": {
         "bold": "Fett (Strg+B)",
@@ -1376,7 +1383,9 @@
         "selectNamed": "{{name}} auswählen",
         "bulkDeleteConfirm": "{{count}} Kontakte löschen?",
         "bulkDeleteConfirm_one": "{{count}} Kontakt löschen?",
-        "bulkDeletedToast": "{{count}} Kontakte gelöscht"
+        "bulkDeletedToast": "{{count}} Kontakte gelöscht",
+        "errorContactGone": "Diesen Kontakt gibt es nicht mehr.",
+        "errorSelectedCategoryGone": "Die gewählte Kategorie gibt es nicht mehr."
     },
     "budget": {
         "title": "Budget",
@@ -3453,7 +3462,8 @@
         "importSubmit": "{{count}} übernehmen",
         "importSuccess": "{{count}} Geburtstage übernommen.",
         "importNothingSelected": "Bitte mindestens einen Kontakt auswählen.",
-        "importSelected": "{{count}} Kontakte ausgewählt"
+        "importSelected": "{{count}} Kontakte ausgewählt",
+        "errorBirthdayGone": "Diesen Geburtstag gibt es nicht mehr."
     },
     "recipes": {
         "mealTypeNone": "Keine Mahlzeit",
@@ -3607,6 +3617,10 @@
         "deleted": "Schnellzugriff gelöscht",
         "loadError": "Die Schnellzugriffe konnten nicht geladen werden.",
         "orderError": "Die Reihenfolge konnte nicht gespeichert werden.",
+        "errorLinkGone": "Diesen Schnellzugriff gibt es nicht mehr.",
+        "errorLimitReached": "Mehr als {{limit}} Schnellzugriffe passen nicht auf die Übersicht.",
+        "saveError": "Der Schnellzugriff konnte nicht gespeichert werden.",
+        "deleteError": "Der Schnellzugriff konnte nicht gelöscht werden.",
         "iconSymbol": "Symbol wählen",
         "iconChoose": "Symbol oder Bild wählen"
     },
@@ -4052,7 +4066,12 @@
         "errorAmountsHidden": "Bezahlen kann nur, wer die Beträge der Haushaltshilfe sehen darf.",
         "notHereToday": "Heute noch nicht da",
         "tabVisits": "Besuche",
-        "tabChores": "Arbeiten"
+        "tabChores": "Arbeiten",
+        "errorWorkerGone": "Diese Haushaltshilfe gibt es nicht mehr.",
+        "errorVisitGone": "Diesen Einsatz gibt es nicht mehr.",
+        "errorTaskGone": "Diese Aufgabe gibt es nicht mehr.",
+        "errorAlreadyCheckedOut": "Diese Haushaltshilfe ist schon ausgecheckt.",
+        "errorAlreadyCheckedIn": "Diese Haushaltshilfe ist schon eingecheckt."
     },
     "splitExpenses": {
         "title": "Gemeinsame Ausgaben",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} Kalendereintrag hatte keine UID; eine Ersatzkennung aus Bezeichnung und Datum wurde verwendet.",
         "importDiagnosticDuplicateInstance": "{{count}} doppelte Abholtermine (gleiche Kennung) wurden zusammengeführt.",
         "importDiagnosticDuplicateInstance_one": "{{count}} doppelter Abholtermin (gleiche Kennung) wurde zusammengeführt.",
+        "importDiagnosticOther": "Ein Kalendereintrag weicht vom erwarteten Format ab.",
         "importUnresolvedBlockingError": "Bitte löse zuerst alle blockierenden Hinweise, oder überspringe die betroffenen Termine ausdrücklich.",
         "importIgnoreLabel": "Ignorieren",
         "importCreateNewType": "Neue Abfallart anlegen",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Konto schließen",
             "confirmCloseAccount": "Konto von {{name}} schließen?",
             "closeAccountDetail": "Der Verlauf bleibt erhalten. Ein neu eröffnetes Konto beginnt in der Währung, die der Haushalt dann führt.",
-            "accountNotEmpty": "Das Konto lässt sich erst schließen, wenn kein Guthaben, kein Plan und keine offene Anfrage mehr daran hängen."
-        }
+            "accountNotEmpty": "Das Konto lässt sich erst schließen, wenn kein Guthaben, kein Plan und keine offene Anfrage mehr daran hängen.",
+            "errorAccountDeactivated": "Dieses Konto ist deaktiviert und wird nur noch ausgezahlt.",
+            "errorBalanceTooLarge": "Das Guthaben würde zu groß. Die Anfrage bleibt offen.",
+            "errorAccountExists": "Diese Person hat schon ein Taschengeldkonto.",
+            "errorNoAccount": "Diese Person hat kein Taschengeldkonto.",
+            "errorCurrencyChanged": "Die Währung dieses Kontos hat sich geändert."
+        },
+        "errorRewardGone": "Diese Prämie ist nicht mehr verfügbar.",
+        "errorRequestGone": "Diese Anfrage gibt es nicht mehr.",
+        "errorRequestDecided": "Über diese Anfrage wurde schon entschieden.",
+        "errorNotEnoughPoints": "Dafür reichen die Punkte nicht.",
+        "errorNotParticipating": "Diese Person sammelt keine Punkte.",
+        "errorMoneyAccountGone": "Dieses Konto gibt es nicht mehr.",
+        "errorMoneyPlanGone": "Diesen Plan gibt es nicht mehr."
     },
     "datepicker": {
         "openCalendar": "Kalender öffnen",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Gegenstandsdetails",
         "pickOne": "Wähle einen Gegenstand",
         "pickOneHint": "Angaben, Fristen und Verlauf erscheinen hier.",
-        "moreDetailsHint": "Kauf, Garantie, Foto, Dokumente"
+        "moreDetailsHint": "Kauf, Garantie, Foto, Dokumente",
+        "errorItemGone": "Diesen Gegenstand gibt es nicht mehr.",
+        "errorTrackedDateGone": "Diese Frist gibt es nicht mehr.",
+        "errorSelectedLocationGone": "Den gewählten Ort gibt es nicht mehr.",
+        "errorBookingGone": "Diese Buchung gibt es nicht mehr.",
+        "errorBookingAlreadyLinked": "Diese Buchung ist bereits verknüpft.",
+        "errorLocationExists": "Diesen Ort gibt es hier schon. Wähle einen anderen Namen.",
+        "errorLocationGone": "Diesen Ort gibt es nicht mehr.",
+        "errorCategoryGone": "Diese Kategorie gibt es nicht mehr."
     },
     "documentAttach": {
         "label": "Anhänge",
@@ -6414,7 +6454,13 @@
             "seminar": "SE",
             "lab": "PK"
         },
-        "typesWithTime": "Mit Uhrzeit"
+        "typesWithTime": "Mit Uhrzeit",
+        "errorShiftTypeGone": "Diese Schichtart gibt es nicht mehr.",
+        "errorSelectedShiftTypeGone": "Die gewählte Schichtart gibt es nicht mehr.",
+        "errorCustomFieldGone": "Dieses Feld gibt es nicht mehr.",
+        "errorSelectedCustomFieldGone": "Ein gewähltes Feld gibt es nicht mehr.",
+        "errorPatternGone": "Diesen Schichtplan gibt es nicht mehr.",
+        "errorEntryGone": "Diesen Eintrag gibt es nicht mehr."
     },
     "pairDisplay": {
         "title": "Tablet koppeln",

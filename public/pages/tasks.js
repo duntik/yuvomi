@@ -6,7 +6,7 @@
 
 import { api } from '/api.js';
 import { renderRRuleFields, bindRRuleEvents, getRRuleValues } from '/rrule-ui.js';
-import { openModal as openSharedModal, closeModal, whenModalClosed, wireBlurValidation, validateAll, btnError, btnLoading, promptModal, confirmModal, advancedSection, refocusAfterRender } from '/components/modal.js';
+import { openModal as openSharedModal, closeModal, whenModalClosed, wireBlurValidation, validateAll, btnError, btnLoading, promptModal, confirmModal, advancedSection, refocusAfterRender, captureModalContext } from '/components/modal.js';
 import { whenHistorySettled } from '/utils/overlay-history.js';
 import { stagger, vibrate, scheduleUndoableDelete, acknowledgeCheck, collapseOut, expandIn, wireScrollFade, isImeComposing } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
@@ -49,6 +49,20 @@ import {
   setTaskArchived, toggleSubtaskStatus,
 } from '/components/task-detail.js';
 import { reloadAfterSave } from '/utils/reload-after-save.js';
+import { errorSentence, isAlreadyDeleted, loadErrorSentence } from '/utils/friendly-error.js';
+
+/**
+ * "GIBT ES NICHT MEHR" (#1909): ein anderes Haushaltsmitglied hat die Aufgabe
+ * geloescht oder privat gestellt. Die 404 heisst fuer diese Person in beiden
+ * Faellen: weg. Der Toast sagt das in der Sprache der App, und die Liste kommt
+ * frisch, damit die Zeile nicht stehen bleibt - nur bei genau diesem Grund,
+ * nie bei einer blanken 404. Gibt true zurueck, wenn nachgeladen wurde.
+ */
+async function reloadIfTaskGone(err, container) {
+  if (!isAlreadyDeleted(err, 'tasks_task_not_found') || !container) return false;
+  await loadTasks(container).catch(() => {});
+  return true;
+}
 
 // --------------------------------------------------------
 // Die geteilten Regeln, mit dem Blickwinkel DIESER Seite
@@ -412,7 +426,7 @@ async function wireSyncTarget(panel, task) {
     const res = await api.get('/tasks/sync-targets');
     lists = res.data?.caldav ?? [];
   } catch (err) {
-    console.warn('[Tasks] Sync-Ziele nicht ladbar:', err.message);
+    console.warn('[Tasks] Sync-Ziele nicht ladbar:', err);
   }
 
   const current = task?.target_caldav_account_id && task?.target_caldav_list_url
@@ -1862,7 +1876,8 @@ function acknowledgeStatusToggle(container, taskId, nextStatus, response) {
         await toggleTaskStatus(taskId, nextStatus);
         await reloadWithRowMotion(container, taskId);
       } catch (err) {
-        window.yuvomi.showToast(err.message, 'danger');
+        window.yuvomi.showToast(errorSentence(err), 'danger');
+        await reloadIfTaskGone(err, container);
       }
     },
   );
@@ -2473,6 +2488,9 @@ function openBulkTagDialog(taskIds, mode, container) {
         e.preventDefault();
         const tag = form.elements.tag.value.trim();
         if (!tag) return;
+        // Geschlossen wird nur dieser Dialog, nicht einer, der waehrend der
+        // Anfrage aufgegangen ist (#1997).
+        const dialog = captureModalContext();
         try {
           const body = mode === 'add' ? { ids: taskIds, add: [tag] } : { ids: taskIds, remove: [tag] };
           const res = await api.post('/tasks/tags/apply', body);
@@ -2486,14 +2504,14 @@ function openBulkTagDialog(taskIds, mode, container) {
               ? `${t('tasks.tagsUpdated', { count: res.data?.updated ?? 0 })} ${t('tasks.tagsSkippedLocked', { count: skipped })}`
               : t('tasks.tagsUpdated', { count: res.data?.updated ?? 0 }),
             'success');
-          closeModal({ force: true });
+          closeModal({ force: true, context: dialog });
           state.selectedTaskIds.clear();
           updateBulkActionsBar(container);
           renderFilters(container);
           await reloadAfterSave(() => loadTasks(container));
           refocusAfterRender();
         } catch (err) {
-          window.yuvomi.showToast(err.message ?? t('common.errorGeneric'), 'danger');
+          window.yuvomi.showToast(errorSentence(err), 'danger');
         }
       });
     },
@@ -2539,7 +2557,8 @@ function openTaskCategoryManager(container) {
       // ankommt, ist immer ein Fehler DIESER Auffrischung - und der erklaert als
       // einziger, warum die Seite den alten Stand behaelt.
       console.error('[Tasks] Auffrischen nach Kategorie-Aenderung fehlgeschlagen:', err);
-      window.yuvomi?.showToast(err.data?.error ?? t('common.errorGeneric'), 'danger');
+      // Ein Ladefehler: sein Satz, nie der Text des Servers (#1909).
+      window.yuvomi?.showToast(loadErrorSentence(err) ?? t('common.errorGeneric'), 'danger');
     }
   };
   openSharedModal({
@@ -2584,6 +2603,7 @@ async function handleFormSubmit(e, { container = null, onChanged = () => loadTas
   errorEl.hidden = true;
   submitBtn.disabled = true;
   submitBtn.textContent = t('common.saving');
+  const dialog = captureModalContext();
 
   const originalLabel = taskId ? t('common.save') : t('common.add');
 
@@ -2706,7 +2726,9 @@ async function handleFormSubmit(e, { container = null, onChanged = () => loadTas
   try {
     documentIds = taskDocuments ? await taskDocuments.commit() : null;
   } catch (err) {
-    resetSubmit(err.message || t('common.errorGeneric'));
+    // Der Upload eines Belegs: der Satz der App, nie der des Servers oder
+    // des Browsers (#1909).
+    resetSubmit(errorSentence(err));
     btnError(submitBtn);
     return;
   }
@@ -2780,7 +2802,9 @@ async function handleFormSubmit(e, { container = null, onChanged = () => loadTas
     // zu sehen (Notizen: 25ms). Die Quittung ist die Zeile, die aufzieht, dazu
     // der Toast oben - ein Knopf, hinter dem beides wartet, haelt nur auf.
     // `btnSuccess` bleibt der Baustein fuer Formulare, die offen bleiben.
-    closeModal({ force: true });
+    // Nur dieser Dialog, nicht einer, der waehrend der Anfrage aufgegangen
+    // ist (#1997).
+    closeModal({ force: true, context: dialog });
     // Erst die Tag-Liste, dann neu zeichnen: ein gerade vergebener Tag soll
     // sofort in Filterleiste und Vorschlägen stehen (#586).
     //
@@ -2797,7 +2821,9 @@ async function handleFormSubmit(e, { container = null, onChanged = () => loadTas
       refocusAfterRender();
     } catch (err) {
       console.error('[Tasks] reload after save failed:', err);
-      window.yuvomi.showToast(err.message ?? t('common.errorGeneric'), 'danger');
+      // Ein Ladefehler: sein Satz (Netz, Bremse, Server), nie der Text des
+      // Servers (#1909).
+      window.yuvomi.showToast(loadErrorSentence(err) ?? t('common.errorGeneric'), 'danger');
       return;
     }
     // Angelegt, nicht bearbeitet: die neue Zeile zeigen (siehe revealCreatedTask).
@@ -2816,7 +2842,16 @@ async function handleFormSubmit(e, { container = null, onChanged = () => loadTas
         });
     }
   } catch (err) {
-    resetSubmit(err.message);
+    // Die Aufgabe gibt es nicht mehr (#1909): nichts mehr zu speichern - das
+    // Formular geht zu, solange es das offene ist, und die Liste kommt frisch.
+    if (taskId && isAlreadyDeleted(err, 'tasks_task_not_found')) {
+      window.yuvomi.showToast(errorSentence(err), 'danger');
+      closeModal({ force: true, context: dialog });
+      await Promise.resolve(onChanged()).catch(() => {});
+      refocusAfterRender();
+      return;
+    }
+    resetSubmit(errorSentence(err));
     btnError(submitBtn);
   }
 }
@@ -2835,7 +2870,8 @@ async function handleRenameSubtask(id, currentTitle, container) {
     await reloadAfterSave(() => loadTasks(container));
     refocusAfterRender();
   } catch (err) {
-    window.yuvomi.showToast(err.message, 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
+    await reloadIfTaskGone(err, container);
   }
 }
 
@@ -2849,11 +2885,16 @@ async function handleDeleteSubtask(id, title, container) {
   });
   if (!ok) return;
   try {
-    await api.delete(`/tasks/${id}`);
+    try {
+      await api.delete(`/tasks/${id}`);
+    } catch (err) {
+      // SCHON GELOESCHT IST EIN ERFOLG (#1909): jemand anderes war schneller.
+      if (!isAlreadyDeleted(err, 'tasks_task_not_found')) throw err;
+    }
     await loadTasks(container);
     refocusAfterRender();
   } catch (err) {
-    window.yuvomi.showToast(err.message, 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
   }
 }
 
@@ -2929,7 +2970,7 @@ async function runColumnMove(task, column, container) {
     const response = await moveTaskToColumn(before, column);
     if (column === 'done') seriesText = seriesDoneText(response);
   } catch (err) {
-    window.yuvomi.showToast(err.message, 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
   }
   await loadTasks(container);
   // NACH dem Neuladen, wie in der Liste: die Karte liegt in „Erledigt", und in
@@ -3749,7 +3790,7 @@ async function loadHistory(container, { append = false, afterWrite = false, quie
     state.history.cursor = res.next_cursor ?? null;
     state.history.error = null;
   } catch (err) {
-    console.error('[Tasks] Verlauf-Ladefehler:', err.message);
+    console.error('[Tasks] Verlauf-Ladefehler:', err);
     state.history.error = err;
     if (!append) { state.history.entries = []; state.history.hasMore = false; state.history.cursor = null; }
   } finally {
@@ -4538,7 +4579,7 @@ function wireSwipeGestures(container) {
           await reloadWithRowMotion(container, taskId);
           acknowledgeStatusToggle(container, taskId, nextStatus, response);
         } catch (err) {
-          window.yuvomi.showToast(err.message, 'danger');
+          window.yuvomi.showToast(errorSentence(err), 'danger');
           await loadTasks(container);
         }
       },
@@ -4661,7 +4702,7 @@ async function sendTaskOrder(groupEl, container) {
     }
     return true;
   } catch (err) {
-    window.yuvomi.showToast(err.message, 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
     // Das DOM zeigt eine Reihenfolge, die der Server nicht kennt.
     await loadTasks(container);
     return false;
@@ -4739,7 +4780,8 @@ async function resetTaskOrder(groupEl, container) {
     const toggles = [...container.querySelectorAll('[data-group-toggle]')];
     toggles.find((b) => b.dataset.groupToggle === key)?.focus();
   } catch (err) {
-    window.yuvomi.showToast(err.message, 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
+    await reloadIfTaskGone(err, container);
   }
 }
 
@@ -5105,7 +5147,8 @@ async function runBulkAction(action, container) {
     updateBulkActionsBar(container);
     await loadTasks(container);
   } catch (err) {
-    window.yuvomi.showToast(err.message ?? t('common.errorGeneric'), 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
+    await reloadIfTaskGone(err, container);
   }
 }
 
@@ -5197,7 +5240,7 @@ async function archiveTaskIds(taskIds, container) {
         : t('tasks.bulkArchived'),
       'success');
   } catch (err) {
-    window.yuvomi.showToast(err.message ?? t('common.errorGeneric'), 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
   }
   // Wie beim Ansichtswechsel: scheitert das Nachladen am Netz, wird wenigstens
   // der vorhandene Bestand neu gezeichnet.
@@ -5242,14 +5285,21 @@ function handleBulkDelete(taskIds, container) {
     commit: async ({ keepalive }) => {
       // Erinnerungen gehen mit der Aufgabe - serverseitig, siehe
       // deleteTaskWithUndo() in components/task-detail.js.
-      await Promise.all(taskIds.map(id => api.delete(`/tasks/${id}`, { keepalive })));
+      // Je Aufgabe: schon geloescht ist ein Erfolg (#1909).
+      await Promise.all(taskIds.map(async (id) => {
+        try {
+          await api.delete(`/tasks/${id}`, { keepalive });
+        } catch (err) {
+          if (!isAlreadyDeleted(err, 'tasks_task_not_found')) throw err;
+        }
+      }));
       if (keepalive) return; // Seite verschwindet — kein UI-Refresh mehr
       refreshReminders();
       await loadTasks(container);
     },
     restore: (err) => {
       restore();
-      if (err) window.yuvomi.showToast(err.message ?? t('common.unknownError'), 'danger');
+      if (err) window.yuvomi.showToast(errorSentence(err), 'danger');
     },
   });
 }
@@ -5296,12 +5346,13 @@ async function completeTaskFor(container, taskId, userId) {
           await toggleTaskStatus(taskId, 'done');
           await reloadWithRowMotion(container, taskId);
         } catch (err) {
-          window.yuvomi.showToast(err.message, 'danger');
+          window.yuvomi.showToast(errorSentence(err), 'danger');
+          await reloadIfTaskGone(err, container);
         }
       },
     );
   } catch (err) {
-    window.yuvomi.showToast(err.message, 'danger');
+    window.yuvomi.showToast(errorSentence(err), 'danger');
     await loadTasks(container);
   }
 }
@@ -5487,7 +5538,7 @@ function wireTaskList(container) {
         // Derselbe Rückweg wie beim Wischen - und dieselbe Quittung.
         acknowledgeStatusToggle(container, id, nextStatus, response);
       } catch (err) {
-        window.yuvomi.showToast(err.message, 'danger');
+        window.yuvomi.showToast(errorSentence(err), 'danger');
         await loadTasks(container);
       }
     }
@@ -5531,7 +5582,8 @@ function wireTaskList(container) {
       } catch (err) {
         // Der vorgezogene Haken geht zurueck - der Server kennt ihn nicht.
         target.classList.toggle('subtask-item__checkbox--done', !subtaskDone);
-        window.yuvomi.showToast(err.message, 'danger');
+        window.yuvomi.showToast(errorSentence(err), 'danger');
+        await reloadIfTaskGone(err, container);
       }
     }
 
@@ -5553,7 +5605,8 @@ function wireTaskList(container) {
         window.yuvomi.showToast(archive ? t('tasks.archivedToast') : t('tasks.unarchivedToast'), 'success');
         await loadTasks(container);
       } catch (err) {
-        window.yuvomi.showToast(err.message, 'danger');
+        window.yuvomi.showToast(errorSentence(err), 'danger');
+        await reloadIfTaskGone(err, container);
       }
     }
 
@@ -6254,7 +6307,7 @@ export async function render(container, { user, signal } = {}) {
     state.subtasksExpandedByDefault = preferencesData.data?.tasks_subtasks_expanded === true;
     state.defaultSyncTarget = preferencesData.data?.tasks_default_target || '';
   } catch (err) {
-    console.error('[Tasks] Ladefehler:', err.message);
+    console.error('[Tasks] Ladefehler:', err);
     // Der Toast allein war die falsche Antwort: er verging, und darunter blieb
     // „Keine Aufgaben - alles erledigt?" mit „Aufgabe erstellen" stehen. Bei
     // einem Serverfehler behauptet das nicht nur Datenverlust, es behauptet
@@ -6342,6 +6395,8 @@ export const __test = {
   // Spalte, beide mit dem Aufruf, den sie absetzen - gezaehlt wird, WIE OFT
   // sie den Server fragen, und das sieht kein Textguard.
   runBulkAction, updateBulkActionsBar, toggleTaskSelection, archiveDoneColumn, filteredTasks,
+  // #1997: der Schlagwort-Dialog der Mehrfachauswahl schliesst nur sich selbst.
+  openBulkTagDialog,
   // Was ein Wandtablett zu sehen und zu fassen bekommt (#1209). Die Karte
   // traegt drei Wege zum selben Statuswechsel - Haken, Wisch, Teilaufgabe -,
   // und am Display darf nur der erste erscheinen, weil nur er nach der Person

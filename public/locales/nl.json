@@ -629,7 +629,10 @@
         "kanbanColExpand": "Kolom uitklappen",
         "kanbanArchiveDone": "Alles wat klaar is archiveren",
         "kanbanArchiveDoneConfirm": "Alle afgeronde taken in deze kolom archiveren?",
-        "kanbanArchiveDoneAction": "Archiveren"
+        "kanbanArchiveDoneAction": "Archiveren",
+        "errorTaskGone": "Deze taak bestaat niet meer.",
+        "errorParentGone": "De taak waar deze subtaak bij hoort bestaat niet meer.",
+        "errorCommentGone": "Deze opmerking bestaat niet meer."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} artikel verwijderd.",
@@ -927,6 +930,8 @@
         "loadError": "Evenementen konden niet worden geladen.",
         "saveError": "Fout bij opslaan",
         "deleteError": "Fout bij verwijderen",
+        "occurrenceGoneError": "Deze afspraak hoort niet meer bij de reeks. Laad de agenda opnieuw en kies hem nog een keer.",
+        "occurrenceMalformedError": "De afspraak uit de reeks is niet goed opgegeven. Laad de agenda opnieuw en kies hem nog een keer.",
         "titleRequired": "Titel is verplicht",
         "monthJanuary": "Januari",
         "monthFebruary": "Februari",
@@ -1238,7 +1243,9 @@
         "checkConflict": "De notitie is intussen gewijzigd. Deze wordt opnieuw geladen.",
         "pinnedState": "Vastgezet",
         "checklistDone": "Klaar",
-        "checklistOpen": "Open"
+        "checklistOpen": "Open",
+        "errorNoteGone": "Deze notitie bestaat niet meer.",
+        "errorSelectedCategoryGone": "Een gekozen categorie bestaat niet meer."
     },
     "markdown": {
         "bold": "Vet (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "{{name}} selecteren",
         "bulkDeleteConfirm": "{{count}} contacten verwijderen?",
         "bulkDeleteConfirm_one": "{{count}} contact verwijderen?",
-        "bulkDeletedToast": "{{count}} contacten verwijderd"
+        "bulkDeletedToast": "{{count}} contacten verwijderd",
+        "errorContactGone": "Dit contact bestaat niet meer.",
+        "errorSelectedCategoryGone": "De gekozen categorie bestaat niet meer."
     },
     "budget": {
         "title": "Budget",
@@ -3437,7 +3446,8 @@
         "importSubmit": "{{count}} toevoegen",
         "importSuccess": "{{count}} verjaardagen toegevoegd.",
         "importNothingSelected": "Selecteer minstens één contact.",
-        "importSelected": "{{count}} contacten geselecteerd"
+        "importSelected": "{{count}} contacten geselecteerd",
+        "errorBirthdayGone": "Deze verjaardag bestaat niet meer."
     },
     "recipes": {
         "mealTypeNone": "Geen maaltijd",
@@ -3596,6 +3606,10 @@
         "deleted": "Snelkoppeling verwijderd",
         "loadError": "De snelkoppelingen konden niet worden geladen.",
         "orderError": "De volgorde kon niet worden opgeslagen.",
+        "errorLinkGone": "Deze snelkoppeling bestaat niet meer.",
+        "errorLimitReached": "Op het overzicht passen maximaal {{limit}} snelkoppelingen.",
+        "saveError": "De snelkoppeling kon niet worden opgeslagen.",
+        "deleteError": "De snelkoppeling kon niet worden verwijderd.",
         "iconSymbol": "Pictogram kiezen",
         "iconChoose": "Pictogram of afbeelding kiezen"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Alleen wie de bedragen van de huishoudhulp mag zien, kan een betaling markeren.",
         "notHereToday": "Vandaag nog niet aanwezig",
         "tabVisits": "Bezoeken",
-        "tabChores": "Klussen"
+        "tabChores": "Klussen",
+        "errorWorkerGone": "Deze schoonmaker bestaat niet meer.",
+        "errorVisitGone": "Dit bezoek bestaat niet meer.",
+        "errorTaskGone": "Deze taak bestaat niet meer.",
+        "errorAlreadyCheckedOut": "Deze schoonmaker is al uitgecheckt.",
+        "errorAlreadyCheckedIn": "Deze schoonmaker is al ingecheckt."
     },
     "userMultiSelect": {
         "moreUsers": "meer",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} agenda-item had geen UID; een vervangende identiteit op basis van label en datum is gebruikt.",
         "importDiagnosticDuplicateInstance": "{{count}} dubbele ophaalmomenten (dezelfde identiteit) zijn samengevoegd tot één.",
         "importDiagnosticDuplicateInstance_one": "{{count}} dubbel ophaalmoment (dezelfde identiteit) is samengevoegd tot één.",
+        "importDiagnosticOther": "Een agenda-item heeft niet de verwachte indeling.",
         "importUnresolvedBlockingError": "Los eerst elke blokkerende melding op, of sla de betreffende gebeurtenissen expliciet over.",
         "importIgnoreLabel": "Negeren",
         "importCreateNewType": "Nieuwe afvalsoort aanmaken",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Rekening sluiten",
             "confirmCloseAccount": "Rekening van {{name}} sluiten?",
             "closeAccountDetail": "De geschiedenis blijft bewaard. Een opnieuw geopende rekening begint in de valuta die het huishouden dan gebruikt.",
-            "accountNotEmpty": "De rekening kan pas worden gesloten als er geen saldo, geen plan en geen open verzoek meer aan hangt."
-        }
+            "accountNotEmpty": "De rekening kan pas worden gesloten als er geen saldo, geen plan en geen open verzoek meer aan hangt.",
+            "errorAccountDeactivated": "Deze rekening is gedeactiveerd en kan alleen nog worden uitbetaald.",
+            "errorBalanceTooLarge": "Het saldo zou te groot worden. Het verzoek blijft open.",
+            "errorAccountExists": "Deze persoon heeft al een zakgeldrekening.",
+            "errorNoAccount": "Deze persoon heeft geen zakgeldrekening.",
+            "errorCurrencyChanged": "De valuta van deze rekening is gewijzigd."
+        },
+        "errorRewardGone": "Deze beloning is niet meer beschikbaar.",
+        "errorRequestGone": "Dit verzoek bestaat niet meer.",
+        "errorRequestDecided": "Over dit verzoek is al beslist.",
+        "errorNotEnoughPoints": "Daarvoor zijn er niet genoeg punten.",
+        "errorNotParticipating": "Deze persoon spaart geen punten.",
+        "errorMoneyAccountGone": "Deze rekening bestaat niet meer.",
+        "errorMoneyPlanGone": "Dit plan bestaat niet meer."
     },
     "datepicker": {
         "openCalendar": "Kalender openen",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Voorwerpdetails",
         "pickOne": "Kies een voorwerp",
         "pickOneHint": "Gegevens, termijnen en geschiedenis verschijnen hier.",
-        "moreDetailsHint": "Aankoop, garantie, foto, documenten"
+        "moreDetailsHint": "Aankoop, garantie, foto, documenten",
+        "errorItemGone": "Dit voorwerp bestaat niet meer.",
+        "errorTrackedDateGone": "Deze termijn bestaat niet meer.",
+        "errorSelectedLocationGone": "De gekozen locatie bestaat niet meer.",
+        "errorBookingGone": "Deze boeking bestaat niet meer.",
+        "errorBookingAlreadyLinked": "Deze boeking is al gekoppeld.",
+        "errorLocationExists": "Deze locatie bestaat hier al. Kies een andere naam.",
+        "errorLocationGone": "Deze locatie bestaat niet meer.",
+        "errorCategoryGone": "Deze categorie bestaat niet meer."
     },
     "documentAttach": {
         "label": "Bijlagen",
@@ -6414,7 +6454,13 @@
             "seminar": "WC",
             "lab": "PR"
         },
-        "typesWithTime": "Met tijden"
+        "typesWithTime": "Met tijden",
+        "errorShiftTypeGone": "Dit diensttype bestaat niet meer.",
+        "errorSelectedShiftTypeGone": "Het gekozen diensttype bestaat niet meer.",
+        "errorCustomFieldGone": "Dit veld bestaat niet meer.",
+        "errorSelectedCustomFieldGone": "Een van de gekozen velden bestaat niet meer.",
+        "errorPatternGone": "Dit roosterpatroon bestaat niet meer.",
+        "errorEntryGone": "Deze vermelding bestaat niet meer."
     },
     "pairDisplay": {
         "title": "Tablet koppelen",

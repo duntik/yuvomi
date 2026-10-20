@@ -306,29 +306,29 @@ test('kein HTML-Kommentar im Markup enthält ein Backtick', () => {
 // SINKEN - wer eine Stelle umstellt, senkt sie hier mit; eine neue Datei steht
 // bei 0.
 const LATE_MODAL_CLOSE_BESTAND = {
-  'components/quick-links-manager.js': 1,
-  'pages/birthdays.js': 2,
-  'pages/budget-plans.js': 2,
-  'pages/budget.js': 7,
+  'components/quick-links-manager.js': 0,
+  'pages/birthdays.js': 0,
+  'pages/budget-plans.js': 0,
+  'pages/budget.js': 0,
   'pages/calendar.js': 2,
-  'pages/contacts.js': 2,
-  'pages/health.js': 13,
-  'pages/housekeeping.js': 4,
-  'pages/inventory.js': 2,
+  'pages/contacts.js': 0,
+  'pages/health.js': 0,
+  'pages/housekeeping.js': 0,
+  'pages/inventory.js': 0,
   'pages/meals.js': 4,
   'pages/pantry.js': 1,
-  'pages/rewards.js': 7,
-  'pages/schedule.js': 4,
-  'pages/shopping.js': 8,
+  'pages/rewards.js': 0,
+  'pages/schedule.js': 0,
+  'pages/shopping.js': 0,
   'pages/split-expenses.js': 6,
-  'pages/tasks.js': 2,
-  'pages/waste.js': 15,
-  'settings/pages/admin-family.js': 2,
-  'settings/pages/modules-health.js': 2,
-  'settings/pages/modules-kitchen.js': 2,
-  'settings/pages/personal-calendar-subscriptions.js': 1,
-  'settings/pages/sync-calendar.js': 1,
-  'settings/pages/sync-contacts.js': 1,
+  'pages/tasks.js': 0,
+  'pages/waste.js': 0,
+  'settings/pages/admin-family.js': 0,
+  'settings/pages/modules-health.js': 0,
+  'settings/pages/modules-kitchen.js': 0,
+  'settings/pages/personal-calendar-subscriptions.js': 0,
+  'settings/pages/sync-calendar.js': 0,
+  'settings/pages/sync-contacts.js': 0,
 };
 
 test('kein neues closeModal() nach einem await ohne den Kontext des eigenen Dialogs (#1997, Ratsche)', () => {
@@ -20476,7 +20476,7 @@ test('Familie: Mitglied und Einladung oeffnen einen Dialog, der Knopf bleibt Fok
   assert.match(src, /addMemberBtn\.addEventListener\('click', \(\) => openAddMemberModal\(/);
   assert.doesNotMatch(src, /addMemberBtn\.hidden = true|addBtn\.hidden = true/, 'der Knopf verschwindet nicht - er ist das Ziel der Fokus-Rueckgabe');
   const submit = src.slice(src.indexOf('function openAddMemberModal('), src.indexOf('function bindEvents('));
-  assert.match(submit, /closeModal\(\{ force: true \}\)/, 'nach dem Anlegen schliesst der Dialog und gibt den Fokus zurueck');
+  assert.match(submit, /closeModal\(\{ force: true, context: modalContext \}\)/, 'nach dem Anlegen schliesst der Dialog und gibt den Fokus zurueck');
 });
 
 /* Lucide ersetzt `<i data-lucide>` durch ein `<svg>` - eine Regel auf `… i`
@@ -21666,21 +21666,16 @@ const SERVER_TEXT_OWNERS = new Set([
 // deshalb stieg hier die Zahl (pages/calendar.js 5 -> 7, components/modal.js
 // 0 -> 1) statt dass die Stellen blind umgestellt wurden. Die Kalender-Scheibe
 // von #1909 raeumt sie mit eigenen Gruenden und Saetzen ab.
+//
+// `settings/module-install-errors.js` liest den Text nur noch an EINER Stelle,
+// und bewusst: `bad_manifest` setzt die Angabe des Modul-Laders (welches Feld
+// in module.json fehlt) in einen uebersetzten Satz - eine Angabe zum Modul fuer
+// den, der es installiert, kein Satz an seiner Stelle (#1909).
 const SERVER_TEXT_OPEN = new Map([
-  ['components/modal.js', 1],
-  ['components/quick-links-manager.js', 2],
-  ['components/task-detail.js', 1],
-  ['pages/birthdays.js', 1],
   ['pages/calendar.js', 7],
-  ['pages/contacts.js', 4],
-  ['pages/inventory.js', 8],
   ['pages/meals.js', 5],
-  ['pages/notes.js', 5],
   ['pages/pantry.js', 6],
-  ['pages/schedule.js', 1],
-  ['pages/tasks.js', 1],
   ['settings/module-install-errors.js', 1],
-  ['settings/pages/modules-kitchen.js', 1],
 ]);
 
 test('der Leser fuer den Servertext sieht jede Schreibweise und keinen Kommentar (#1909)', () => {
@@ -21739,7 +21734,10 @@ test('keine Seite zeigt den Text des Servers ohne Zuordnung, die offenen stehen 
     'Eine Datei liest den Servertext seltener als die Liste sagt - SERVER_TEXT_OPEN auf die neue Zahl senken '
     + '(bei 0 den Eintrag streichen), sonst darf die Zahl unbemerkt wieder steigen.');
   for (const name of ['pages/shopping.js', 'pages/waste.js', 'pages/health.js', 'settings/pages/modules-health.js', 'utils/kitchen-transfer.js', 'components/category-manager.js',
-    'pages/documents.js', 'utils/document-folder-delete.js', 'pages/recipes.js', 'pages/subscriptions.js']) {
+    'pages/documents.js', 'utils/document-folder-delete.js', 'pages/recipes.js', 'pages/subscriptions.js',
+    'pages/inventory.js', 'pages/notes.js', 'pages/contacts.js', 'pages/birthdays.js', 'pages/tasks.js',
+    'components/task-detail.js', 'components/modal.js', 'pages/schedule.js',
+    'components/quick-links-manager.js', 'settings/pages/modules-kitchen.js']) {
     assert.equal(SERVER_TEXT_OPEN.has(name), false, `${name} steht auf 0 und gehoert nicht in die Liste`);
   }
 });
@@ -21765,6 +21763,21 @@ const ERROR_MESSAGE_CLEAN = [
   'utils/document-folder-delete.js',
   'pages/recipes.js',
   'pages/subscriptions.js',
+  'pages/inventory.js',
+  'pages/notes.js',
+  'pages/contacts.js',
+  'pages/birthdays.js',
+  'pages/tasks.js',
+  'components/task-detail.js',
+  'components/modal.js',
+  'pages/schedule.js',
+  'settings/module-install-errors.js',
+  'pages/housekeeping.js',
+  'pages/rewards.js',
+  'pages/budget.js',
+  'pages/waste.js',
+  'pages/shopping.js',
+  'components/quick-links-manager.js',
 ];
 
 test('der Leser fuer err.message sieht beide Schreibweisen und keinen Kommentar (#1909)', () => {
@@ -21830,6 +21843,25 @@ test('die Abfuhr-Seite gibt den gespeicherten Fehlertext einer Quelle nie aus (#
     'pages/waste.js gibt `last_error` aus - den Satz aus last_error_reason/last_error_params bauen (lastFailureSentence)');
 });
 
+/* DER HINWEIS EINES IMPORTS (#1909). Eine Zeile unter der Vorschau traegt
+ * neben `code` den englischen Satz des Servers (`message`, z. B. "3 calendar
+ * entries were skipped ..."). Die Seite sagt fuer jeden Code ihren eigenen
+ * Satz, und fuer einen Code, den sie (noch) nicht kennt, den allgemeinen -
+ * `diag.message` liest sie nie. Und jeder Code, den der Import vergibt, hat
+ * auf der Seite seinen Satz, sonst stuende dort fuer einen bekannten Fall der
+ * allgemeine. */
+test('die Abfuhr-Seite sagt zu jedem Import-Hinweis ihren Satz, nie den des Servers (#1909)', () => {
+  const page = read('../public/pages/waste.js');
+  const code = withoutCommentsKeepingLines(page, { blankLiterals: true });
+  assert.equal([...code.matchAll(/\bdiag\s*(?:\?\.|\.)\s*message\b/g)].length, 0,
+    'pages/waste.js liest `diag.message` - den Satz aus IMPORT_DIAGNOSTIC_LABEL_KEYS nehmen, sonst waste.importDiagnosticOther');
+  const mapped = new Set([...page.match(/const IMPORT_DIAGNOSTIC_LABEL_KEYS = \{([^}]*)\}/)[1].matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1]));
+  const server = read('../server/services/waste-import.js');
+  const codes = new Set([...server.matchAll(/\bcode:\s*'([a-z_]+)'/g)].map((m) => m[1]));
+  assert.ok(codes.size >= 6, `nur ${codes.size} Codes im Import gefunden - der Leser greift nicht mehr`);
+  for (const name of codes) assert.ok(mapped.has(name), `Import-Hinweis ${name} hat auf der Seite keinen Satz`);
+});
+
 /* WER NOCH UEBER friendlyError FRAGT, STEHT ALS ZAHL DA (#1909, Uebergang).
  *
  * `utils/friendly-error.js` ist oben ausgenommen, und `friendlyError()` reicht
@@ -21873,7 +21905,6 @@ function countFriendlyErrorCalls(source) {
 
 // Datei -> Zahl der Aufrufe von friendlyError. Nur senken.
 const FRIENDLY_ERROR_CALLERS = new Map([
-  ['pages/budget.js', 1],
   ['pages/contacts.js', 1],
   ['pages/housekeeping.js', 1],
   ['pages/meals.js', 3],
@@ -21939,6 +21970,9 @@ test('friendlyError hat keinen neuen Aufrufer, die verbliebenen stehen als Zahl 
     assert.equal(counts.has(name), false, `${name} ruft friendlyError() - der Einkauf zeigt nie den Text des Servers`);
     assert.equal(FRIENDLY_ERROR_CALLERS.has(name), false, `${name} steht auf 0 und gehoert nicht in die Liste`);
   }
+  // Das Budget ebenso (#1909): die Absagen ueber errorSentence, der Rest ueber loadErrorSentence.
+  assert.equal(counts.has('pages/budget.js'), false, 'pages/budget.js ruft friendlyError() - das Budget zeigt nie den Text des Servers');
+  assert.equal(FRIENDLY_ERROR_CALLERS.has('pages/budget.js'), false, 'pages/budget.js steht auf 0 und gehoert nicht in die Liste');
 });
 
 /* ────────────────────────────────────────────────────────────────────────────

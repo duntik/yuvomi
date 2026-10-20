@@ -629,7 +629,10 @@
         "kanbanColExpand": "列を開く",
         "kanbanArchiveDone": "完了をすべてアーカイブ",
         "kanbanArchiveDoneConfirm": "この列の完了したタスクをすべてアーカイブしますか？",
-        "kanbanArchiveDoneAction": "アーカイブ"
+        "kanbanArchiveDoneAction": "アーカイブ",
+        "errorTaskGone": "このタスクはもう存在しません。",
+        "errorParentGone": "このサブタスクの親タスクはもう存在しません。",
+        "errorCommentGone": "このコメントはもう存在しません。"
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} 件を削除しました。",
@@ -927,6 +930,8 @@
         "loadError": "予定の読み込みに失敗しました。",
         "saveError": "保存に失敗しました",
         "deleteError": "削除に失敗しました",
+        "occurrenceGoneError": "この予定はもうシリーズに含まれていません。カレンダーを再読み込みして、もう一度選んでください。",
+        "occurrenceMalformedError": "シリーズの予定が正しく指定されていません。カレンダーを再読み込みして、もう一度選んでください。",
         "titleRequired": "タイトルは必須です",
         "monthJanuary": "1月",
         "monthFebruary": "2月",
@@ -1238,7 +1243,9 @@
         "checkConflict": "メモはその間に変更されました。再読み込みします。",
         "pinnedState": "ピン留め済み",
         "checklistDone": "完了",
-        "checklistOpen": "未完了"
+        "checklistOpen": "未完了",
+        "errorNoteGone": "このメモはもうありません。",
+        "errorSelectedCategoryGone": "選択したカテゴリの一つがもう存在しません。"
     },
     "markdown": {
         "bold": "太字 (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "{{name}} を選択",
         "bulkDeleteConfirm": "{{count}} 件の連絡先を削除しますか?",
         "bulkDeleteConfirm_one": "{{count}} 件の連絡先を削除しますか?",
-        "bulkDeletedToast": "連絡先 {{count}} 件を削除しました"
+        "bulkDeletedToast": "連絡先 {{count}} 件を削除しました",
+        "errorContactGone": "この連絡先はもうありません。",
+        "errorSelectedCategoryGone": "選択したカテゴリーはもう存在しません。"
     },
     "budget": {
         "title": "家計",
@@ -3476,7 +3485,8 @@
         "importSubmit": "{{count}} 件を追加",
         "importSuccess": "{{count}} 件の誕生日を追加しました。",
         "importNothingSelected": "少なくとも 1 件の連絡先を選択してください。",
-        "importSelected": "{{count}} 件の連絡先を選択"
+        "importSelected": "{{count}} 件の連絡先を選択",
+        "errorBirthdayGone": "この誕生日はもうありません。"
     },
     "reminders": {
         "sectionTitle": "リマインダー",
@@ -3866,6 +3876,10 @@
         "deleted": "クイックリンクを削除しました",
         "loadError": "クイックリンクを読み込めませんでした。",
         "orderError": "並び順を保存できませんでした。",
+        "errorLinkGone": "このクイックリンクはもう存在しません。",
+        "errorLimitReached": "概要に置けるクイックリンクは{{limit}}件までです。",
+        "saveError": "クイックリンクを保存できませんでした。",
+        "deleteError": "クイックリンクを削除できませんでした。",
         "iconSymbol": "アイコンを選ぶ",
         "iconChoose": "アイコンまたは画像を選ぶ"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "支払いを記録できるのは、家事サポートの金額を見られる人だけです。",
         "notHereToday": "今日はまだ来ていません",
         "tabVisits": "訪問",
-        "tabChores": "家事"
+        "tabChores": "家事",
+        "errorWorkerGone": "このハウスキーパーはもう存在しません。",
+        "errorVisitGone": "この訪問はもう存在しません。",
+        "errorTaskGone": "このタスクはもう存在しません。",
+        "errorAlreadyCheckedOut": "このハウスキーパーはすでにチェックアウトしています。",
+        "errorAlreadyCheckedIn": "このハウスキーパーはすでにチェックインしています。"
     },
     "userMultiSelect": {
         "moreUsers": "他",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}}件の予定にUIDがなかったため、ラベルと日付に基づく代替識別子を使用しました。",
         "importDiagnosticDuplicateInstance": "重複した回収予定{{count}}件（同一の識別情報）を1件にまとめました。",
         "importDiagnosticDuplicateInstance_one": "重複した回収予定{{count}}件（同一の識別情報）を1件にまとめました。",
+        "importDiagnosticOther": "予定の1件が想定された形式と一致しません。",
         "importUnresolvedBlockingError": "先にブロック中のすべての警告を解決するか、該当する予定を明示的にスキップしてください。",
         "importIgnoreLabel": "無視",
         "importCreateNewType": "新しいごみの種類を作成",
@@ -5912,8 +5932,20 @@
             "closeAccount": "口座を閉じる",
             "confirmCloseAccount": "{{name}}の口座を閉じますか？",
             "closeAccountDetail": "履歴は残ります。開き直した口座は、そのとき世帯で使っている通貨で始まります。",
-            "accountNotEmpty": "残高、プラン、保留中のリクエストがなくなるまで口座は閉じられません。"
-        }
+            "accountNotEmpty": "残高、プラン、保留中のリクエストがなくなるまで口座は閉じられません。",
+            "errorAccountDeactivated": "この口座は無効になっており、残高の払い出しのみ可能です。",
+            "errorBalanceTooLarge": "残高が大きくなりすぎます。リクエストは保留のままです。",
+            "errorAccountExists": "この人にはすでにおこづかい口座があります。",
+            "errorNoAccount": "この人にはおこづかい口座がありません。",
+            "errorCurrencyChanged": "この口座の通貨が変更されました。"
+        },
+        "errorRewardGone": "この景品はもう利用できません。",
+        "errorRequestGone": "このリクエストはもう存在しません。",
+        "errorRequestDecided": "このリクエストはすでに決定済みです。",
+        "errorNotEnoughPoints": "ポイントが足りません。",
+        "errorNotParticipating": "この人はポイントを貯めていません。",
+        "errorMoneyAccountGone": "この口座はもう存在しません。",
+        "errorMoneyPlanGone": "このプランはもう存在しません。"
     },
     "datepicker": {
         "openCalendar": "カレンダーを開く",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "持ち物の詳細",
         "pickOne": "持ち物を選択",
         "pickOneHint": "詳細・期限・履歴がここに表示されます。",
-        "moreDetailsHint": "購入・保証・写真・書類"
+        "moreDetailsHint": "購入・保証・写真・書類",
+        "errorItemGone": "この持ち物はもうありません。",
+        "errorTrackedDateGone": "この期限はもうありません。",
+        "errorSelectedLocationGone": "選択した場所はもう存在しません。",
+        "errorBookingGone": "この取引はもうありません。",
+        "errorBookingAlreadyLinked": "この取引はすでに関連付けられています。",
+        "errorLocationExists": "この場所はすでにここにあります。別の名前を選んでください。",
+        "errorLocationGone": "この場所はもう存在しません。",
+        "errorCategoryGone": "このカテゴリーはもう存在しません。"
     },
     "documentAttach": {
         "label": "添付",
@@ -6414,7 +6454,13 @@
             "seminar": "ゼ",
             "lab": "実"
         },
-        "typesWithTime": "時間あり"
+        "typesWithTime": "時間あり",
+        "errorShiftTypeGone": "このシフトの種類はもう存在しません。",
+        "errorSelectedShiftTypeGone": "選択したシフトの種類はもう存在しません。",
+        "errorCustomFieldGone": "この項目はもう存在しません。",
+        "errorSelectedCustomFieldGone": "選択した項目の一つはもう存在しません。",
+        "errorPatternGone": "このシフトパターンはもう存在しません。",
+        "errorEntryGone": "この項目はもう存在しません。"
     },
     "pairDisplay": {
         "title": "タブレットをペアリング",

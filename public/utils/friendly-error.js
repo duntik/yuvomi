@@ -206,6 +206,97 @@ export const CASE_MESSAGES = new Map([
   ['subscriptions_logo_content_mismatch', 'subscriptions.errorLogoContentMismatch'],
   // Die Logo-Suche hat geantwortet, aber nichts Brauchbares gefunden.
   ['subscriptions_no_logo_found', 'subscriptions.logoSearchEmpty'],
+  // Inventar (#1909). Die "gibt es nicht mehr" stehen auch in GONE_REASONS.
+  // Gegenstaende haben keine Sichtbarkeit: die 404 heisst "geloescht". Ein
+  // Loeschen mit diesem Grund ist deshalb ein Erfolg (isAlreadyDeleted).
+  ['inventory_item_not_found', 'inventory.errorItemGone'],
+  // Die Frist, die als erledigt markiert werden sollte, steht nicht mehr am
+  // Gegenstand (beim Bearbeiten entfernt).
+  ['inventory_tracked_date_not_found', 'inventory.errorTrackedDateGone'],
+  // Der im Formular GEWAEHLTE Ort fehlt: das Formular bleibt offen und bietet
+  // die aktuellen Orte an.
+  ['inventory_selected_location_not_found', 'inventory.errorSelectedLocationGone'],
+  // Die Buchung, die verknuepft, vorbelegt oder geloest werden sollte, gibt es
+  // nicht mehr (geloescht, oder fuer diese Person nicht mehr sichtbar).
+  ['inventory_booking_not_found', 'inventory.errorBookingGone'],
+  ['inventory_booking_already_linked', 'inventory.errorBookingAlreadyLinked'],
+  // Notizen (#1909). Notizen haben keine Sichtbarkeit: die 404 heisst
+  // "geloescht", ein Loeschen mit diesem Grund ist ein Erfolg.
+  ['notes_note_not_found', 'notes.errorNoteGone'],
+  // Eine im Editor GEWAEHLTE Kategorie gibt es nicht mehr: der Editor bleibt
+  // offen und bietet die aktuellen Kategorien an.
+  ['notes_selected_category_not_found', 'notes.errorSelectedCategoryGone'],
+  // Kontakte (#1909). Die 404 heisst "geloescht", ein Loeschen mit diesem
+  // Grund ist ein Erfolg.
+  ['contacts_contact_not_found', 'contacts.errorContactGone'],
+  // Geburtstage (#1909), ebenso.
+  ['birthdays_birthday_not_found', 'birthdays.errorBirthdayGone'],
+  // Die im Kontaktformular GEWAEHLTE Kategorie gibt es nicht mehr: das
+  // Formular bleibt offen und bietet die aktuellen Kategorien an.
+  ['contacts_selected_category_not_found', 'contacts.errorSelectedCategoryGone'],
+  // Orte und Kategorien des Inventars (#1909). Den Namen gibt es auf dieser
+  // Ebene schon (`category_exists` deckt die Kategorien, oben); ein Ort oder
+  // eine Kategorie, die inzwischen geloescht wurde, ist ein "gibt es nicht
+  // mehr" - der Verwalter laedt nach, ein Loeschen ist ein Erfolg.
+  ['inventory_location_exists', 'inventory.errorLocationExists'],
+  ['inventory_location_not_found', 'inventory.errorLocationGone'],
+  ['inventory_category_not_found', 'inventory.errorCategoryGone'],
+  // Aufgaben (#1909). Die 404 heisst "geloescht oder nicht mehr sichtbar"
+  // (privat gestellt) - fuer diese Person ist die Aufgabe in beiden Faellen
+  // weg, ein Loeschen mit diesem Grund ist deshalb ein Erfolg.
+  ['tasks_task_not_found', 'tasks.errorTaskGone'],
+  // Die Aufgabe, an die eine neue Teilaufgabe sollte, ist inzwischen weg; ein
+  // Kommentar, der geaendert oder geloescht werden sollte, ebenso (#1909).
+  ['tasks_parent_not_found', 'tasks.errorParentGone'],
+  ['tasks_comment_not_found', 'tasks.errorCommentGone'],
+  // Dienstplan (#1909). Die "gibt es nicht mehr" stehen auch in GONE_REASONS;
+  // die Seite laedt dann nach, ein Loeschen mit einem davon ist ein Erfolg.
+  // Abweichung und Zusatzschicht sind fuer den Nutzer beide "ein Eintrag".
+  ['schedule_shift_type_not_found', 'schedule.errorShiftTypeGone'],
+  ['schedule_custom_field_not_found', 'schedule.errorCustomFieldGone'],
+  ['schedule_pattern_not_found', 'schedule.errorPatternGone'],
+  ['schedule_override_not_found', 'schedule.errorEntryGone'],
+  ['schedule_extra_shift_not_found', 'schedule.errorEntryGone'],
+  // Die im Dialog GEWAEHLTE Schichtart oder ein gewaehltes Feld fehlt: der
+  // Dialog bleibt offen, die Seite dahinter kommt frisch.
+  ['schedule_selected_shift_type_not_found', 'schedule.errorSelectedShiftTypeGone'],
+  ['schedule_selected_custom_field_not_found', 'schedule.errorSelectedCustomFieldGone'],
+  // Bis #1909 ordnete die Seite diese drei am WORTLAUT des Servers zu.
+  ['schedule_shift_type_in_use', 'schedule.typeInUse'],
+  ['schedule_cycle_length_conflict', 'schedule.cycleLengthConflictGeneric'],
+  ['schedule_shift_type_required', 'schedule.shiftTypeRequiredError'],
+  // Aelter als die Regel (#1777) und schon Teil der API: nur der Dienstplan
+  // schickt ihn.
+  ['range_reversed', 'schedule.rangeOrderError'],
+  // Haushaltshilfe (#1909). Die "gibt es nicht mehr" stehen auch in
+  // GONE_REASONS; die Seite laedt dann nach. Haushaltshilfe, Einsatz und
+  // Aufgabe haben keine Sichtbarkeit: die 404 heisst "geloescht", ein Loeschen
+  // mit diesem Grund ist ein Erfolg. Keine offene Sitzung beim Auschecken
+  // heisst: jemand anderes hat schon ausgecheckt.
+  ['housekeeping_worker_not_found', 'housekeeping.errorWorkerGone'],
+  ['housekeeping_visit_not_found', 'housekeeping.errorVisitGone'],
+  ['housekeeping_task_not_found', 'housekeeping.errorTaskGone'],
+  ['housekeeping_open_session_not_found', 'housekeeping.errorAlreadyCheckedOut'],
+  ['housekeeping_already_checked_in', 'housekeeping.errorAlreadyCheckedIn'],
+  ['housekeeping_username_taken', 'join.usernameTaken'],
+  ['housekeeping_username_invalid', 'setup.errorUsernameInvalid'],
+  // Belohnungen (#1909). Die aelteren Gruende ohne Praefix (out_of_stock,
+  // insufficient_funds, account_deactivated ...) liest die Seite selbst:
+  // `account_deactivated` schickt auch die Kontoverwaltung, mit anderem Sinn.
+  // Eine Praemie, die geloescht oder abgeschaltet wurde, ist "nicht mehr
+  // verfuegbar"; Konto und Plan, die schon weg sind, sind beim Loeschen ein Erfolg.
+  ['rewards_reward_not_found', 'rewards.errorRewardGone'],
+  ['rewards_redemption_not_found', 'rewards.errorRequestGone'],
+  ['rewards_redemption_decided', 'rewards.errorRequestDecided'],
+  ['rewards_insufficient_points', 'rewards.errorNotEnoughPoints'],
+  ['rewards_not_participating', 'rewards.errorNotParticipating'],
+  ['rewards_money_account_not_found', 'rewards.errorMoneyAccountGone'],
+  ['rewards_money_plan_not_found', 'rewards.errorMoneyPlanGone'],
+  // Schnellzugriffe (#1909). Die 404 heisst "geloescht" - oder privat fuer
+  // jemand anderen, was fuer diese Person dasselbe ist. Ein Loeschen mit diesem
+  // Grund ist deshalb ein Erfolg. Die Grenze traegt ihre Zahl (CASE_PARAMS).
+  ['quick_links_link_not_found', 'quickLinks.errorLinkGone'],
+  ['quick_links_limit_reached', 'quickLinks.errorLimitReached'],
 ]);
 
 /**
@@ -230,6 +321,7 @@ export const CASE_PARAMS = new Map([
   ['health_cycle_import_too_large', ['limit_kb']],
   ['health_cycle_import_too_many_rows', ['limit']],
   ['documents_folder_too_deep', ['limit']],
+  ['quick_links_limit_reached', ['limit']],
 ]);
 
 const PARAM_MAX = 1_000_000_000;
@@ -301,6 +393,36 @@ export const GONE_REASONS = new Set([
   'subscriptions_payment_method_not_found',
   'subscriptions_selected_category_not_found',
   'subscriptions_selected_payment_method_not_found',
+  'inventory_item_not_found',
+  'inventory_tracked_date_not_found',
+  'inventory_selected_location_not_found',
+  'inventory_booking_not_found',
+  'notes_note_not_found',
+  'notes_selected_category_not_found',
+  'contacts_contact_not_found',
+  'birthdays_birthday_not_found',
+  'contacts_selected_category_not_found',
+  'inventory_location_not_found',
+  'inventory_category_not_found',
+  'tasks_task_not_found',
+  'tasks_parent_not_found',
+  'tasks_comment_not_found',
+  'schedule_shift_type_not_found',
+  'schedule_custom_field_not_found',
+  'schedule_pattern_not_found',
+  'schedule_override_not_found',
+  'schedule_extra_shift_not_found',
+  'schedule_selected_shift_type_not_found',
+  'schedule_selected_custom_field_not_found',
+  'housekeeping_worker_not_found',
+  'housekeeping_visit_not_found',
+  'housekeeping_task_not_found',
+  'housekeeping_open_session_not_found',
+  'rewards_reward_not_found',
+  'rewards_redemption_not_found',
+  'rewards_money_account_not_found',
+  'rewards_money_plan_not_found',
+  'quick_links_link_not_found',
 ]);
 
 /**

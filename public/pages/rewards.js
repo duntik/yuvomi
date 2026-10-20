@@ -11,7 +11,7 @@ import { t, formatDate, getLocale, getNumberFormat } from '/i18n.js';
 import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { initials } from '/utils/initials.js';
 import { getReadableTextColor, AVATAR_FALLBACK_COLOR } from '/utils/color.js';
-import { openModal, closeModal, confirmModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
+import { openModal, closeModal, captureModalContext, confirmModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
 import { createPageFab, setPageFabAction } from '/utils/fab.js';
 import { rowActionHtml } from '/utils/row-action.js';
 import { wireTablist } from '/utils/tablist.js';
@@ -29,6 +29,7 @@ import {
   amountToInput, currencyFractionDigits, toDecimalString,
 } from '/utils/money.js';
 import { reloadAfterSave } from '/utils/reload-after-save.js';
+import { errorSentence, isAlreadyDeleted, isGone } from '/utils/friendly-error.js';
 
 const TABS = ['overview', 'catalog', 'ledger'];
 
@@ -51,6 +52,42 @@ let state = {
 
 function prefersReducedMotion() {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+/* DER SATZ DER APP, NIE DER DES SERVERS (#1909). Bis dahin zeigte fast jeder
+ * Fehler hier `err.message` - den englischen Text des Servers ("Insufficient
+ * points.") oder den des Browsers. Jetzt nennt der Server den Fall
+ * (`reason`), und der Satz kommt aus der App.
+ *
+ * Die Gruende des Taschengelds sind aelter als die Regel mit dem Modulpraefix
+ * und Teil der API; nur diese Seite liest sie, deshalb stehen ihre Saetze hier
+ * und nicht in utils/friendly-error.js (`account_deactivated` schickt auch die
+ * Kontoverwaltung, mit anderem Sinn). Alles mit Praefix (`rewards_...`) und
+ * jede Absage (403) laufen ueber errorSentence. */
+const MONEY_REASON_KEYS = new Map([
+  ['out_of_stock', 'rewards.soldOutHint'],
+  ['insufficient_funds', 'rewards.money.insufficient'],
+  ['money_account_not_empty', 'rewards.money.accountNotEmpty'],
+  ['account_deactivated', 'rewards.money.errorAccountDeactivated'],
+  ['balance_too_large', 'rewards.money.errorBalanceTooLarge'],
+  ['money_account_exists', 'rewards.money.errorAccountExists'],
+  ['no_money_account', 'rewards.money.errorNoAccount'],
+  ['currency_mismatch', 'rewards.money.errorCurrencyChanged'],
+]);
+
+function rewardsErrorSentence(err, fallbackKey = 'common.errorGeneric') {
+  const status = err?.status ?? err?.response?.status;
+  const key = status !== 403 && status !== 0 ? MONEY_REASON_KEYS.get(err?.data?.reason) : undefined;
+  return key ? t(key) : errorSentence(err, fallbackKey);
+}
+
+/** Loeschen, das schon erledigt ist, ist kein Fehler: `reason` nennt, was hier geloescht werden sollte. */
+async function deleteUnlessGone(path, reason) {
+  try {
+    await api.delete(path);
+  } catch (err) {
+    if (!isAlreadyDeleted(err, reason)) throw err;
+  }
 }
 
 /** Kurzer Status-Toast (nutzt das globale, per role="alert" angekündigte System). */
@@ -1035,6 +1072,7 @@ async function openRedeemModal(memberId, presetItemId = null) {
       panel.querySelector('#rw-redeem-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         errEl.hidden = true;
+        const modalContext = captureModalContext();
         submit.disabled = true;
         try {
           await api.post('/rewards/redemptions', {
@@ -1042,17 +1080,15 @@ async function openRedeemModal(memberId, presetItemId = null) {
             user_id: Number(memberEl.value),
             note: panel.querySelector('#rw-redeem-note').value.trim() || undefined,
           });
-          await closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           toast(isAdmin() ? t('rewards.toastRedeemed') : t('rewards.toastRequested'));
           await reloadAfterSave(() => refreshActiveTab());
           refocusAfterRender();
         } catch (err) {
           // Zwischen Dialog-Aufbau und Absenden kann die letzte Einheit weg
           // sein - ein anderes Kind war schneller. Der Server sagt das mit
-          // einem Code, nicht mit einem uebersetzten Satz.
-          errEl.textContent = err?.data?.reason === 'out_of_stock'
-            ? t('rewards.soldOutHint')
-            : (err?.message || t('rewards.redeemError'));
+          // einem Code, nicht mit einem uebersetzten Satz (`out_of_stock`).
+          errEl.textContent = rewardsErrorSentence(err, 'rewards.redeemError');
           errEl.hidden = false;
           submit.disabled = false;
         }
@@ -1114,11 +1150,16 @@ async function decideRedemption(id, action, btn) {
     // offen (#1734) - gebucht ist nichts, neu zu laden gibt es nichts.
     const ohneDeckung = err?.data?.reason === 'insufficient_funds';
     await confirmModal(vergriffen ? t('rewards.outOfStock')
-      : ohneDeckung ? t('rewards.money.insufficientOnApprove') : (err?.message || t('common.error')),
+      : ohneDeckung ? t('rewards.money.insufficientOnApprove') : rewardsErrorSentence(err),
     { confirmLabel: t('rewards.gotIt') });
     // Auch ohne Deckung neu laden: das Guthaben neben der Anfrage ist der
     // Stand von vor der Absage - also genau der, der sie nicht mehr erklaert.
-    if (vergriffen || ohneDeckung) {
+    // Ebenso, wenn die Anfrage inzwischen weg, schon entschieden oder mit dem
+    // deaktivierten Konto zurueckgezogen ist (#1909): sie stuende sonst weiter
+    // als offen da.
+    const veraltet = isGone(err)
+      || ['rewards_redemption_decided', 'account_deactivated', 'balance_too_large'].includes(err?.data?.reason);
+    if (vergriffen || ohneDeckung || veraltet) {
       await refreshActiveTab();
       refocusAfterRender();
     }
@@ -1163,6 +1204,7 @@ function openBonusModal() {
         if (!Number.isFinite(delta) || delta === 0) {
           errEl.textContent = t('rewards.pointsSignedHint'); errEl.hidden = false; return;
         }
+        const modalContext = captureModalContext();
         submit.disabled = true; errEl.hidden = true;
         try {
           await api.post('/rewards/bonus', {
@@ -1170,12 +1212,12 @@ function openBonusModal() {
             delta,
             reason: panel.querySelector('#rw-bonus-reason').value.trim() || undefined,
           });
-          await closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           toast(t('rewards.toastBonus'));
           await reloadAfterSave(() => refreshActiveTab());
           refocusAfterRender();
         } catch (err) {
-          errEl.textContent = err?.message || t('common.error'); errEl.hidden = false; submit.disabled = false;
+          errEl.textContent = rewardsErrorSentence(err); errEl.hidden = false; submit.disabled = false;
         }
       });
     },
@@ -1231,7 +1273,15 @@ function openRewardModal(item) {
         const ok = await confirmOverModal(t('rewards.confirmDeleteReward', { reward: item.name }),
           { confirmLabel: t('common.delete'), danger: true, detail: t('rewards.confirmDeleteRewardDetail') });
         if (!ok) return;
-        await api.delete(`/rewards/catalog/${item.id}`);
+        // Bis #1909 ohne `catch`: ein Scheitern wurde zur unbehandelten
+        // Rejection und zeigte den Text des Servers. Schon geloescht ist erledigt.
+        try {
+          await deleteUnlessGone(`/rewards/catalog/${item.id}`, 'rewards_reward_not_found');
+        } catch (err) {
+          const errEl = panel.querySelector('#rw-reward-error');
+          errEl.textContent = rewardsErrorSentence(err); errEl.hidden = false;
+          return;
+        }
         toast(t('rewards.toastRewardDeleted'), 'default');
         await refreshActiveTab();
         refocusAfterRender();
@@ -1260,16 +1310,17 @@ function openRewardModal(item) {
           description: panel.querySelector('#rw-reward-desc').value.trim() || null,
         };
         if (isEdit) body.is_active = panel.querySelector('#rw-reward-active').checked;
+        const modalContext = captureModalContext();
         submit.disabled = true; errEl.hidden = true;
         try {
           if (isEdit) await api.patch(`/rewards/catalog/${item.id}`, body);
           else await api.post('/rewards/catalog', body);
-          await closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           toast(t('rewards.toastSaved'));
           await reloadAfterSave(() => refreshActiveTab());
           refocusAfterRender();
         } catch (err) {
-          errEl.textContent = err?.message || t('common.error'); errEl.hidden = false; submit.disabled = false;
+          errEl.textContent = rewardsErrorSentence(err); errEl.hidden = false; submit.disabled = false;
         }
       });
     },
@@ -1283,7 +1334,7 @@ async function openParticipantsModal() {
     const res = await api.get('/rewards/participants');
     members = res.data || [];
   } catch (err) {
-    await confirmModal(err?.message || t('common.error'), { confirmLabel: t('rewards.gotIt') });
+    await confirmModal(rewardsErrorSentence(err, 'rewards.loadError'), { confirmLabel: t('rewards.gotIt') });
     return;
   }
   openModal({
@@ -1318,7 +1369,7 @@ async function openParticipantsModal() {
           } catch (err) {
             cb.checked = !cb.checked;
             const errEl = panel.querySelector('#rw-participants-error');
-            errEl.textContent = err?.message || t('common.error'); errEl.hidden = false;
+            errEl.textContent = rewardsErrorSentence(err); errEl.hidden = false;
           } finally {
             cb.disabled = false;
           }
@@ -1663,18 +1714,18 @@ function openMoneyRequestModal(kind, memberId) {
         if (withdrawal && decimalToMinor(amount, account) > account.balance_minor) {
           errEl.textContent = t('rewards.money.insufficient'); errEl.hidden = false; return;
         }
+        const modalContext = captureModalContext();
         submit.disabled = true;
         try {
           await api.post('/rewards/redemptions', {
             kind, amount, note: panel.querySelector('#rw-money-note').value.trim() || undefined,
           });
-          await closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           toast(t('rewards.toastRequested'));
           await reloadAfterSave(() => refreshActiveTab());
           refocusAfterRender();
         } catch (err) {
-          errEl.textContent = err?.data?.reason === 'insufficient_funds'
-            ? t('rewards.money.insufficient') : (err?.message || t('common.error'));
+          errEl.textContent = rewardsErrorSentence(err);
           errEl.hidden = false;
           submit.disabled = false;
         }
@@ -1725,6 +1776,7 @@ function openMoneyBookModal(memberId) {
         errEl.hidden = true;
         const amount = readMoneyAmount(input, errEl, account);
         if (amount == null) return;
+        const modalContext = captureModalContext();
         submit.disabled = true;
         try {
           await api.post('/rewards/money/entries', {
@@ -1732,13 +1784,12 @@ function openMoneyBookModal(memberId) {
             direction: panel.querySelector('#rw-money-direction').value,
             reason: panel.querySelector('#rw-money-reason').value.trim() || undefined,
           });
-          await closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           toast(t('rewards.toastSaved'));
           await reloadAfterSave(() => refreshActiveTab());
           refocusAfterRender();
         } catch (err) {
-          errEl.textContent = err?.data?.reason === 'insufficient_funds'
-            ? t('rewards.money.insufficient') : (err?.message || t('common.error'));
+          errEl.textContent = rewardsErrorSentence(err);
           errEl.hidden = false;
           submit.disabled = false;
         }
@@ -1835,6 +1886,7 @@ function openMoneyPlanModal(memberId) {
         const amount = readMoneyAmount(panel.querySelector('#rw-money-amount'), errEl, planCtx);
         if (amount == null) return;
         const weekly = freqEl.value === 'weekly';
+        const modalContext = captureModalContext();
         submit.disabled = true;
         try {
           await api.put(`/rewards/money/plans/${account.id}`, {
@@ -1843,12 +1895,12 @@ function openMoneyPlanModal(memberId) {
             anchor_day: Number(panel.querySelector(weekly ? '#rw-plan-weekday' : '#rw-plan-monthday').value),
             paused: panel.querySelector('#rw-plan-paused').checked,
           });
-          await closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           toast(t('rewards.toastSaved'));
           await reloadAfterSave(() => refreshActiveTab());
           refocusAfterRender();
         } catch (err) {
-          errEl.textContent = err?.message || t('common.error'); errEl.hidden = false; submit.disabled = false;
+          errEl.textContent = rewardsErrorSentence(err); errEl.hidden = false; submit.disabled = false;
         }
       });
     },
@@ -1886,15 +1938,16 @@ function openMoneyAccountModal() {
       panel.querySelector('#rw-account-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         errEl.hidden = true;
+        const modalContext = captureModalContext();
         submit.disabled = true;
         try {
           await api.post('/rewards/money/accounts', { user_id: Number(panel.querySelector('#rw-account-member').value) });
-          await closeModal({ force: true });
+          closeModal({ force: true, context: modalContext });
           toast(t('rewards.toastSaved'));
           await reloadAfterSave(() => refreshActiveTab());
           refocusAfterRender();
         } catch (err) {
-          errEl.textContent = err?.message || t('common.error'); errEl.hidden = false; submit.disabled = false;
+          errEl.textContent = rewardsErrorSentence(err); errEl.hidden = false; submit.disabled = false;
         }
       });
     },
@@ -1911,12 +1964,10 @@ async function closeMoneyAccount(account) {
     { confirmLabel: t('rewards.money.closeAccount'), detail: t('rewards.money.closeAccountDetail') });
   if (!ok) return;
   try {
-    await api.delete(`/rewards/money/accounts/${account.id}`);
+    await deleteUnlessGone(`/rewards/money/accounts/${account.id}`, 'rewards_money_account_not_found');
     toast(t('rewards.toastSaved'), 'default');
   } catch (err) {
-    await confirmModal(err?.data?.reason === 'money_account_not_empty'
-      ? t('rewards.money.accountNotEmpty') : (err?.message || t('common.error')),
-    { confirmLabel: t('rewards.gotIt') });
+    await confirmModal(rewardsErrorSentence(err), { confirmLabel: t('rewards.gotIt') });
   }
   await refreshActiveTab();
   refocusAfterRender();
@@ -1930,10 +1981,10 @@ async function closeMoneyAccount(account) {
  * Faellen neu geladen: sie zeigt, was jetzt gilt. */
 async function removeMoneyPlan(account) {
   try {
-    await api.delete(`/rewards/money/plans/${account.id}`);
+    await deleteUnlessGone(`/rewards/money/plans/${account.id}`, 'rewards_money_plan_not_found');
     toast(t('rewards.toastSaved'), 'default');
   } catch (err) {
-    await confirmModal(err?.message || t('common.error'), { confirmLabel: t('rewards.gotIt') });
+    await confirmModal(rewardsErrorSentence(err), { confirmLabel: t('rewards.gotIt') });
   }
   await refreshActiveTab();
   refocusAfterRender();

@@ -629,7 +629,10 @@
         "kanbanColExpand": "展开该列",
         "kanbanArchiveDone": "归档全部已完成",
         "kanbanArchiveDoneConfirm": "要归档此列中所有已完成的任务吗？",
-        "kanbanArchiveDoneAction": "归档"
+        "kanbanArchiveDoneAction": "归档",
+        "errorTaskGone": "此任务已不存在。",
+        "errorParentGone": "此子任务所属的任务已不存在。",
+        "errorCommentGone": "此评论已不存在。"
     },
     "shopping": {
         "itemsRemovedToast_one": "已删除 {{count}} 件商品。",
@@ -927,6 +930,8 @@
         "loadError": "日程加载失败。",
         "saveError": "保存失败",
         "deleteError": "删除失败",
+        "occurrenceGoneError": "此次日程已不再属于该系列。请重新加载日历并再次选择。",
+        "occurrenceMalformedError": "系列日程未正确指定。请重新加载日历并再次选择。",
         "titleRequired": "标题为必填项",
         "monthJanuary": "一月",
         "monthFebruary": "二月",
@@ -1238,7 +1243,9 @@
         "checkConflict": "便签已被修改，将重新加载。",
         "pinnedState": "已置顶",
         "checklistDone": "已完成",
-        "checklistOpen": "待处理"
+        "checklistOpen": "待处理",
+        "errorNoteGone": "这条便签已不存在。",
+        "errorSelectedCategoryGone": "所选的一个类别已不存在。"
     },
     "markdown": {
         "bold": "加粗 (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "选择 {{name}}",
         "bulkDeleteConfirm": "删除 {{count}} 个联系人?",
         "bulkDeleteConfirm_one": "删除 {{count}} 个联系人?",
-        "bulkDeletedToast": "已删除 {{count}} 个联系人"
+        "bulkDeletedToast": "已删除 {{count}} 个联系人",
+        "errorContactGone": "这个联系人已不存在。",
+        "errorSelectedCategoryGone": "所选类别已不存在。"
     },
     "budget": {
         "title": "预算",
@@ -3476,7 +3485,8 @@
         "importSubmit": "添加 {{count}}",
         "importSuccess": "已添加 {{count}} 个生日。",
         "importNothingSelected": "请至少选择一个联系人。",
-        "importSelected": "已选择 {{count}} 个联系人"
+        "importSelected": "已选择 {{count}} 个联系人",
+        "errorBirthdayGone": "这个生日已不存在。"
     },
     "reminders": {
         "sectionTitle": "提醒",
@@ -3866,6 +3876,10 @@
         "deleted": "已删除快捷链接",
         "loadError": "无法加载快捷链接。",
         "orderError": "无法保存顺序。",
+        "errorLinkGone": "此快捷链接已不存在。",
+        "errorLimitReached": "概览最多只能放 {{limit}} 个快捷链接。",
+        "saveError": "无法保存快捷链接。",
+        "deleteError": "无法删除快捷链接。",
         "iconSymbol": "选择图标",
         "iconChoose": "选择图标或图片"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "只有可以查看家政金额的人才能标记付款。",
         "notHereToday": "今天还没到",
         "tabVisits": "上门",
-        "tabChores": "家务"
+        "tabChores": "家务",
+        "errorWorkerGone": "该家政人员已不存在。",
+        "errorVisitGone": "该上门记录已不存在。",
+        "errorTaskGone": "该任务已不存在。",
+        "errorAlreadyCheckedOut": "该家政人员已签退。",
+        "errorAlreadyCheckedIn": "该家政人员已签到。"
     },
     "userMultiSelect": {
         "moreUsers": "更多",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} 个日历条目没有 UID；已使用基于标签和日期的备用标识。",
         "importDiagnosticDuplicateInstance": "已将 {{count}} 个重复的收运实例（相同标识）合并为一个。",
         "importDiagnosticDuplicateInstance_one": "已将 {{count}} 个重复的收运实例（相同标识）合并为一个。",
+        "importDiagnosticOther": "有一个日历条目不符合预期格式。",
         "importUnresolvedBlockingError": "请先解决所有阻断性提示，或明确跳过受影响的事件。",
         "importIgnoreLabel": "忽略",
         "importCreateNewType": "创建新的垃圾类型",
@@ -5912,8 +5932,20 @@
             "closeAccount": "关闭账户",
             "confirmCloseAccount": "关闭 {{name}} 的账户？",
             "closeAccountDetail": "记录会保留。重新开设的账户会以家庭当时使用的货币开始。",
-            "accountNotEmpty": "只有在没有余额、计划和待处理请求时才能关闭账户。"
-        }
+            "accountNotEmpty": "只有在没有余额、计划和待处理请求时才能关闭账户。",
+            "errorAccountDeactivated": "该账户已停用，只能结清余额。",
+            "errorBalanceTooLarge": "余额将过大。请求保持待处理。",
+            "errorAccountExists": "此人已有零花钱账户。",
+            "errorNoAccount": "此人没有零花钱账户。",
+            "errorCurrencyChanged": "该账户的币种已更改。"
+        },
+        "errorRewardGone": "该奖品已不可用。",
+        "errorRequestGone": "该请求已不存在。",
+        "errorRequestDecided": "该请求已有决定。",
+        "errorNotEnoughPoints": "积分不足。",
+        "errorNotParticipating": "此人不积累积分。",
+        "errorMoneyAccountGone": "该账户已不存在。",
+        "errorMoneyPlanGone": "该计划已不存在。"
     },
     "datepicker": {
         "openCalendar": "打开日历",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "物品详情",
         "pickOne": "选择一个物品",
         "pickOneHint": "详细信息、期限和历史记录会显示在这里。",
-        "moreDetailsHint": "购买、保修、照片、文档"
+        "moreDetailsHint": "购买、保修、照片、文档",
+        "errorItemGone": "这个物品已不存在。",
+        "errorTrackedDateGone": "这个到期日已不存在。",
+        "errorSelectedLocationGone": "所选位置已不存在。",
+        "errorBookingGone": "这笔账目已不存在。",
+        "errorBookingAlreadyLinked": "这笔账目已关联。",
+        "errorLocationExists": "此处已有同名位置。请换一个名称。",
+        "errorLocationGone": "这个位置已不存在。",
+        "errorCategoryGone": "这个类别已不存在。"
     },
     "documentAttach": {
         "label": "附件",
@@ -6414,7 +6454,13 @@
             "seminar": "研",
             "lab": "实"
         },
-        "typesWithTime": "有时间"
+        "typesWithTime": "有时间",
+        "errorShiftTypeGone": "此班次类型已不存在。",
+        "errorSelectedShiftTypeGone": "所选的班次类型已不存在。",
+        "errorCustomFieldGone": "此字段已不存在。",
+        "errorSelectedCustomFieldGone": "所选字段中有一个已不存在。",
+        "errorPatternGone": "此排班周期已不存在。",
+        "errorEntryGone": "此条目已不存在。"
     },
     "pairDisplay": {
         "title": "配对平板",

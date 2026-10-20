@@ -796,7 +796,7 @@ function parseReorderIds(req, res, list) {
     `SELECT id FROM tasks WHERE parent_task_id IS NULL AND id IN (${list.map(() => '?').join(',')})`
   ).all(...list).map((r) => r.id));
   if (list.some((id) => !visible.has(id) || !topLevel.has(id))) {
-    res.status(404).json({ error: 'Task not found.', code: 404 });
+    res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     return null;
   }
   return list;
@@ -1079,7 +1079,7 @@ router.get('/:id', (req, res) => {
         AND ${visibilityWhere('t', 'task_assignments', 'task_id')}
     `).get(req.params.id, me, me);
 
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
 
     addAssignedUsers(task);
     task.subtasks = loadSubtasks(task.id, me);
@@ -1194,8 +1194,10 @@ router.post('/', (req, res) => {
         .get(parent_task_id);
       // Unsichtbar heisst hier dasselbe wie nicht vorhanden: sonst verriete 201
       // gegen 404 die Kennung, und der Punkt stuende in einer fremden Checkliste.
+      // Der Grund (#1909): die Aufgabe, an die der Teilschritt sollte, wurde
+      // inzwischen geloescht oder privat gestellt - die Leseansicht sagt das.
       if (!parent || !mayAccessTask(parent, req.authUserId || req.session.userId))
-        return res.status(404).json({ error: 'Parent task not found.', code: 404 });
+        return res.status(404).json({ error: 'Parent task not found.', code: 404, reason: 'tasks_parent_not_found' });
       if (parent.parent_task_id)
         return res.status(400).json({ error: 'Maximal 2 Verschachtelungsebenen erlaubt.', code: 400 });
       // Einen Punkt an eine gesperrte Checkliste zu haengen aendert, was die
@@ -1279,10 +1281,10 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const task = db.get().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     // 404 statt 403: ob es die Aufgabe gibt, ist selbst schon eine Auskunft.
     if (!mayAccessTask(task, req.authUserId || req.session.userId)) {
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     }
 
     const errors = validateTaskInput(req.body, false, task.recurrence_rule);
@@ -1860,7 +1862,7 @@ router.patch('/:id/status', (req, res) => {
     // externen Kennungen, um den Statuswechsel dem CalDAV-Objekt zuzuordnen.
     const prev = db.get().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!prev)
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     // 404 statt 403: ob es die Aufgabe gibt, ist selbst schon eine Auskunft.
     // Dieser Weg hat die Sichtbarkeit fuer Mitglieder nie gefragt - nur der
     // Display-Zweig darunter tat es. Eine geratene id genuegte, um eine fremde
@@ -1869,7 +1871,7 @@ router.patch('/:id/status', (req, res) => {
     // VOR dem Display-Block und vor der Ablage-Abkuerzung, weil beide selbst
     // antworten; dieselbe Regel wie PUT, /archive, /check und DELETE.
     if (!mayAccessTask(prev, req.authUserId || req.session.userId)) {
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     }
 
     // EIN WANDTABLETT HAKT AB, UND ZWAR NUR DAS (#1209).
@@ -1912,7 +1914,7 @@ router.patch('/:id/status', (req, res) => {
     let displayDoneBy = null;
     if (isDisplayRequest(req)) {
       if (prev.visibility !== 'all') {
-        return res.status(404).json({ error: 'Task not found.', code: 404 });
+        return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
       }
       if (status !== 'done') {
         return res.status(403).json({
@@ -2036,12 +2038,12 @@ router.patch('/:id/archive', (req, res) => {
     // Ganze Zeile statt id+status: die Sichtbarkeit und die Sperre stehen in
     // Feldern, die die schmale Auswahl nicht mitbrachte.
     const task = db.get().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     // 404 statt 403: ob es die Aufgabe gibt, ist selbst schon eine Auskunft.
     // Dieser Weg hat das nie geprueft - eine geratene id genuegte, um eine
     // fremde private Aufgabe abzulegen (Muster aus #769).
     if (!mayAccessTask(task, req.authUserId || req.session.userId)) {
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     }
     // Ablegen nimmt die Aufgabe allen aus der Ansicht (#830).
     if (!mayEditTaskDefinition(task, req)) return res.status(403).json(LOCKED_ERROR);
@@ -2091,10 +2093,10 @@ router.patch('/:id/check', (req, res) => {
   try {
     const id   = parseInt(req.params.id, 10);
     const task = db.get().prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     // 404 statt 403: ob es die Aufgabe gibt, ist selbst schon eine Auskunft.
     if (!mayAccessTask(task, req.authUserId || req.session.userId)) {
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     }
 
     const { line, checked, expect } = req.body;
@@ -2149,10 +2151,10 @@ router.delete('/:id', (req, res) => {
     // Aufgabe kann lokal welche bekommen haben, und die stammen dann selbst aus
     // keiner Liste, aber der Fall kostet nichts.
     const victim = db.get().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-    if (!victim) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!victim) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     // 404 statt 403: ob es die Aufgabe gibt, ist selbst schon eine Auskunft.
     if (!mayAccessTask(victim, req.authUserId || req.session.userId)) {
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     }
     // Loeschen ist der endgueltigste Eingriff in die Definition (#830).
     if (!mayEditTaskDefinition(victim, req)) return res.status(403).json(LOCKED_ERROR);
@@ -2164,7 +2166,7 @@ router.delete('/:id', (req, res) => {
 
     const result = db.get().prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
     if (result.changes === 0)
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     res.json({ ok: true });
 
     if (queued) pushToCalDAV('Löschung');
@@ -2227,7 +2229,7 @@ router.get('/:id/completions', (req, res) => {
     const me = req.authUserId || req.session.userId;
     const task = db.get().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!task || !mayAccessTask(task, me)) {
-      return res.status(404).json({ error: 'Task not found.', code: 404 });
+      return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     }
     res.json({ data: seriesHistory(db.get(), { me, taskId: Number(req.params.id), limit: req.query.limit }) });
   } catch (err) {
@@ -2241,7 +2243,7 @@ router.get('/:id/documents', (req, res) => {
   try {
     const me = req.authUserId || req.session.userId;
     const task = findVisibleTask(req.params.id, me);
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     // Die Route liefert nur Dokumente: ohne Leserecht dort dieselbe Antwort,
     // die der Pfad-Guard vor /documents gaebe (#1358). Erst nach der Aufgabe
     // gefragt, damit eine unsichtbare Aufgabe weiter 404 bleibt.
@@ -2264,7 +2266,7 @@ router.put('/:id/documents', (req, res) => {
   try {
     const me = req.authUserId || req.session.userId;
     const task = findVisibleTask(req.params.id, me);
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     // Angehaengte Dokumente sind Teil der Anweisung - die Anleitung, das
     // Formular, der Zettel, auf den die Aufgabe verweist (#830).
     if (!mayEditTaskDefinition(task, req)) return res.status(403).json(LOCKED_ERROR);
@@ -2376,20 +2378,28 @@ function notifyMentions(task, comment, authorId, previousComment = '') {
 }
 
 /** Ein Kommentar samt Aufgabe, wenn die Person ihn ändern bzw. entfernen darf. */
+// Die Absagen beim Aendern und Loeschen eines Kommentars. Beide 404 tragen
+// denselben Text wie bisher, der Grund unterscheidet (#1909): die Aufgabe ist
+// weg (geloescht oder privat gestellt), oder nur der Kommentar (sein Autor oder
+// ein Admin hat ihn inzwischen geloescht).
+const COMMENT_TASK_GONE = { error: 'Comment not found.', code: 404, reason: 'tasks_task_not_found' };
+const COMMENT_GONE = { error: 'Comment not found.', code: 404, reason: 'tasks_comment_not_found' };
+const COMMENT_NOT_YOURS = { error: 'Not authorized.', code: 403 };
+
 function commentForWrite(req, { allowAdmin = false } = {}) {
   const me = req.authUserId || req.session.userId;
   const found = findVisibleTask(req.params.id, me);
-  if (!found) return { error: 404 };
+  if (!found) return { refusal: COMMENT_TASK_GONE };
   // Mit Titel, weil eine Erwaehnung beim Nachbessern dieselbe Meldung schickt
   // wie beim Schreiben - und die nennt die Aufgabe.
   const task = db.get().prepare('SELECT id, title FROM tasks WHERE id = ?').get(found.id);
 
   const row = db.get().prepare('SELECT * FROM task_comments WHERE id = ? AND task_id = ?')
     .get(req.params.commentId, task.id);
-  if (!row) return { error: 404 };
+  if (!row) return { refusal: COMMENT_GONE };
 
   const mayWrite = row.user_id === me || (allowAdmin && isAdminRequest(req));
-  if (!mayWrite) return { error: 403 };
+  if (!mayWrite) return { refusal: COMMENT_NOT_YOURS };
   return { task, row, me };
 }
 
@@ -2398,7 +2408,7 @@ router.get('/:id/comments', (req, res) => {
   try {
     const me = req.authUserId || req.session.userId;
     const task = findVisibleTask(req.params.id, me);
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
     res.json({ data: loadTaskComments(task.id) });
   } catch (err) {
     log.error('GET /:id/comments error:', err);
@@ -2414,7 +2424,7 @@ router.post('/:id/comments', (req, res) => {
       SELECT t.id, t.title FROM tasks t
       WHERE t.id = ? AND ${visibilityWhere('t', 'task_assignments', 'task_id')}
     `).get(req.params.id, me, me);
-    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404 });
+    if (!task) return res.status(404).json({ error: 'Task not found.', code: 404, reason: 'tasks_task_not_found' });
 
     // `v.str` trimmt und weist einen Kommentar aus lauter Leerzeichen ab.
     const comment = v.str(req.body.comment, 'comment', { max: v.MAX_TEXT, required: true });
@@ -2442,11 +2452,7 @@ router.post('/:id/comments', (req, res) => {
 router.patch('/:id/comments/:commentId', (req, res) => {
   try {
     const found = commentForWrite(req);
-    if (found.error) {
-      return res.status(found.error).json({
-        error: found.error === 403 ? 'Not authorized.' : 'Comment not found.', code: found.error,
-      });
-    }
+    if (found.refusal) return res.status(found.refusal.code).json(found.refusal);
 
     const comment = v.str(req.body.comment, 'comment', { max: v.MAX_TEXT, required: true });
     if (comment.error) return res.status(400).json({ error: comment.error, code: 400 });
@@ -2477,11 +2483,7 @@ router.patch('/:id/comments/:commentId', (req, res) => {
 router.delete('/:id/comments/:commentId', (req, res) => {
   try {
     const found = commentForWrite(req, { allowAdmin: true });
-    if (found.error) {
-      return res.status(found.error).json({
-        error: found.error === 403 ? 'Not authorized.' : 'Comment not found.', code: found.error,
-      });
-    }
+    if (found.refusal) return res.status(found.refusal.code).json(found.refusal);
     db.get().prepare('DELETE FROM task_comments WHERE id = ?').run(found.row.id);
     res.json({ data: { id: found.row.id } });
   } catch (err) {

@@ -729,7 +729,10 @@
         "kanbanColExpand": "Развернуть столбец",
         "kanbanArchiveDone": "Архивировать все выполненные",
         "kanbanArchiveDoneConfirm": "Архивировать все выполненные задачи в этом столбце?",
-        "kanbanArchiveDoneAction": "Архивировать"
+        "kanbanArchiveDoneAction": "Архивировать",
+        "errorTaskGone": "Этой задачи больше нет.",
+        "errorParentGone": "Родительской задачи этой подзадачи больше нет.",
+        "errorCommentGone": "Этого комментария больше нет."
     },
     "shopping": {
         "importMealsPreviewMeals_few": "{{count}} приёма пищи",
@@ -1063,6 +1066,8 @@
         "loadError": "Не удалось загрузить события.",
         "saveError": "Ошибка сохранения",
         "deleteError": "Ошибка удаления",
+        "occurrenceGoneError": "Это повторение больше не входит в серию. Перезагрузите календарь и выберите его снова.",
+        "occurrenceMalformedError": "Повторение серии указано неверно. Перезагрузите календарь и выберите его снова.",
         "titleRequired": "Заголовок обязателен",
         "monthJanuary": "Январь",
         "monthFebruary": "Февраль",
@@ -1384,7 +1389,9 @@
         "checkConflict": "Заметка была изменена. Она будет загружена заново.",
         "pinnedState": "Закреплена",
         "checklistDone": "Выполнено",
-        "checklistOpen": "Открыто"
+        "checklistOpen": "Открыто",
+        "errorNoteGone": "Этой заметки больше нет.",
+        "errorSelectedCategoryGone": "Одной из выбранных категорий больше нет."
     },
     "markdown": {
         "bold": "Жирный (Ctrl+B)",
@@ -1508,7 +1515,9 @@
         "bulkDeleteConfirm_one": "Удалить {{count}} контакт?",
         "bulkDeleteConfirm_few": "Удалить {{count}} контакта?",
         "bulkDeleteConfirm_many": "Удалить {{count}} контактов?",
-        "bulkDeletedToast": "Удалено контактов: {{count}}"
+        "bulkDeletedToast": "Удалено контактов: {{count}}",
+        "errorContactGone": "Этого контакта больше нет.",
+        "errorSelectedCategoryGone": "Выбранной категории больше нет."
     },
     "budget": {
         "title": "Бюджет",
@@ -3686,7 +3695,8 @@
         "importSubmit": "Добавить {{count}}",
         "importSuccess": "Добавлено дней рождения: {{count}}.",
         "importNothingSelected": "Выберите хотя бы один контакт.",
-        "importSelected": "Выбрано контактов: {{count}}"
+        "importSelected": "Выбрано контактов: {{count}}",
+        "errorBirthdayGone": "Этого дня рождения больше нет."
     },
     "reminders": {
         "sectionTitle": "Напоминание",
@@ -4094,6 +4104,10 @@
         "deleted": "Быстрая ссылка удалена",
         "loadError": "Не удалось загрузить быстрые ссылки.",
         "orderError": "Не удалось сохранить порядок.",
+        "errorLinkGone": "Этой быстрой ссылки больше нет.",
+        "errorLimitReached": "На обзоре помещается не больше {{limit}} быстрых ссылок.",
+        "saveError": "Не удалось сохранить быструю ссылку.",
+        "deleteError": "Не удалось удалить быструю ссылку.",
         "iconSymbol": "Выбрать значок",
         "iconChoose": "Выбрать значок или изображение"
     },
@@ -4276,7 +4290,12 @@
         "errorAmountsHidden": "Отметить оплату может только тот, кому видны суммы помощницы по дому.",
         "notHereToday": "Сегодня ещё не пришла",
         "tabVisits": "Визиты",
-        "tabChores": "Дела по дому"
+        "tabChores": "Дела по дому",
+        "errorWorkerGone": "Этого помощника больше нет.",
+        "errorVisitGone": "Этого визита больше нет.",
+        "errorTaskGone": "Этой задачи больше нет.",
+        "errorAlreadyCheckedOut": "Уход этого помощника уже отмечен.",
+        "errorAlreadyCheckedIn": "Приход этого помощника уже отмечен."
     },
     "userMultiSelect": {
         "moreUsers": "ещё",
@@ -5939,6 +5958,7 @@
         "importDiagnosticMissingUidFallback_many": "У {{count}} записей календаря не было UID; использован резервный идентификатор на основе метки и даты.",
         "importDiagnosticDuplicateInstance": "Объединено дублирующихся вывозов (с одинаковым идентификатором): {{count}}.",
         "importDiagnosticDuplicateInstance_one": "Объединён дублирующийся вывоз (с одинаковым идентификатором): {{count}}.",
+        "importDiagnosticOther": "Одна запись календаря не соответствует ожидаемому формату.",
         "importDiagnosticDuplicateInstance_few": "Объединено дублирующихся вывозов (с одинаковым идентификатором): {{count}}.",
         "importDiagnosticDuplicateInstance_many": "Объединено дублирующихся вывозов (с одинаковым идентификатором): {{count}}.",
         "importUnresolvedBlockingError": "Сначала устраните все блокирующие предупреждения или явно пропустите затронутые события.",
@@ -6182,8 +6202,20 @@
             "closeAccount": "Закрыть счёт",
             "confirmCloseAccount": "Закрыть счёт для {{name}}?",
             "closeAccountDetail": "История сохраняется. Заново открытый счёт начинается в валюте, которую семья использует на тот момент.",
-            "accountNotEmpty": "Счёт можно закрыть только тогда, когда на нём нет остатка, плана и открытых запросов."
-        }
+            "accountNotEmpty": "Счёт можно закрыть только тогда, когда на нём нет остатка, плана и открытых запросов.",
+            "errorAccountDeactivated": "Этот счёт деактивирован и может быть только выплачен.",
+            "errorBalanceTooLarge": "Остаток стал бы слишком большим. Запрос остаётся открытым.",
+            "errorAccountExists": "У этого человека уже есть счёт карманных денег.",
+            "errorNoAccount": "У этого человека нет счёта карманных денег.",
+            "errorCurrencyChanged": "Валюта этого счёта изменилась."
+        },
+        "errorRewardGone": "Эта награда больше недоступна.",
+        "errorRequestGone": "Этого запроса больше нет.",
+        "errorRequestDecided": "По этому запросу уже принято решение.",
+        "errorNotEnoughPoints": "Баллов на это не хватает.",
+        "errorNotParticipating": "Этот человек не копит баллы.",
+        "errorMoneyAccountGone": "Этого счёта больше нет.",
+        "errorMoneyPlanGone": "Этого плана больше нет."
     },
     "datepicker": {
         "openCalendar": "Открыть календарь",
@@ -6454,7 +6486,15 @@
         "detailPaneLabel": "Сведения о предмете",
         "pickOne": "Выберите предмет",
         "pickOneHint": "Здесь появятся данные, сроки и история.",
-        "moreDetailsHint": "Покупка, гарантия, фото, документы"
+        "moreDetailsHint": "Покупка, гарантия, фото, документы",
+        "errorItemGone": "Этого предмета больше нет.",
+        "errorTrackedDateGone": "Этого срока больше нет.",
+        "errorSelectedLocationGone": "Выбранного места больше нет.",
+        "errorBookingGone": "Этой операции больше нет.",
+        "errorBookingAlreadyLinked": "Эта операция уже связана.",
+        "errorLocationExists": "Такое место здесь уже есть. Выберите другое название.",
+        "errorLocationGone": "Этого места больше нет.",
+        "errorCategoryGone": "Этой категории больше нет."
     },
     "documentAttach": {
         "label": "Вложения",
@@ -6728,7 +6768,13 @@
             "seminar": "С",
             "lab": "ЛР"
         },
-        "typesWithTime": "Со временем"
+        "typesWithTime": "Со временем",
+        "errorShiftTypeGone": "Этого типа смены больше нет.",
+        "errorSelectedShiftTypeGone": "Выбранного типа смены больше нет.",
+        "errorCustomFieldGone": "Этого поля больше нет.",
+        "errorSelectedCustomFieldGone": "Одного из выбранных полей больше нет.",
+        "errorPatternGone": "Этого цикла смен больше нет.",
+        "errorEntryGone": "Этой записи больше нет."
     },
     "pairDisplay": {
         "title": "Подключение планшета",

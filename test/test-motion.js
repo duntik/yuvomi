@@ -1352,7 +1352,7 @@ test('Listenbewegung R17: Notizen, Dokumente, Kontakte, Budget, Inventar, Abos, 
     ['contacts', /collapseRow\(row, \{ group: row\?\.closest\('\.contact-group'\), selector: CONTACT_ROW \}\)/, 'geloeschter Kontakt klappt aus, mit dem letzten die Gruppe'],
     ['budget', /redrawList\(body, renderBody, \{ selector: BUDGET_ENTRY, keyAttr: 'data-id' \}\)/, 'Buchungsliste'],
     ['budget', /summaryWith\(state\.summary, \[entry\], -1\);[\s\S]{0,260}collapseEntryThenRedraw\(id\);/, 'geloeschte Buchung klappt aus'],
-    ['budget', /closeModal\(\{ force: true \}\);\s*redrawEntries\(\);\s*window\.yuvomi\?\.showToast\(t\('budget\.addedToast'\)/, 'neue Buchung zieht auf'],
+    ['budget', /closeModal\(\{ force: true, context: modalContext \}\);\s*redrawEntries\(\);\s*window\.yuvomi\?\.showToast\(t\('budget\.addedToast'\)/, 'neue Buchung zieht auf'],
     ['inventory', /redrawList\(host, renderListBody, \{ selector: INVENTORY_ITEM_ROW, keyAttr: 'data-id' \}\)/, 'Gegenstaende'],
     ['inventory', /await collapseRow\(_container\?\.querySelector\(`#inventory-list \.list-row\[data-id="\$\{item\.id\}"\]`\)/, 'geloeschter Gegenstand klappt aus'],
     ['subscriptions', /redrawList\(content, drawContent, \{ selector: SUBSCRIPTION_ROW, keyAttr: 'data-swipe-id' \}\)/, 'Abos'],
@@ -1715,7 +1715,7 @@ test('R18: der Aufgaben-Dialog schliesst mit dem Speichern - die aufziehende Zei
   assert.doesNotMatch(save, /setTimeout\(\(\) => closeModal/, 'kein verzoegertes Schliessen');
   // Das Neuzeichnen steht in einem eigenen try: sein Fehler gehoert auf die
   // Seite, nicht an den geschlossenen Dialog (Review zu #1794, Test weiter unten).
-  assert.match(save, /closeModal\(\{ force: true \}\);\s*try \{\s*await refreshTags\(\);\s*await onChanged\(\);/, 'schliessen, dann neu zeichnen');
+  assert.match(save, /closeModal\(\{ force: true, context: dialog \}\);\s*try \{\s*await refreshTags\(\);\s*await onChanged\(\);/, 'schliessen, dann neu zeichnen');
   // Die Reihenfolge der Enthuellung bleibt: erst der Dialog weg, dann die
   // History wieder bei der Seite, dann die Zeile (sonst traegt `back()` die
   // alte Adresse wieder herein).
@@ -2320,7 +2320,7 @@ test('tasks: a failing reload after the dialog closed is reported on the page, n
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../public/pages/tasks.js', import.meta.url), 'utf8');
   const submit = src.slice(src.indexOf('async function handleFormSubmit('));
-  const closed = submit.indexOf('closeModal({ force: true });');
+  const closed = submit.indexOf('closeModal({ force: true, context: dialog });');
   assert.ok(closed > 0, 'der Dialog schliesst vor dem Neuladen');
   const after = submit.slice(closed, submit.indexOf('\n  } catch (err) {\n    resetSubmit(err.message);', closed));
   const reload = after.match(/try \{\s*await refreshTags\(\);\s*await onChanged\(\);[\s\S]*?\n    \} catch \((\w+)\) \{([\s\S]*?)\n    \}/);

@@ -629,7 +629,10 @@
         "kanbanColExpand": "Επέκταση στήλης",
         "kanbanArchiveDone": "Αρχειοθέτηση όλων των ολοκληρωμένων",
         "kanbanArchiveDoneConfirm": "Αρχειοθέτηση όλων των ολοκληρωμένων εργασιών αυτής της στήλης;",
-        "kanbanArchiveDoneAction": "Αρχειοθέτηση"
+        "kanbanArchiveDoneAction": "Αρχειοθέτηση",
+        "errorTaskGone": "Αυτή η εργασία δεν υπάρχει πια.",
+        "errorParentGone": "Η εργασία στην οποία ανήκει αυτή η υποεργασία δεν υπάρχει πια.",
+        "errorCommentGone": "Αυτό το σχόλιο δεν υπάρχει πια."
     },
     "shopping": {
         "itemsRemovedToast_one": "{{count}} είδος διαγράφηκε.",
@@ -927,6 +930,8 @@
         "loadError": "Δεν ήταν δυνατή η φόρτωση εκδηλώσεων.",
         "saveError": "Σφάλμα αποθήκευσης",
         "deleteError": "Σφάλμα διαγραφής",
+        "occurrenceGoneError": "Αυτή η εμφάνιση δεν ανήκει πια στη σειρά. Φορτώστε ξανά το ημερολόγιο και επιλέξτε την ξανά.",
+        "occurrenceMalformedError": "Η εμφάνιση της σειράς δεν δόθηκε σωστά. Φορτώστε ξανά το ημερολόγιο και επιλέξτε την ξανά.",
         "titleRequired": "Ο τίτλος είναι υποχρεωτικός",
         "monthJanuary": "Ιανουάριος",
         "monthFebruary": "Φεβρουάριος",
@@ -1238,7 +1243,9 @@
         "checkConflict": "Η σημείωση άλλαξε στο μεταξύ. Θα φορτωθεί ξανά.",
         "pinnedState": "Καρφιτσωμένη",
         "checklistDone": "Ολοκληρώθηκε",
-        "checklistOpen": "Ανοιχτό"
+        "checklistOpen": "Ανοιχτό",
+        "errorNoteGone": "Αυτή η σημείωση δεν υπάρχει πια.",
+        "errorSelectedCategoryGone": "Μια επιλεγμένη κατηγορία δεν υπάρχει πλέον."
     },
     "markdown": {
         "bold": "Έντονο (Ctrl+B)",
@@ -1360,7 +1367,9 @@
         "selectNamed": "Επιλογή {{name}}",
         "bulkDeleteConfirm": "Διαγραφή {{count}} επαφών;",
         "bulkDeleteConfirm_one": "Διαγραφή {{count}} επαφής;",
-        "bulkDeletedToast": "Διαγράφηκαν {{count}} επαφές"
+        "bulkDeletedToast": "Διαγράφηκαν {{count}} επαφές",
+        "errorContactGone": "Αυτή η επαφή δεν υπάρχει πια.",
+        "errorSelectedCategoryGone": "Η επιλεγμένη κατηγορία δεν υπάρχει πλέον."
     },
     "budget": {
         "title": "Προϋπολογισμός",
@@ -3476,7 +3485,8 @@
         "importSubmit": "Προσθήκη {{count}}",
         "importSuccess": "Προστέθηκαν {{count}} γενέθλια.",
         "importNothingSelected": "Επιλέξτε τουλάχιστον μία επαφή.",
-        "importSelected": "Επιλέχθηκαν {{count}} επαφές"
+        "importSelected": "Επιλέχθηκαν {{count}} επαφές",
+        "errorBirthdayGone": "Αυτά τα γενέθλια δεν υπάρχουν πια."
     },
     "reminders": {
         "sectionTitle": "Υπενθύμιση",
@@ -3866,6 +3876,10 @@
         "deleted": "Ο σύνδεσμος διαγράφηκε",
         "loadError": "Δεν ήταν δυνατή η φόρτωση των συνδέσμων.",
         "orderError": "Δεν ήταν δυνατή η αποθήκευση της σειράς.",
+        "errorLinkGone": "Αυτός ο σύνδεσμος δεν υπάρχει πια.",
+        "errorLimitReached": "Στην επισκόπηση χωρούν έως {{limit}} σύνδεσμοι.",
+        "saveError": "Δεν ήταν δυνατή η αποθήκευση του συνδέσμου.",
+        "deleteError": "Δεν ήταν δυνατή η διαγραφή του συνδέσμου.",
         "iconSymbol": "Επιλογή εικονιδίου",
         "iconChoose": "Επιλογή εικονιδίου ή εικόνας"
     },
@@ -4048,7 +4062,12 @@
         "errorAmountsHidden": "Μόνο όποιος βλέπει τα ποσά της οικιακής βοηθού μπορεί να καταχωρίσει πληρωμή.",
         "notHereToday": "Δεν έχει έρθει ακόμη σήμερα",
         "tabVisits": "Επισκέψεις",
-        "tabChores": "Δουλειές"
+        "tabChores": "Δουλειές",
+        "errorWorkerGone": "Αυτός ο βοηθός δεν υπάρχει πια.",
+        "errorVisitGone": "Αυτή η επίσκεψη δεν υπάρχει πια.",
+        "errorTaskGone": "Αυτή η εργασία δεν υπάρχει πια.",
+        "errorAlreadyCheckedOut": "Αυτός ο βοηθός έχει ήδη αναχωρήσει.",
+        "errorAlreadyCheckedIn": "Αυτός ο βοηθός έχει ήδη καταγράψει άφιξη."
     },
     "userMultiSelect": {
         "moreUsers": "ακόμη",
@@ -5673,6 +5692,7 @@
         "importDiagnosticMissingUidFallback_one": "{{count}} καταχώριση ημερολογίου δεν είχε UID· χρησιμοποιήθηκε εναλλακτική ταυτότητα με βάση την ετικέτα και την ημερομηνία.",
         "importDiagnosticDuplicateInstance": "{{count}} διπλές περιπτώσεις παραλαβής (ίδια ταυτότητα) συγχωνεύτηκαν σε μία.",
         "importDiagnosticDuplicateInstance_one": "{{count}} διπλή περίπτωση παραλαβής (ίδια ταυτότητα) συγχωνεύτηκε σε μία.",
+        "importDiagnosticOther": "Μια καταχώριση ημερολογίου δεν ταιριάζει με την αναμενόμενη μορφή.",
         "importUnresolvedBlockingError": "Επιλύστε πρώτα κάθε ανασταλτική προειδοποίηση, ή παραλείψτε ρητά τα σχετικά συμβάντα.",
         "importIgnoreLabel": "Αγνόηση",
         "importCreateNewType": "Δημιουργία νέου τύπου απορριμμάτων",
@@ -5912,8 +5932,20 @@
             "closeAccount": "Κλείσιμο λογαριασμού",
             "confirmCloseAccount": "Κλείσιμο του λογαριασμού για {{name}};",
             "closeAccountDetail": "Το ιστορικό διατηρείται. Ένας λογαριασμός που ανοίγει ξανά ξεκινά στο νόμισμα που χρησιμοποιεί τότε το νοικοκυριό.",
-            "accountNotEmpty": "Ο λογαριασμός κλείνει μόνο όταν δεν έχει υπόλοιπο, πλάνο ή ανοιχτό αίτημα."
-        }
+            "accountNotEmpty": "Ο λογαριασμός κλείνει μόνο όταν δεν έχει υπόλοιπο, πλάνο ή ανοιχτό αίτημα.",
+            "errorAccountDeactivated": "Αυτός ο λογαριασμός είναι απενεργοποιημένος και μπορεί μόνο να εξοφληθεί.",
+            "errorBalanceTooLarge": "Το υπόλοιπο θα γινόταν πολύ μεγάλο. Το αίτημα παραμένει ανοιχτό.",
+            "errorAccountExists": "Αυτό το άτομο έχει ήδη λογαριασμό χαρτζιλικιού.",
+            "errorNoAccount": "Αυτό το άτομο δεν έχει λογαριασμό χαρτζιλικιού.",
+            "errorCurrencyChanged": "Το νόμισμα αυτού του λογαριασμού άλλαξε."
+        },
+        "errorRewardGone": "Αυτό το βραβείο δεν είναι πια διαθέσιμο.",
+        "errorRequestGone": "Αυτό το αίτημα δεν υπάρχει πια.",
+        "errorRequestDecided": "Για αυτό το αίτημα έχει ήδη ληφθεί απόφαση.",
+        "errorNotEnoughPoints": "Οι πόντοι δεν φτάνουν για αυτό.",
+        "errorNotParticipating": "Αυτό το άτομο δεν συγκεντρώνει πόντους.",
+        "errorMoneyAccountGone": "Αυτός ο λογαριασμός δεν υπάρχει πια.",
+        "errorMoneyPlanGone": "Αυτό το πλάνο δεν υπάρχει πια."
     },
     "datepicker": {
         "openCalendar": "Άνοιγμα ημερολογίου",
@@ -6150,7 +6182,15 @@
         "detailPaneLabel": "Λεπτομέρειες αντικειμένου",
         "pickOne": "Επίλεξε ένα αντικείμενο",
         "pickOneHint": "Τα στοιχεία, οι προθεσμίες και το ιστορικό εμφανίζονται εδώ.",
-        "moreDetailsHint": "Αγορά, εγγύηση, φωτογραφία, έγγραφα"
+        "moreDetailsHint": "Αγορά, εγγύηση, φωτογραφία, έγγραφα",
+        "errorItemGone": "Αυτό το αντικείμενο δεν υπάρχει πια.",
+        "errorTrackedDateGone": "Αυτή η προθεσμία δεν υπάρχει πια.",
+        "errorSelectedLocationGone": "Η επιλεγμένη τοποθεσία δεν υπάρχει πλέον.",
+        "errorBookingGone": "Αυτή η κίνηση δεν υπάρχει πια.",
+        "errorBookingAlreadyLinked": "Αυτή η κίνηση είναι ήδη συνδεδεμένη.",
+        "errorLocationExists": "Αυτή η τοποθεσία υπάρχει ήδη εδώ. Επιλέξτε άλλο όνομα.",
+        "errorLocationGone": "Αυτή η τοποθεσία δεν υπάρχει πια.",
+        "errorCategoryGone": "Αυτή η κατηγορία δεν υπάρχει πια."
     },
     "documentAttach": {
         "label": "Συνημμένα",
@@ -6414,7 +6454,13 @@
             "seminar": "ΣΕ",
             "lab": "ΕΡ"
         },
-        "typesWithTime": "Με ώρα"
+        "typesWithTime": "Με ώρα",
+        "errorShiftTypeGone": "Αυτός ο τύπος βάρδιας δεν υπάρχει πια.",
+        "errorSelectedShiftTypeGone": "Ο επιλεγμένος τύπος βάρδιας δεν υπάρχει πια.",
+        "errorCustomFieldGone": "Αυτό το πεδίο δεν υπάρχει πια.",
+        "errorSelectedCustomFieldGone": "Ένα από τα επιλεγμένα πεδία δεν υπάρχει πια.",
+        "errorPatternGone": "Αυτός ο κύκλος βαρδιών δεν υπάρχει πια.",
+        "errorEntryGone": "Αυτή η καταχώριση δεν υπάρχει πια."
     },
     "pairDisplay": {
         "title": "Σύζευξη tablet",

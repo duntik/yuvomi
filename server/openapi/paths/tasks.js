@@ -5,7 +5,7 @@ const TASK_DOCUMENTS_NOTE = '`document_count` counts the linked documents the ca
   + 'Without access to the Documents module (for API tokens a `documents:read` scope) both are `null` - not told, which is not the same as `0` or an empty list.';
 
 export function tasksPaths() {
-  return {
+  return withCaseReasons({
     '/api/v1/tasks': {
       // Die Filter stehen als echte Parameter da, nicht nur im Fließtext: ein
       // generierter Client und die MCP-Brücke (get_api_operation) lesen die
@@ -138,5 +138,36 @@ export function tasksPaths() {
       patch: op({ summary: 'Edit a comment', tag: 'Tasks', params: [idParam(), idParam('commentId', 'Comment ID')], stateChanging: true, requestBody: jsonBody(null), description: 'Body: { comment }. The author only; sets updated_at.' }),
       delete: op({ summary: 'Delete a comment', tag: 'Tasks', params: [idParam(), idParam('commentId', 'Comment ID')], stateChanging: true, description: 'The author, or an admin moderating.' }),
     },
-  };
+  });
+}
+
+// #1909: die Faelle, die ein Nutzer erreicht, tragen einen `reason` neben dem
+// englischen `error` - je Operation der Satz, der sie nennt.
+const TASK_GONE = '`tasks_task_not_found` (404, the task does not exist or is not visible to you - deleted, or made private)';
+const PARENT_GONE = '`tasks_parent_not_found` (404, `parent_task_id` names a task that does not exist or is not visible to you)';
+const COMMENT_GONE = `${TASK_GONE}, \`tasks_comment_not_found\` (404, the task is there, the comment is not - deleted in the meantime)`;
+const CASE_REASONS = {
+  '/api/v1/tasks': { post: PARENT_GONE },
+  '/api/v1/tasks/reorder': { patch: TASK_GONE },
+  '/api/v1/tasks/reorder/reset': { post: TASK_GONE },
+  '/api/v1/tasks/{id}': { get: TASK_GONE, put: TASK_GONE, delete: TASK_GONE },
+  '/api/v1/tasks/{id}/status': { patch: TASK_GONE },
+  '/api/v1/tasks/{id}/archive': { patch: TASK_GONE },
+  '/api/v1/tasks/{id}/check': { patch: TASK_GONE },
+  '/api/v1/tasks/{id}/documents': { get: TASK_GONE, put: TASK_GONE },
+  '/api/v1/tasks/{id}/completions': { get: TASK_GONE },
+  '/api/v1/tasks/{id}/comments': { get: TASK_GONE, post: TASK_GONE },
+  '/api/v1/tasks/{id}/comments/{commentId}': { patch: COMMENT_GONE, delete: COMMENT_GONE },
+};
+
+function withCaseReasons(paths) {
+  for (const [path, operations] of Object.entries(CASE_REASONS)) {
+    for (const [method, reasons] of Object.entries(operations)) {
+      const operation = paths[path]?.[method];
+      if (!operation) throw new Error(`openapi tasks: ${method} ${path} is not documented`);
+      const note = `A refusal a user can reach carries a \`reason\` next to \`error\` (#1909): ${reasons}.`;
+      operation.description = operation.description ? `${operation.description}\n\n${note}` : note;
+    }
+  }
+  return paths;
 }
