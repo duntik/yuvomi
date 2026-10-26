@@ -141,11 +141,27 @@ function buildReminderRow(account, list) {
     });
   });
 
+  // Nur lesbar geteilt (#1840): die Liste wird gelesen, aber nicht als Ziel
+  // neuer Aufgaben angeboten; was schon auf den Upload hierher wartet, nennt
+  // die Zeile mit der Zahl.
+  const readOnlyNote = list.writable === false
+    ? (list.waitingUploads > 0
+      ? t('settings.reminderListReadOnlyWaiting', { count: list.waitingUploads })
+      : t('settings.reminderListReadOnly'))
+    : '';
   const row = createSettingRow({
     label: list.listName,
     control: toggle,
   });
   wrapper.append(row, select);
+  if (readOnlyNote) {
+    const note = document.createElement('p');
+    note.className = 'caldav-calendar-source caldav-reminder-note';
+    note.id = `${toggle.id}-read-only`;
+    note.textContent = readOnlyNote;
+    toggle.setAttribute('aria-describedby', note.id);
+    wrapper.appendChild(note);
+  }
   return wrapper;
 }
 

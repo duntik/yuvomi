@@ -355,6 +355,8 @@
         "customizeResetDone": "Jouw overzicht volgt het huishouden weer.",
         "optionsFor": "Opties voor {{widget}}",
         "optionCalendarScope": "Welke afspraken?",
+        "optionCalendarCalendars": "Welke agenda’s?",
+        "optionCalendarCalendarsHint": "Zonder selectie toont de tegel afspraken uit alle agenda’s.",
         "optionCalendarAll": "Alle afspraken",
         "optionCalendarLimit": "Hoeveel afspraken?",
         "optionCalendarLimitHint": "Geldt voor de hoge formaten en maakt de tegel navenant hoger. In ‘{{small}}’ toont de tegel alleen de eerstvolgende afspraken, in ‘{{size}}’ de week.",
@@ -788,7 +790,11 @@
         "tickedSection": "Afgevinkt",
         "itemBackToast": "„{{name}}” staat weer op de lijst.",
         "itemStateOpen": "niet afgevinkt",
-        "itemAddedToast": "\"{{name}}\" toegevoegd onder \"{{category}}\"."
+        "itemAddedToast": "\"{{name}}\" toegevoegd onder \"{{category}}\".",
+        "moveReturned": {
+            "refused": "„{{item}}” staat weer op „{{back}}”: de server heeft het niet geaccepteerd in „{{target}}”.",
+            "waited": "„{{item}}” is niet verplaatst naar „{{target}}”: de synchronisatie van „{{back}}” staat al meer dan een week uit. Het artikel verschijnt weer op „{{back}}” zodra die lijst wordt ingeschakeld."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} ingrediënt",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "Zijbalk van de agenda",
         "upNextTitle": "Hierna",
         "upNextEmpty": "Niets gepland in de komende drie weken.",
-        "shiftLegend": "Legenda van diensten"
+        "shiftLegend": "Legenda van diensten",
+        "errorCalendarGone": "Deze agenda bestaat niet meer.",
+        "errorCalendarNameInvalid": "Geef de agenda een naam van hoogstens {{limit}} tekens.",
+        "errorCalendarOrderChanged": "De agenda’s zijn intussen gewijzigd.",
+        "errorDeleteFeedAdminOnly": "Deze agenda wordt geëxporteerd. Alleen een beheerder kan hem verwijderen.",
+        "errorEventGone": "Deze afspraak bestaat niet meer.",
+        "errorSelectedCalendarGone": "De gekozen agenda bestaat niet meer.",
+        "errorSeriesNoOccurrence": "Met deze herhaling zou er vanaf de begindatum geen enkele afspraak zijn.",
+        "localCalendarUploadsHint": "Afspraken in deze agenda worden via Apple Calendar naar iCloud geüpload."
     },
     "noteCategories": {
         "categories": "Categorieën",
@@ -1274,7 +1288,11 @@
         "checklistDone": "Klaar",
         "checklistOpen": "Open",
         "errorNoteGone": "Deze notitie bestaat niet meer.",
-        "errorSelectedCategoryGone": "Een gekozen categorie bestaat niet meer."
+        "errorSelectedCategoryGone": "Een gekozen categorie bestaat niet meer.",
+        "lockedToggle": "Bewerken vergrendelen",
+        "lockedBadge": "Vergrendeld",
+        "lockedHint": "Alleen jij en beheerders kunnen deze notitie wijzigen, vastzetten of verwijderen - ook het afvinken van items in de lijst. Iedereen kan hem nog steeds lezen.",
+        "errorLocked": "Deze notitie is vergrendeld. Alleen degene die hem heeft gemaakt en beheerders kunnen hem wijzigen."
     },
     "markdown": {
         "bold": "Vet (Ctrl+B)",
@@ -2055,9 +2073,14 @@
         "themeLight": "Licht",
         "themeDark": "Donker",
         "wallModeLabel": "Wandmodus",
-        "wallModeHint": "Maakt van het startscherm op dit apparaat een rustig display voor een wandtablet: tijd, dagprogramma, wie vandaag aan de beurt is en het weer - groot genoeg om vanaf twee meter te lezen, zonder bediening. Tussen 22 en 6 uur dimt het. Geldt alleen hier, niet voor de andere apparaten in huis.",
+        "wallModeHint": "Maakt van het startscherm op dit apparaat een rustig display voor een wandtablet: tijd, dagprogramma, wie vandaag aan de beurt is en het weer - groot genoeg om vanaf twee meter te lezen, zonder bediening. Tijdens de nachturen dimt het. Geldt alleen hier, niet voor de andere apparaten in huis.",
         "wallModeOn": "Wandmodus aan, zichtbaar bij {{page}}.",
         "wallModeOff": "Wandmodus uit.",
+        "nightHoursLabel": "Nachturen",
+        "nightHoursHint": "Tijdens deze uren dimmen de wandmodus en de schermbeveiliging, volgens de klok van het huishouden. Geldt alleen voor dit apparaat.",
+        "nightHoursFrom": "Dimmen vanaf",
+        "nightHoursUntil": "Dimmen tot",
+        "nightHoursSaved": "Nachturen op dit apparaat: {{from}} tot {{until}}.",
         "screensaverIdleLabel": "Schermbeveiliging starten na",
         "screensaverIdleHint": "Hoe lang dit apparaat onaangeroerd blijft voordat de fotoschermbeveiliging start. Geldt alleen voor dit apparaat, niet voor de rest van het huishouden. Werkt zodra een beheerder Immich heeft gekoppeld.",
         "screensaverIdleSaved": "Wachttijd schermbeveiliging op dit apparaat: {{delay}}.",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "Verbinding met Immich geslaagd.",
         "immichPreview": "Voorbeeld",
         "immichPreviewUnavailable": "Kan geen foto uit Immich laden.",
+        "immichErrorUrlInvalid": "De server-URL is ongeldig. Deze moet beginnen met http:// of https://.",
+        "immichErrorAlbumIdInvalid": "Het album-ID is ongeldig. Je vindt het in Immich in het adres van het album.",
+        "immichErrorApiKeyInvalid": "De API-sleutel is te lang. Kopieer de sleutel opnieuw uit Immich.",
+        "immichErrorNotConfigured": "Voor de test ontbreken de server-URL of de API-sleutel.",
+        "immichErrorApiKeyRejected": "Immich weigert de API-sleutel. Misschien is hij verlopen, ingetrokken of mist hij een machtiging.",
+        "immichErrorStatus": "Immich antwoordde met een fout (status {{status}}). Controleer de server-URL of probeer het later opnieuw.",
+        "immichErrorUnreachable": "Immich is niet bereikbaar. Controleer de server-URL en of Immich draait.",
+        "immichSaveFailed": "De Immich-configuratie kon niet worden opgeslagen.",
+        "immichTestFailed": "De verbinding met Immich kon niet worden gecontroleerd.",
         "backToSettings": "Terug naar instellingen",
         "retry": "Opnieuw proberen",
         "loadError": "Instellingen konden niet worden geladen.",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "Volgorde van het gezin wijzigen",
         "permChildRoleHint": "Nieuwe kinderaccounts krijgen bij het aanmaken ook eigen startrechten: {{list}}. Daarna staan ze bij het betreffende lid.",
         "activeModulesHintMore": "Wil je een module alleen voor jezelf verbergen, ga dan naar Modules → Navigatie.",
-        "permIntroMore": "Individuele leden kunnen afwijken van de standaard van de rol. Zonder instelling heeft elke rol volledige toegang; beheerders altijd."
+        "permIntroMore": "Individuele leden kunnen afwijken van de standaard van de rol. Zonder instelling heeft elke rol volledige toegang; beheerders altijd.",
+        "preferenceSaveFailed": "De instelling kon niet worden opgeslagen.",
+        "caldavCalendarReadOnly": "Alleen-lezen: hier kunnen geen nieuwe afspraken worden opgeslagen",
+        "caldavCalendarReadOnlyWaiting_one": "Alleen-lezen: {{count}} afspraak die hierheen moet worden geüpload, komt niet aan",
+        "caldavCalendarReadOnlyWaiting": "Alleen-lezen: {{count}} afspraken die hierheen moeten worden geüpload, komen niet aan",
+        "reminderListReadOnly": "Alleen-lezen: hier kunnen geen nieuwe items worden opgeslagen",
+        "reminderListReadOnlyWaiting_one": "Alleen-lezen: {{count}} item dat hierheen moet worden geüpload, komt niet aan",
+        "reminderListReadOnlyWaiting": "Alleen-lezen: {{count}} items die hierheen moeten worden geüpload, komen niet aan"
     },
     "login": {
         "tagline": "Welkom terug. Je huishouden op één plek.",
@@ -4019,7 +4058,8 @@
             "reasonNameTooLong": "Een bestands- of mapnaam is te lang.",
             "reasonTooDeep": "Het pad overschrijdt de limiet van vijf mapniveaus.",
             "reasonParentFailed": "De bovenliggende map kon niet worden gemaakt.",
-            "reasonRateLimited": "De server ontvangt te veel verzoeken. Probeer de upload later opnieuw."
+            "reasonRateLimited": "De server ontvangt te veel verzoeken. Probeer de upload later opnieuw.",
+            "folderGoneReplanned": "Een map van deze upload is intussen verwijderd. Het voorbeeld toont de huidige stand - start de upload opnieuw."
         },
         "errorFolderGone": "Deze map bestaat niet meer.",
         "errorSelectedFolderGone": "De gekozen map bestaat niet meer.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} is jou nog schuldig",
         "debtOwes": "{{from}} is schuldig aan {{to}}",
         "balanced": "Vereffend",
-        "balancedInGroup": "{{group}}: Vereffend"
+        "balancedInGroup": "{{group}}: Vereffend",
+        "totalsByMember": "Betaald per persoon",
+        "totalsByMemberHint": "Voorgeschoten, met daaronder het eigen aandeel",
+        "ownShare": "Eigen aandeel: {{amount}}",
+        "paidLabel": "Betaald",
+        "totalsByCategory": "Per categorie",
+        "categoryFilter": "Uitgaven filteren op categorie",
+        "noExpensesInCategory": "Geen uitgaven in deze categorie."
     },
     "wmo": {
         "0": "Heldere lucht",
@@ -4924,6 +4971,7 @@
             "saveError": "Meting kon niet worden opgeslagen.",
             "invalidValue": "Voer geldige waarden in.",
             "range": {
+                "day": "Dag",
                 "week": "Week",
                 "month": "Maand",
                 "year": "Jaar"
@@ -4963,6 +5011,7 @@
                 "family": "Gezin"
             },
             "sparse": "Te weinig metingen om een trend te tonen.",
+            "bandValue": "{{mean}}, van {{low}} tot {{high}}",
             "recentMeasurements": "Recente metingen",
             "deleteMeasurement": "Meting {{value}} van {{date}} verwijderen",
             "measurementDeleted": "Meting verwijderd",

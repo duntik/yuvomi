@@ -373,6 +373,8 @@
         "customizeResetDone": "Sumusunod muli ang iyong overview sa sambahayan.",
         "optionsFor": "Mga opsyon para sa {{widget}}",
         "optionCalendarScope": "Aling mga appointment?",
+        "optionCalendarCalendars": "Aling mga kalendaryo?",
+        "optionCalendarCalendarsHint": "Kapag walang pinili, ipinapakita ng tile ang mga appointment mula sa lahat ng kalendaryo.",
         "optionCalendarAll": "Lahat ng appointment",
         "optionCalendarLimit": "Ilang appointment?",
         "optionCalendarLimitHint": "Para ito sa matataas na laki at pinatataas nito ang tile nang naaayon. Sa “{{small}}”, ang mga susunod na appointment lang ang ipinapakita, sa “{{size}}” ang linggo.",
@@ -806,7 +808,11 @@
         "tickedSection": "Mga naka-check",
         "itemBackToast": "Nasa listahan na ulit ang \"{{name}}\".",
         "itemStateOpen": "hindi pa naka-check",
-        "itemAddedToast": "Naidagdag ang \"{{name}}\" sa \"{{category}}\"."
+        "itemAddedToast": "Naidagdag ang \"{{name}}\" sa \"{{category}}\".",
+        "moveReturned": {
+            "refused": "Bumalik ang \"{{item}}\" sa \"{{back}}\": hindi ito tinanggap ng server sa \"{{target}}\".",
+            "waited": "Hindi nailipat ang \"{{item}}\" sa \"{{target}}\": mahigit isang linggo nang naka-off ang pag-sync ng \"{{back}}\". Lalabas ulit ang item sa \"{{back}}\" kapag binuksan ang listahang iyon."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} sangkap",
@@ -1221,7 +1227,15 @@
         "sidebarLabel": "Sidebar ng kalendaryo",
         "upNextTitle": "Susunod",
         "upNextEmpty": "Walang nakatakda sa susunod na tatlong linggo.",
-        "shiftLegend": "Alamat ng mga shift"
+        "shiftLegend": "Alamat ng mga shift",
+        "errorCalendarGone": "Wala na ang kalendaryong ito.",
+        "errorCalendarNameInvalid": "Bigyan ang kalendaryo ng pangalang hindi hihigit sa {{limit}} na character.",
+        "errorCalendarOrderChanged": "Nagbago na ang mga kalendaryo sa pansamantala.",
+        "errorDeleteFeedAdminOnly": "Ine-export ang kalendaryong ito. Admin lang ang makakapag-delete nito.",
+        "errorEventGone": "Wala na ang pangyayaring ito.",
+        "errorSelectedCalendarGone": "Wala na ang napiling kalendaryo.",
+        "errorSeriesNoOccurrence": "Sa pag-uulit na ito, walang kahit isang pangyayari mula sa petsa ng simula.",
+        "localCalendarUploadsHint": "Ina-upload sa iCloud sa pamamagitan ng Apple Calendar ang mga event sa kalendaryong ito."
     },
     "noteCategories": {
         "categories": "Mga kategorya",
@@ -1292,7 +1306,11 @@
         "checklistDone": "Tapos",
         "checklistOpen": "Bukas",
         "errorNoteGone": "Wala na ang talang ito.",
-        "errorSelectedCategoryGone": "Wala na ang isa sa mga napiling kategorya."
+        "errorSelectedCategoryGone": "Wala na ang isa sa mga napiling kategorya.",
+        "lockedToggle": "I-lock ang pag-edit",
+        "lockedBadge": "Naka-lock",
+        "lockedHint": "Ikaw at ang mga administrator lang ang makakapagbago, makakapag-pin o makakapagbura ng talang ito - kasama ang pag-tsek ng mga item sa checklist nito. Mababasa pa rin ito ng iba.",
+        "errorLocked": "Naka-lock ang talang ito. Ang gumawa nito at ang mga administrator lang ang makakapagbago nito."
     },
     "markdown": {
         "bold": "Bold (Ctrl+B)",
@@ -2100,9 +2118,14 @@
         "themeLight": "Maliwanag",
         "themeDark": "Madilim",
         "wallModeLabel": "Wall mode",
-        "wallModeHint": "Ginagawang tahimik na display ang home sa device na ito para sa tablet na nakasabit sa dingding: oras, programa ng araw, kung sino ang naka-duty at ang panahon - sapat na laki para mabasa mula dalawang metro, walang kailangang pindutin. Dumidilim ito mula 10 ng gabi hanggang 6 ng umaga. Dito lang ito, hindi sa ibang device sa bahay.",
+        "wallModeHint": "Ginagawang tahimik na display ang home sa device na ito para sa tablet na nakasabit sa dingding: oras, programa ng araw, kung sino ang naka-duty at ang panahon - sapat na laki para mabasa mula dalawang metro, walang kailangang pindutin. Dumidilim ito sa oras ng gabi. Dito lang ito, hindi sa ibang device sa bahay.",
         "wallModeOn": "Naka-on ang wall mode, makikita sa {{page}}.",
         "wallModeOff": "Naka-off ang wall mode.",
+        "nightHoursLabel": "Oras ng gabi",
+        "nightHoursHint": "Sa mga oras na ito, dumidilim ang wall mode at ang screensaver, ayon sa oras ng bahay. Para lang sa device na ito.",
+        "nightHoursFrom": "Padilimin mula",
+        "nightHoursUntil": "Padilimin hanggang",
+        "nightHoursSaved": "Oras ng gabi sa device na ito: {{from}} hanggang {{until}}.",
         "screensaverIdleLabel": "Simulan ang screensaver pagkalipas ng",
         "screensaverIdleHint": "Gaano katagal hindi gagalawin ang device na ito bago magsimula ang photo screensaver. Para lang sa device na ito, hindi sa iba pang bahagi ng sambahayan. Magkakabisa kapag naikonekta na ng admin ang Immich.",
         "screensaverIdleSaved": "Paghihintay ng screensaver sa device na ito: {{delay}}.",
@@ -2936,6 +2959,15 @@
         "immichTestOk": "Matagumpay ang koneksyon sa Immich.",
         "immichPreview": "Preview",
         "immichPreviewUnavailable": "Hindi makapag-load ng larawan mula sa Immich.",
+        "immichErrorUrlInvalid": "Hindi wasto ang URL ng server. Dapat itong magsimula sa http:// o https://.",
+        "immichErrorAlbumIdInvalid": "Hindi wasto ang ID ng album. Makikita mo ito sa Immich sa address ng album.",
+        "immichErrorApiKeyInvalid": "Masyadong mahaba ang API key. Kopyahin muli ang key mula sa Immich.",
+        "immichErrorNotConfigured": "Kailangan ng pagsubok ang URL ng server at ang API key.",
+        "immichErrorApiKeyRejected": "Tinatanggihan ng Immich ang API key. Maaaring nag-expire ito, binawi, o kulang ng pahintulot.",
+        "immichErrorStatus": "Sumagot ang Immich ng error (status {{status}}). Suriin ang URL ng server o subukang muli mamaya.",
+        "immichErrorUnreachable": "Hindi maabot ang Immich. Suriin ang URL ng server at kung tumatakbo ang Immich.",
+        "immichSaveFailed": "Hindi ma-save ang configuration ng Immich.",
+        "immichTestFailed": "Hindi masuri ang koneksyon sa Immich.",
         "backToSettings": "Bumalik sa mga setting",
         "retry": "Subukang muli",
         "loadError": "Hindi ma-load ang mga setting.",
@@ -3384,7 +3416,14 @@
         "permCapabilityTasksReorder": "Baguhin ang pagkakasunod-sunod ng pamilya",
         "permChildRoleHint": "Ang mga bagong account ng bata ay may sarili ring panimulang pahintulot pagkagawa: {{list}}. Pagkatapos, nakalista ang mga ito sa miyembrong iyon.",
         "activeModulesHintMore": "Para itago lang para sa iyo, pumunta sa Mga Modyul → Nabigasyon.",
-        "permIntroMore": "Maaaring magkaiba ang mga indibidwal na miyembro sa default ng papel. Kapag walang nakatakda, may buong access ang bawat papel; palaging mayroon nito ang mga administrator."
+        "permIntroMore": "Maaaring magkaiba ang mga indibidwal na miyembro sa default ng papel. Kapag walang nakatakda, may buong access ang bawat papel; palaging mayroon nito ang mga administrator.",
+        "preferenceSaveFailed": "Hindi ma-save ang setting.",
+        "caldavCalendarReadOnly": "Read-only: hindi maaaring mag-save ng bagong event dito",
+        "caldavCalendarReadOnlyWaiting_one": "Read-only: hindi darating ang {{count}} event na naghihintay ma-upload dito",
+        "caldavCalendarReadOnlyWaiting": "Read-only: hindi darating ang {{count}} event na naghihintay ma-upload dito",
+        "reminderListReadOnly": "Read-only: hindi maaaring mag-save ng bagong entry dito",
+        "reminderListReadOnlyWaiting_one": "Read-only: hindi darating ang {{count}} entry na naghihintay ma-upload dito",
+        "reminderListReadOnlyWaiting": "Read-only: hindi darating ang {{count}} entry na naghihintay ma-upload dito"
     },
     "login": {
         "tagline": "Maligayang pagbabalik. Ang iyong tahanan sa iisang lugar.",
@@ -4019,7 +4058,8 @@
             "reasonNameTooLong": "Masyadong mahaba ang pangalan ng file o folder.",
             "reasonTooDeep": "Lampas ang path sa limang antas ng folder.",
             "reasonParentFailed": "Hindi magawa ang parent folder.",
-            "reasonRateLimited": "Masyadong maraming kahilingan ang natatanggap ng server. Subukang mag-upload muli mamaya."
+            "reasonRateLimited": "Masyadong maraming kahilingan ang natatanggap ng server. Subukang mag-upload muli mamaya.",
+            "folderGoneReplanned": "Nabura sa pansamantala ang isang folder ng upload na ito. Ipinapakita ng preview ang kasalukuyang estado - simulan muli ang upload."
         },
         "errorFolderGone": "Wala na ang folder na ito.",
         "errorSelectedFolderGone": "Wala na ang napiling folder.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "May utang sa iyo si {{name}}",
         "debtOwes": "{{from}} may utang kay {{to}}",
         "balanced": "Ayos na",
-        "balancedInGroup": "{{group}}: Ayos na"
+        "balancedInGroup": "{{group}}: Ayos na",
+        "totalsByMember": "Binayaran ng bawat isa",
+        "totalsByMemberHint": "Ang inabono, at sa ilalim ang sariling bahagi",
+        "ownShare": "Sariling bahagi: {{amount}}",
+        "paidLabel": "Binayaran",
+        "totalsByCategory": "Ayon sa kategorya",
+        "categoryFilter": "I-filter ang mga gastos ayon sa kategorya",
+        "noExpensesInCategory": "Walang gastos sa kategoryang ito."
     },
     "wmo": {
         "0": "Maaliwalas na langit",
@@ -4924,6 +4971,7 @@
             "saveError": "Hindi ma-save ang sukat.",
             "invalidValue": "Pakilagay ang wastong halaga.",
             "range": {
+                "day": "Araw",
                 "week": "Linggo",
                 "month": "Buwan",
                 "year": "Taon"
@@ -4963,6 +5011,7 @@
                 "family": "Pamilya"
             },
             "sparse": "Kulang ang sukat para magpakita ng takbo.",
+            "bandValue": "{{mean}}, mula {{low}} hanggang {{high}}",
             "recentMeasurements": "Mga kamakailang sukat",
             "deleteMeasurement": "Tanggalin ang sukat na {{value}} ({{date}})",
             "measurementDeleted": "Natanggal ang sukat",

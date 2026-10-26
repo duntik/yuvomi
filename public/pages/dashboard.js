@@ -17,6 +17,7 @@ import { buildWeekStrip } from '/utils/week-strip.js';
 import { relativeDateLabel, housekeepingSinceLabel } from '/utils/day-label.js';
 import { daysFromTodayText, dateText } from '/utils/date-format.js';
 import { esc, fmtLocation, renderMarkdownLight } from '/utils/html.js';
+import { errorSentence } from '/utils/friendly-error.js';
 import { initials } from '/utils/initials.js';
 // `todayKey` heisst hier schon ein Parameter (bzw. eine lokale Bindung), der den
 // Bezugstag traegt - der Import kommt deshalb unter eigenem Namen herein.
@@ -44,6 +45,7 @@ import {
   COCKPIT_COVERED_WIDGETS,
   nearestPreset, sameWidgetConfig, suggestGridHoleFill, rowFillSpans, columnFillSpans,
   dashboardQuery, dashboardQueryFiltersCounts, dashboardRequest, normalizeShoppingListSelection,
+  normalizeCalendarSelection,
   fetchPendingReminders, childDefaultWidgetConfig,
 } from '/utils/dashboard-widgets.js';
 import { EVENT_LIMIT_STEPS, EVENT_LIMIT_DEFAULT, clampEventLimit } from '/utils/dashboard-event-limit.js';
@@ -5014,6 +5016,23 @@ async function loadShoppingLists(getLists = (path) => api.get(path)) {
   }
 }
 
+/**
+ * Die waehlbaren Kalender fuer den Optionen-Dialog der Kalender-Kachel (#2062):
+ * eigene, synchronisierte und Abos, unter dem Schluessel des Kalendermoduls.
+ * Sie stehen als `sources` neben den eigenen Kalendern von
+ * `/calendar/calendars`. Ohne Cache und mit `null` im Fehlerfall, wie die
+ * Einkaufslisten: ein Dialog ohne Katalog darf eine bestehende Auswahl nicht
+ * als "nichts gewaehlt" speichern.
+ */
+async function loadCalendarSources(getSources = (path) => api.get(path)) {
+  try {
+    const res = await getSources('/calendar/calendars');
+    return Array.isArray(res?.sources) ? res.sources : null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadNoteCategories(getCategories = (path) => api.get(path)) {
   try {
     const res = await getCategories('/notes/categories');
@@ -5096,7 +5115,9 @@ async function openExtensionWidgetOptions(id, meta, current = {}) {
 }
 
 /** Der Optionen-Dialog eines Widgets. Aufloesen mit den neuen Optionen oder null. */
-async function openWidgetOptions(id, current = {}, { loadNotes = loadNoteCategories, loadLists = loadShoppingLists } = {}) {
+async function openWidgetOptions(id, current = {}, {
+  loadNotes = loadNoteCategories, loadLists = loadShoppingLists, loadCalendars = loadCalendarSources,
+} = {}) {
   const extMeta = getExtensionWidgetMeta(id);
   if (extMeta?.optionsSchema) return openExtensionWidgetOptions(id, extMeta, current);
 
@@ -5120,6 +5141,14 @@ async function openWidgetOptions(id, current = {}, { loadNotes = loadNoteCategor
   // Angehakt ist, was gespeichert UND noch da ist: eine geloeschte Liste hat
   // keine Zeile mehr und faellt mit dem naechsten Speichern aus der Auswahl.
   const pickedLists = new Set(normalizeShoppingListSelection(options.lists));
+  // Dieselbe Regel fuer die Kalender (#2062): angehakt ist, was gespeichert UND
+  // noch im Katalog ist; ein entfernter Kalender faellt mit dem Speichern weg.
+  const calendarChoices = id === 'calendar' ? await loadCalendars() : [];
+  if (calendarChoices === null) {
+    window.yuvomi?.showToast(t('dashboard.loadError'), 'danger');
+    return null;
+  }
+  const pickedCalendars = new Set(normalizeCalendarSelection(options.calendars));
 
   const body = id === 'calendar'
     ? `
@@ -5134,6 +5163,19 @@ async function openWidgetOptions(id, current = {}, { loadNotes = loadNoteCategor
           <span>${t('calendar.assignedToMe')}</span>
         </label>
       </fieldset>
+      ${/* Erst ab zwei Kalendern eine Wahl: mit einem gaebe es nichts zu
+            waehlen, und die Gruppe waere eine Zeile, die nichts aendert. */ ''}
+      ${calendarChoices.length > 1 ? `
+      <fieldset class="form-group widget-options__group">
+        <legend class="form-label">${esc(t('dashboard.optionCalendarCalendars'))}</legend>
+        <p class="widget-options__hint">${esc(t('dashboard.optionCalendarCalendarsHint'))}</p>
+        ${calendarChoices.map((source) => `
+        <label class="widget-options__choice">
+          <input type="checkbox" name="cal-calendar" value="${esc(String(source.key))}"
+                 ${pickedCalendars.has(source.key) ? 'checked' : ''}>
+          <span>${esc(source.name)}</span>
+        </label>`).join('')}
+      </fieldset>` : ''}
       <fieldset class="form-group widget-options__group">
         <legend class="form-label">${t('calendar.filtersLayers')}</legend>
         <p class="widget-options__hint">${t('dashboard.optionCalendarBirthdaysHint')}</p>
@@ -5235,6 +5277,11 @@ async function openWidgetOptions(id, current = {}, { loadNotes = loadNoteCategor
             // Dialog nicht gibt, kommt so auch nicht ins Layout.
             const limit = clampEventLimit(panel.querySelector('input[name="cal-limit"]:checked')?.value);
             if (limit !== EVENT_LIMIT_DEFAULT) next.limit = limit;
+            // Keine Auswahl heisst „alle Kalender" und wird nicht gespeichert (#2062).
+            const calendars = normalizeCalendarSelection(
+              [...panel.querySelectorAll('input[name="cal-calendar"]:checked')].map((el) => el.value),
+            );
+            if (calendars.length) next.calendars = calendars;
           } else if (id === 'waste') {
             const picked = [...panel.querySelectorAll('input[name="waste-type"]:checked')].map((el) => Number(el.value));
             // Dieselbe Regel wie bei den Aufgaben-Kategorien: keine Auswahl
@@ -7049,7 +7096,7 @@ async function openTaskFromOverview(taskId, container, rerender, user) {
     await openTaskById(taskId, { user, container, onChanged: rerender });
   } catch (err) {
     console.error('[Dashboard] Aufgabe konnte nicht geöffnet werden:', err);
-    window.yuvomi?.showToast(err.message ?? t('tasks.loadError'), 'danger');
+    window.yuvomi?.showToast(errorSentence(err, 'tasks.loadError'), 'danger');
   }
 }
 
@@ -7425,6 +7472,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
     user, t, api, wall: wallMode,
     before: container.querySelector('#dashboard-shell'),
     toast: (message, type) => window.yuvomi?.showToast(message, type),
+    sentence: (error) => errorSentence(error, 'settings.preferenceSaveFailed'),
   });
   // ERSTE SCHRITTE (R23 D14): nach dem Rundgang drei Wege - Familie, Module,
   // Region - an derselben Stelle wie der Zonen-Hinweis, vom ersten Bild an
@@ -7605,7 +7653,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
       markLoaded(requestDay);
     }
   } catch (err) {
-    console.error('[Dashboard] Ladefehler:', err.message, 'Status:', err.status ?? 'network');
+    console.error('[Dashboard] Ladefehler:', err, 'Status:', err.status ?? 'network');
     loadFailed = true;
     loadErrorStatus = Number.isFinite(err?.status) ? err.status : null;
   }
@@ -7625,7 +7673,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
       ]);
       data.cycle = { periods: periodsRes.data || [], settings: settingsRes.data || {} };
     } catch (err) {
-      console.error('[Dashboard] Zyklus-Slice Ladefehler:', err?.message);
+      console.error('[Dashboard] Zyklus-Slice Ladefehler:', err);
       data.cycle = null;
     }
   }
@@ -7641,7 +7689,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
     try {
       data.schedule = await loadScheduleSlice(householdToday());
     } catch (err) {
-      console.error('[Dashboard] Schedule-Slice Ladefehler:', err?.message);
+      console.error('[Dashboard] Schedule-Slice Ladefehler:', err);
       data.schedule = null;
     }
   }
@@ -7670,7 +7718,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
         needsRefresh: (sourcesRes.data ?? []).some((s) => s.needs_refresh),
       };
     } catch (err) {
-      console.error('[Dashboard] Waste-Slice Ladefehler:', err?.message);
+      console.error('[Dashboard] Waste-Slice Ladefehler:', err);
       data.waste = null;
     }
   }
@@ -8764,4 +8812,7 @@ Object.assign(__test, { renderUpcomingEvents, renderShoppingLists, renderShoppin
 
 // Test-Tor fuer die Uebersichts-Bugs vom 2026-09-29 (#1449, #1451-#1457).
 Object.assign(__test, { renderBudgetWidget });
+
+// Test-Tor fuer die Kalender-Auswahl der Kalender-Kachel (#2062).
+Object.assign(__test, { loadCalendarSources });
 Object.assign(__test, { renderCountdowns, renderHousekeepingWidget, renderCycleWidget, todayFingerprint });

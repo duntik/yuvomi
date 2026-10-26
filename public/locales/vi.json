@@ -355,6 +355,8 @@
         "customizeResetDone": "Trang tổng quan của bạn lại theo gia đình.",
         "optionsFor": "Tùy chọn cho {{widget}}",
         "optionCalendarScope": "Những sự kiện nào?",
+        "optionCalendarCalendars": "Những lịch nào?",
+        "optionCalendarCalendarsHint": "Nếu không chọn, ô sẽ hiển thị cuộc hẹn từ tất cả các lịch.",
         "optionCalendarAll": "Tất cả sự kiện",
         "optionCalendarLimit": "Bao nhiêu sự kiện?",
         "optionCalendarLimitHint": "Áp dụng cho các kích thước cao và làm thẻ cao hơn tương ứng. Ở “{{small}}”, thẻ chỉ hiển thị các lịch hẹn sắp tới; ở “{{size}}”, cả tuần.",
@@ -788,7 +790,11 @@
         "tickedSection": "Đã đánh dấu",
         "itemBackToast": "“{{name}}” đã trở lại danh sách.",
         "itemStateOpen": "chưa đánh dấu",
-        "itemAddedToast": "Đã thêm \"{{name}}\" vào \"{{category}}\"."
+        "itemAddedToast": "Đã thêm \"{{name}}\" vào \"{{category}}\".",
+        "moveReturned": {
+            "refused": "“{{item}}” đã trở lại “{{back}}”: máy chủ không chấp nhận mục này trong “{{target}}”.",
+            "waited": "“{{item}}” chưa được chuyển sang “{{target}}”: đồng bộ của “{{back}}” đã tắt hơn một tuần. Mục này sẽ xuất hiện lại trong “{{back}}” khi danh sách đó được bật."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} nguyên liệu",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "Thanh bên lịch",
         "upNextTitle": "Sắp tới",
         "upNextEmpty": "Không có gì trong ba tuần tới.",
-        "shiftLegend": "Chú thích ca"
+        "shiftLegend": "Chú thích ca",
+        "errorCalendarGone": "Lịch này không còn tồn tại.",
+        "errorCalendarNameInvalid": "Đặt tên lịch tối đa {{limit}} ký tự.",
+        "errorCalendarOrderChanged": "Các lịch đã thay đổi trong lúc đó.",
+        "errorDeleteFeedAdminOnly": "Lịch này đang được xuất. Chỉ quản trị viên mới có thể xóa.",
+        "errorEventGone": "Sự kiện này không còn tồn tại.",
+        "errorSelectedCalendarGone": "Lịch đã chọn không còn tồn tại.",
+        "errorSeriesNoOccurrence": "Với kiểu lặp lại này sẽ không có sự kiện nào từ ngày bắt đầu.",
+        "localCalendarUploadsHint": "Sự kiện trong lịch này được tải lên iCloud qua Apple Calendar."
     },
     "noteCategories": {
         "categories": "Danh mục",
@@ -1274,7 +1288,11 @@
         "checklistDone": "Hoàn thành",
         "checklistOpen": "Mở",
         "errorNoteGone": "Ghi chú này không còn nữa.",
-        "errorSelectedCategoryGone": "Một danh mục đã chọn không còn tồn tại."
+        "errorSelectedCategoryGone": "Một danh mục đã chọn không còn tồn tại.",
+        "lockedToggle": "Khoá chỉnh sửa",
+        "lockedBadge": "Đã khoá",
+        "lockedHint": "Chỉ bạn và quản trị viên mới có thể thay đổi, ghim hoặc xoá ghi chú này - kể cả đánh dấu các mục trong danh sách. Những người khác vẫn có thể đọc.",
+        "errorLocked": "Ghi chú này đã bị khoá. Chỉ người tạo và quản trị viên mới có thể thay đổi."
     },
     "markdown": {
         "bold": "In đậm (Ctrl+B)",
@@ -2055,9 +2073,14 @@
         "themeLight": "Sáng",
         "themeDark": "Tối",
         "wallModeLabel": "Chế độ treo tường",
-        "wallModeHint": "Biến trang chủ trên thiết bị này thành một màn hình tĩnh lặng cho máy tính bảng treo tường: giờ, chương trình trong ngày, hôm nay tới lượt ai và thời tiết - đủ lớn để đọc từ khoảng cách hai mét, không cần thao tác. Từ 22 giờ đến 6 giờ màn hình sẽ tối đi. Chỉ áp dụng cho thiết bị này, không áp dụng cho các thiết bị khác trong nhà.",
+        "wallModeHint": "Biến trang chủ trên thiết bị này thành một màn hình tĩnh lặng cho máy tính bảng treo tường: giờ, chương trình trong ngày, hôm nay tới lượt ai và thời tiết - đủ lớn để đọc từ khoảng cách hai mét, không cần thao tác. Vào giờ ban đêm màn hình sẽ tối đi. Chỉ áp dụng cho thiết bị này, không áp dụng cho các thiết bị khác trong nhà.",
         "wallModeOn": "Đã bật chế độ treo tường, xem tại {{page}}.",
         "wallModeOff": "Đã tắt chế độ treo tường.",
+        "nightHoursLabel": "Giờ ban đêm",
+        "nightHoursHint": "Trong những giờ này, chế độ treo tường và trình bảo vệ màn hình sẽ tối đi, theo giờ của gia đình. Chỉ áp dụng cho thiết bị này.",
+        "nightHoursFrom": "Làm tối từ",
+        "nightHoursUntil": "Làm tối đến",
+        "nightHoursSaved": "Giờ ban đêm trên thiết bị này: từ {{from}} đến {{until}}.",
         "screensaverIdleLabel": "Bắt đầu trình bảo vệ màn hình sau",
         "screensaverIdleHint": "Thời gian thiết bị này không được chạm vào trước khi trình bảo vệ màn hình ảnh bắt đầu. Chỉ áp dụng cho thiết bị này, không áp dụng cho các thiết bị khác trong gia đình. Có hiệu lực khi quản trị viên đã kết nối Immich.",
         "screensaverIdleSaved": "Thời gian chờ trình bảo vệ màn hình trên thiết bị này: {{delay}}.",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "Kết nối với Immich thành công.",
         "immichPreview": "Xem trước",
         "immichPreviewUnavailable": "Không thể tải ảnh từ Immich.",
+        "immichErrorUrlInvalid": "URL máy chủ không hợp lệ. URL phải bắt đầu bằng http:// hoặc https://.",
+        "immichErrorAlbumIdInvalid": "ID album không hợp lệ. Bạn có thể tìm thấy nó trong Immich ở địa chỉ của album.",
+        "immichErrorApiKeyInvalid": "Khóa API quá dài. Hãy sao chép lại khóa từ Immich.",
+        "immichErrorNotConfigured": "Bài kiểm tra cần URL máy chủ và khóa API.",
+        "immichErrorApiKeyRejected": "Immich từ chối khóa API. Có thể khóa đã hết hạn, bị thu hồi hoặc thiếu quyền.",
+        "immichErrorStatus": "Immich đã trả về lỗi (trạng thái {{status}}). Hãy kiểm tra URL máy chủ hoặc thử lại sau.",
+        "immichErrorUnreachable": "Không thể kết nối tới Immich. Hãy kiểm tra URL máy chủ và Immich có đang chạy không.",
+        "immichSaveFailed": "Không thể lưu cấu hình Immich.",
+        "immichTestFailed": "Không thể kiểm tra kết nối tới Immich.",
         "backToSettings": "Quay lại cài đặt",
         "retry": "Thử lại",
         "loadError": "Không thể tải cài đặt.",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "Đổi thứ tự của gia đình",
         "permChildRoleHint": "Tài khoản trẻ em mới khi được tạo còn nhận quyền khởi đầu riêng: {{list}}. Sau đó các quyền này hiển thị ở thành viên đó.",
         "activeModulesHintMore": "Để chỉ ẩn với riêng bạn, vào Mô-đun → Điều hướng.",
-        "permIntroMore": "Từng thành viên có thể khác với mặc định của vai trò. Nếu không đặt gì, mỗi vai trò có toàn quyền truy cập; quản trị viên luôn luôn."
+        "permIntroMore": "Từng thành viên có thể khác với mặc định của vai trò. Nếu không đặt gì, mỗi vai trò có toàn quyền truy cập; quản trị viên luôn luôn.",
+        "preferenceSaveFailed": "Không thể lưu cài đặt.",
+        "caldavCalendarReadOnly": "Chỉ đọc: không thể lưu sự kiện mới tại đây",
+        "caldavCalendarReadOnlyWaiting_one": "Chỉ đọc: {{count}} sự kiện đang chờ tải lên đây sẽ không đến nơi",
+        "caldavCalendarReadOnlyWaiting": "Chỉ đọc: {{count}} sự kiện đang chờ tải lên đây sẽ không đến nơi",
+        "reminderListReadOnly": "Chỉ đọc: không thể lưu mục mới tại đây",
+        "reminderListReadOnlyWaiting_one": "Chỉ đọc: {{count}} mục đang chờ tải lên đây sẽ không đến nơi",
+        "reminderListReadOnlyWaiting": "Chỉ đọc: {{count}} mục đang chờ tải lên đây sẽ không đến nơi"
     },
     "login": {
         "tagline": "Chào mừng bạn trở lại. Ngôi nhà của bạn ở cùng một nơi.",
@@ -4019,7 +4058,8 @@
             "reasonNameTooLong": "Tên tệp hoặc thư mục quá dài.",
             "reasonTooDeep": "Đường dẫn vượt quá giới hạn năm cấp thư mục.",
             "reasonParentFailed": "Không thể tạo thư mục cha.",
-            "reasonRateLimited": "Máy chủ đang nhận quá nhiều yêu cầu. Hãy thử tải lên lại sau."
+            "reasonRateLimited": "Máy chủ đang nhận quá nhiều yêu cầu. Hãy thử tải lên lại sau.",
+            "folderGoneReplanned": "Trong lúc đó, một thư mục của lần tải lên này đã bị xóa. Bản xem trước hiển thị trạng thái hiện tại - hãy bắt đầu tải lên lại."
         },
         "errorFolderGone": "Thư mục này không còn tồn tại.",
         "errorSelectedFolderGone": "Thư mục đã chọn không còn tồn tại.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} nợ bạn",
         "debtOwes": "{{from}} nợ {{to}}",
         "balanced": "Đã thanh toán xong",
-        "balancedInGroup": "{{group}}: Đã thanh toán xong"
+        "balancedInGroup": "{{group}}: Đã thanh toán xong",
+        "totalsByMember": "Mỗi người đã trả",
+        "totalsByMemberHint": "Số tiền đã ứng, bên dưới là phần của chính mình",
+        "ownShare": "Phần của mình: {{amount}}",
+        "paidLabel": "Đã trả",
+        "totalsByCategory": "Theo danh mục",
+        "categoryFilter": "Lọc chi tiêu theo danh mục",
+        "noExpensesInCategory": "Không có chi tiêu nào trong danh mục này."
     },
     "wmo": {
         "0": "Trời quang",
@@ -4924,6 +4971,7 @@
             "saveError": "Không thể lưu chỉ số đo.",
             "invalidValue": "Vui lòng nhập giá trị hợp lệ.",
             "range": {
+                "day": "Ngày",
                 "week": "Tuần",
                 "month": "Tháng",
                 "year": "Năm"
@@ -4963,6 +5011,7 @@
                 "family": "Gia đình"
             },
             "sparse": "Quá ít số đo để hiển thị xu hướng.",
+            "bandValue": "{{mean}}, từ {{low}} đến {{high}}",
             "recentMeasurements": "Các lần đo gần đây",
             "deleteMeasurement": "Xóa lần đo {{value}} ngày {{date}}",
             "measurementDeleted": "Đã xóa lần đo",

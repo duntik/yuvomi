@@ -373,6 +373,8 @@
         "customizeResetDone": "نمای کلی تو دوباره از خانواده پیروی می‌کند.",
         "optionsFor": "گزینه‌های {{widget}}",
         "optionCalendarScope": "کدام قرارها؟",
+        "optionCalendarCalendars": "کدام تقویم‌ها؟",
+        "optionCalendarCalendarsHint": "بدون انتخاب، کاشی قرارهای همهٔ تقویم‌ها را نشان می‌دهد.",
         "optionCalendarAll": "همه قرارها",
         "optionCalendarLimit": "چند قرار؟",
         "optionCalendarLimitHint": "برای اندازه‌های بلند اعمال می‌شود و کارت را به همان نسبت بلندتر می‌کند. در «{{small}}» فقط قرارهای بعدی را نشان می‌دهد و در «{{size}}» هفته را.",
@@ -806,7 +808,11 @@
         "tickedSection": "تیک‌خورده‌ها",
         "itemBackToast": "«{{name}}» دوباره در فهرست است.",
         "itemStateOpen": "تیک نخورده",
-        "itemAddedToast": "«{{name}}» زیر «{{category}}» اضافه شد."
+        "itemAddedToast": "«{{name}}» زیر «{{category}}» اضافه شد.",
+        "moveReturned": {
+            "refused": "«{{item}}» به «{{back}}» برگشت: سرور آن را در «{{target}}» نپذیرفت.",
+            "waited": "«{{item}}» به «{{target}}» منتقل نشد: همگام‌سازی «{{back}}» بیش از یک هفته است که خاموش است. مورد به محض روشن شدن این فهرست دوباره در «{{back}}» نمایش داده می‌شود."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} مادهٔ لازم",
@@ -1221,7 +1227,15 @@
         "sidebarLabel": "نوار کناری تقویم",
         "upNextTitle": "بعدی",
         "upNextEmpty": "در سه هفته آینده چیزی نیست.",
-        "shiftLegend": "راهنمای شیفت‌ها"
+        "shiftLegend": "راهنمای شیفت‌ها",
+        "errorCalendarGone": "این تقویم دیگر وجود ندارد.",
+        "errorCalendarNameInvalid": "برای تقویم نامی با حداکثر {{limit}} نویسه بگذارید.",
+        "errorCalendarOrderChanged": "تقویم‌ها در این فاصله تغییر کرده‌اند.",
+        "errorDeleteFeedAdminOnly": "این تقویم در حال خروجی گرفتن است. فقط مدیر می‌تواند آن را حذف کند.",
+        "errorEventGone": "این رویداد دیگر وجود ندارد.",
+        "errorSelectedCalendarGone": "تقویم انتخاب‌شده دیگر وجود ندارد.",
+        "errorSeriesNoOccurrence": "با این تکرار از تاریخ شروع به بعد هیچ رویدادی وجود نخواهد داشت.",
+        "localCalendarUploadsHint": "رویدادهای این تقویم از طریق Apple Calendar در iCloud بارگذاری می‌شوند."
     },
     "noteCategories": {
         "categories": "دسته‌بندی‌ها",
@@ -1292,7 +1306,11 @@
         "checklistDone": "انجام‌شده",
         "checklistOpen": "باز",
         "errorNoteGone": "این یادداشت دیگر وجود ندارد.",
-        "errorSelectedCategoryGone": "یکی از دسته‌های انتخاب‌شده دیگر وجود ندارد."
+        "errorSelectedCategoryGone": "یکی از دسته‌های انتخاب‌شده دیگر وجود ندارد.",
+        "lockedToggle": "قفل کردن ویرایش",
+        "lockedBadge": "قفل‌شده",
+        "lockedHint": "فقط شما و مدیران می‌توانید این یادداشت را تغییر دهید، سنجاق کنید یا حذف کنید - از جمله تیک زدن موارد فهرست آن. بقیه همچنان می‌توانند آن را بخوانند.",
+        "errorLocked": "این یادداشت قفل است. فقط کسی که آن را ایجاد کرده و مدیران می‌توانند آن را تغییر دهند."
     },
     "markdown": {
         "bold": "توپر (Ctrl+B)",
@@ -2100,9 +2118,14 @@
         "themeLight": "روشن",
         "themeDark": "تیره",
         "wallModeLabel": "حالت دیواری",
-        "wallModeHint": "صفحهٔ خانه را در این دستگاه به نمایشی آرام برای تبلت دیواری تبدیل می‌کند: ساعت، برنامهٔ روز، اینکه امروز نوبت چه کسی است و هوا - به‌اندازه‌ای بزرگ که از دو متری خوانده شود و بدون هیچ کنترلی. بین ساعت ۲۲ تا ۶ کم‌نور می‌شود. فقط برای همین دستگاه است، نه دستگاه‌های دیگر خانه.",
+        "wallModeHint": "صفحهٔ خانه را در این دستگاه به نمایشی آرام برای تبلت دیواری تبدیل می‌کند: ساعت، برنامهٔ روز، اینکه امروز نوبت چه کسی است و هوا - به‌اندازه‌ای بزرگ که از دو متری خوانده شود و بدون هیچ کنترلی. در ساعت‌های شب کم‌نور می‌شود. فقط برای همین دستگاه است، نه دستگاه‌های دیگر خانه.",
         "wallModeOn": "حالت دیواری روشن است و در {{page}} دیده می‌شود.",
         "wallModeOff": "حالت دیواری خاموش است.",
+        "nightHoursLabel": "ساعت‌های شب",
+        "nightHoursHint": "در این ساعت‌ها حالت دیواری و محافظ صفحه کم‌نور می‌شوند، بر پایهٔ ساعت خانه. فقط برای این دستگاه اعمال می‌شود.",
+        "nightHoursFrom": "کم‌نور از",
+        "nightHoursUntil": "کم‌نور تا",
+        "nightHoursSaved": "ساعت‌های شب در این دستگاه: از {{from}} تا {{until}}.",
         "screensaverIdleLabel": "شروع محافظ صفحه پس از",
         "screensaverIdleHint": "مدت زمانی که این دستگاه بدون لمس می‌ماند تا محافظ صفحهٔ عکس شروع شود. فقط برای این دستگاه اعمال می‌شود، نه برای بقیهٔ خانوار. پس از اتصال Immich توسط مدیر فعال می‌شود.",
         "screensaverIdleSaved": "مدت انتظار محافظ صفحه در این دستگاه: {{delay}}.",
@@ -2899,6 +2922,15 @@
         "immichTestOk": "اتصال به Immich با موفقیت انجام شد.",
         "immichPreview": "پیش‌نمایش",
         "immichPreviewUnavailable": "بارگذاری عکس از Immich ممکن نشد.",
+        "immichErrorUrlInvalid": "نشانی URL سرور نامعتبر است. باید با http:// یا https:// شروع شود.",
+        "immichErrorAlbumIdInvalid": "شناسه آلبوم نامعتبر است. آن را در Immich در نشانی آلبوم پیدا می‌کنید.",
+        "immichErrorApiKeyInvalid": "کلید API بیش از حد طولانی است. کلید را دوباره از Immich کپی کنید.",
+        "immichErrorNotConfigured": "برای آزمایش، نشانی URL سرور یا کلید API وجود ندارد.",
+        "immichErrorApiKeyRejected": "Immich کلید API را رد می‌کند. شاید منقضی یا لغو شده باشد یا مجوزی نداشته باشد.",
+        "immichErrorStatus": "Immich با خطا پاسخ داد (وضعیت {{status}}). نشانی URL سرور را بررسی کنید یا بعداً دوباره امتحان کنید.",
+        "immichErrorUnreachable": "دسترسی به Immich ممکن نیست. نشانی URL سرور و در حال اجرا بودن Immich را بررسی کنید.",
+        "immichSaveFailed": "پیکربندی Immich ذخیره نشد.",
+        "immichTestFailed": "اتصال به Immich بررسی نشد.",
         "backToSettings": "بازگشت به تنظیمات",
         "retry": "تلاش مجدد",
         "loadError": "تنظیمات بارگذاری نشد.",
@@ -3384,7 +3416,14 @@
         "permCapabilityTasksReorder": "تغییر ترتیب خانواده",
         "permChildRoleHint": "حساب‌های جدید کودک هنگام ساخت، دسترسی‌های آغازین خودشان را هم می‌گیرند: {{list}}. پس از آن نزد همان عضو نمایش داده می‌شوند.",
         "activeModulesHintMore": "برای پنهان کردن فقط برای خودت به ماژول‌ها ← ناوبری برو.",
-        "permIntroMore": "هر عضو می‌تواند با پیش‌فرض نقش متفاوت باشد. بدون تنظیم، هر نقش دسترسی کامل دارد؛ مدیران همیشه."
+        "permIntroMore": "هر عضو می‌تواند با پیش‌فرض نقش متفاوت باشد. بدون تنظیم، هر نقش دسترسی کامل دارد؛ مدیران همیشه.",
+        "preferenceSaveFailed": "تنظیم ذخیره نشد.",
+        "caldavCalendarReadOnly": "فقط خواندنی: نمی‌توان رویداد تازه‌ای را اینجا ذخیره کرد",
+        "caldavCalendarReadOnlyWaiting_one": "فقط خواندنی: {{count}} رویداد در انتظار بارگذاری به اینجا نمی‌رسد",
+        "caldavCalendarReadOnlyWaiting": "فقط خواندنی: {{count}} رویداد در انتظار بارگذاری به اینجا نمی‌رسند",
+        "reminderListReadOnly": "فقط خواندنی: نمی‌توان مورد تازه‌ای را اینجا ذخیره کرد",
+        "reminderListReadOnlyWaiting_one": "فقط خواندنی: {{count}} مورد در انتظار بارگذاری به اینجا نمی‌رسد",
+        "reminderListReadOnlyWaiting": "فقط خواندنی: {{count}} مورد در انتظار بارگذاری به اینجا نمی‌رسند"
     },
     "login": {
         "tagline": "دوباره خوش آمدید. خانهٔ شما در یک جا.",
@@ -4019,7 +4058,8 @@
             "reasonNameTooLong": "نام فایل یا پوشه بیش از حد طولانی است.",
             "reasonTooDeep": "مسیر از محدودیت پنج سطح پوشه فراتر می‌رود.",
             "reasonParentFailed": "پوشه بالادست ایجاد نشد.",
-            "reasonRateLimited": "سرور در حال دریافت درخواست‌های زیادی است. بعداً دوباره بارگذاری را امتحان کنید."
+            "reasonRateLimited": "سرور در حال دریافت درخواست‌های زیادی است. بعداً دوباره بارگذاری را امتحان کنید.",
+            "folderGoneReplanned": "در این میان یکی از پوشه‌های این بارگذاری حذف شد. پیش‌نمایش وضعیت کنونی را نشان می‌دهد - بارگذاری را دوباره آغاز کنید."
         },
         "errorFolderGone": "این پوشه دیگر وجود ندارد.",
         "errorSelectedFolderGone": "پوشهٔ انتخاب‌شده دیگر وجود ندارد.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} به شما بدهکار است",
         "debtOwes": "{{from}} به {{to}} بدهکار است",
         "balanced": "تسویه‌شده",
-        "balancedInGroup": "{{group}}: تسویه‌شده"
+        "balancedInGroup": "{{group}}: تسویه‌شده",
+        "totalsByMember": "پرداختی هر نفر",
+        "totalsByMemberHint": "مبلغ پرداخت‌شده، و زیر آن سهم خود فرد",
+        "ownShare": "سهم خود: {{amount}}",
+        "paidLabel": "پرداخت‌شده",
+        "totalsByCategory": "بر اساس دسته",
+        "categoryFilter": "فیلتر هزینه‌ها بر اساس دسته",
+        "noExpensesInCategory": "هیچ هزینه‌ای در این دسته نیست."
     },
     "wmo": {
         "0": "آسمان صاف",
@@ -4924,6 +4971,7 @@
             "saveError": "اندازه‌گیری ذخیره نشد.",
             "invalidValue": "لطفاً مقادیر معتبری وارد کنید.",
             "range": {
+                "day": "روز",
                 "week": "هفته",
                 "month": "ماه",
                 "year": "سال"
@@ -4963,6 +5011,7 @@
                 "family": "خانواده"
             },
             "sparse": "اندازه‌گیری‌ها برای نمایش روند بسیار کم است.",
+            "bandValue": "{{mean}}، از {{low}} تا {{high}}",
             "recentMeasurements": "آخرین اندازه‌گیری‌ها",
             "deleteMeasurement": "حذف اندازه‌گیری {{value}} ({{date}})",
             "measurementDeleted": "اندازه‌گیری حذف شد",

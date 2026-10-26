@@ -27,6 +27,7 @@ import { formRowHtml, formRowsHtml } from '/utils/form-row.js';
 import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { loadFamilyUsers } from '/settings/family-users.js';
 import { reloadAfterSave } from '/utils/reload-after-save.js';
+import { errorSentence, loadErrorSentence } from '/utils/friendly-error.js';
 
 // Seit R23 ein eigenes Blatt (registry.js, D14; R10-R22 ein Abschnitt im
 // Blatt Kalender). Neu laden heisst, das Blatt neu zu zeichnen - nicht ueber
@@ -158,7 +159,7 @@ function bindDefaultAssigneeBackfill(container) {
         data = (await api.get(`${endpoint}${query}`)).data ?? {};
       });
     } catch (err) {
-      if (isModalContextCurrent(context)) showToast(err.message || t('common.errorGeneric'), 'danger');
+      if (isModalContextCurrent(context)) showToast(errorSentence(err), 'danger');
       return null;
     }
     if (!isModalContextCurrent(context)) return null;
@@ -187,7 +188,7 @@ function bindDefaultAssigneeBackfill(container) {
         ok = true;
       } catch (err) {
         if (err.status === 409) showToast(t('settings.sync.backfillChanged'), 'warning');
-        else showToast(err.message || t('common.errorGeneric'), 'danger');
+        else showToast(errorSentence(err), 'danger');
       }
     });
     return ok;
@@ -395,7 +396,7 @@ function buildCalendarAssigneeSelect({ source, externalId, currentId }) {
       showToast(t('settings.ics.updatedToast'), 'success');
     } catch (err) {
       select.value = last;
-      showToast(err.message || t('common.errorGeneric'), 'danger');
+      showToast(errorSentence(err), 'danger');
     } finally {
       select.disabled = false;
     }
@@ -429,6 +430,18 @@ function buildCalendarList(account, calendars) {
     const name = document.createElement('span');
     name.className = 'caldav-calendar-name';
     name.textContent = cal.calendarName || cal.calendarUrl;
+    // Nur lesbar geteilt (#1840): lesen geht, als Ziel neuer Termine wird
+    // der Kalender nicht angeboten. Wartet schon etwas auf den Upload
+    // hierher, nennt die Zeile die Zahl - ein gespeichertes Ziel wird nicht
+    // still geleert.
+    if (cal.writable === false) {
+      const note = document.createElement('span');
+      note.className = 'caldav-calendar-source';
+      note.textContent = cal.waitingUploads > 0
+        ? t('settings.caldavCalendarReadOnlyWaiting', { count: cal.waitingUploads })
+        : t('settings.caldavCalendarReadOnly');
+      name.appendChild(note);
+    }
 
     label.append(checkbox, color, name);
     // VOR DEM HAKEN, NICHT NACH DEM SYNC: Das Feld stand früher erst da, wenn
@@ -897,7 +910,7 @@ function buildGoogleProvider(googleStatus, user) {
         showToast(t('settings.syncSuccess', { provider: 'Google Calendar' }), 'success');
       } catch (err) {
         if (err.reauthHandled) return;
-        showToast(err.message || t('common.errorGeneric'), 'danger');
+        showToast(googleErrorSentence(err), 'danger');
       } finally {
         syncBtn.disabled = false;
         syncBtn.textContent = t('settings.syncNow');
@@ -946,7 +959,7 @@ function buildGoogleDisconnectButton(googleStatus) {
       );
       window.yuvomi?.navigate(SYNC_CALENDAR_HREF);
     } catch (err) {
-      showToast(err.message || t('common.errorGeneric'), 'danger');
+      showToast(errorSentence(err), 'danger');
     }
   });
   return disconnectBtn;
@@ -1045,7 +1058,7 @@ function buildMirroredCleanup({ count, endpoint }) {
         // hatte. Der Block existiert wegen des Rückstands; der ist jetzt fort.
         group.remove();
       } catch (err) {
-        showToast(err.message || t('common.errorGeneric'), 'danger');
+        showToast(errorSentence(err), 'danger');
       }
     });
   });
@@ -1216,6 +1229,16 @@ function buildProviderHint(text) {
 /** Grund, mit dem /calendar/google/calendars ein abgelehntes Token meldet (#2019). */
 const GOOGLE_REAUTH_REASON = 'google_reauth_required';
 
+/**
+ * Der Satz der App zu einem gescheiterten Google-Aufruf (#1695), nie der Text
+ * des Servers. Konnte handleReauth die Karte nicht neu aufbauen (Status-Abruf
+ * gescheitert), nennt der Toast die abgelaufene Anmeldung - in den Worten, die
+ * die Outlook-Karte fuer denselben Fall hat.
+ */
+function googleErrorSentence(err) {
+  return err?.data?.reason === GOOGLE_REAUTH_REASON ? t('settings.outlookReauthRequired') : errorSentence(err);
+}
+
 function buildGoogleCalendarPicker(googleCall) {
   // Eine Liste, kein Feld (R19): ihr Name ist keine `<label>` ohne
   // Bedienelement, und sie steht nicht im Feld-Dialekt `.form-group`.
@@ -1291,7 +1314,7 @@ function buildGoogleCalendarPicker(googleCall) {
               );
             } catch (err) {
               checkbox.checked = !enabled;
-              if (!err.reauthHandled) showToast(err.message || t('common.errorGeneric'), 'danger');
+              if (!err.reauthHandled) showToast(googleErrorSentence(err), 'danger');
             }
           });
         });
@@ -1300,7 +1323,7 @@ function buildGoogleCalendarPicker(googleCall) {
       if (err.reauthHandled) return;
       const p = document.createElement('p');
       p.className = 'form-hint';
-      p.textContent = err.message || t('common.errorGeneric');
+      p.textContent = loadErrorSentence(err) ?? t('common.errorGeneric');
       list.replaceChildren(p);
     }
   })();
@@ -1327,7 +1350,7 @@ function buildGoogleReadonlyToggle(googleStatus, googleCall) {
         await googleCall(() => api.put('/calendar/google/readonly', { readonly: enabled }));
       } catch (err) {
         checkbox.checked = !enabled;
-        if (!err.reauthHandled) showToast(err.message || t('common.errorGeneric'), 'danger');
+        if (!err.reauthHandled) showToast(googleErrorSentence(err), 'danger');
       }
     });
   });
@@ -1377,7 +1400,7 @@ function buildOutlookCalendarList(account, calendars, user) {
           );
         } catch (err) {
           checkbox.checked = !enabled;
-          showToast(err.message || t('common.errorGeneric'), 'danger');
+          showToast(errorSentence(err), 'danger');
         }
       });
     });

@@ -355,6 +355,8 @@
         "customizeResetDone": "你的概覽重新跟隨家庭。",
         "optionsFor": "{{widget}}選項",
         "optionCalendarScope": "顯示哪些日程？",
+        "optionCalendarCalendars": "顯示哪些行事曆？",
+        "optionCalendarCalendarsHint": "未選擇時，卡片會顯示所有行事曆中的行程。",
         "optionCalendarAll": "全部日程",
         "optionCalendarLimit": "顯示多少個日程？",
         "optionCalendarLimitHint": "適用於較高的尺寸，並相應加高卡片。在「{{small}}」尺寸下只顯示接下來的日程，在「{{size}}」尺寸下顯示一週。",
@@ -788,7 +790,11 @@
         "tickedSection": "已勾選",
         "itemBackToast": "「{{name}}」已回到清單。",
         "itemStateOpen": "未勾選",
-        "itemAddedToast": "已將「{{name}}」加入「{{category}}」。"
+        "itemAddedToast": "已將「{{name}}」加入「{{category}}」。",
+        "moveReturned": {
+            "refused": "「{{item}}」已回到「{{back}}」：伺服器不接受將它放入「{{target}}」。",
+            "waited": "「{{item}}」未移到「{{target}}」：「{{back}}」的同步已關閉超過一週。開啟該清單後，項目會重新出現在「{{back}}」。"
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} 種食材",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "日曆側邊欄",
         "upNextTitle": "接下來",
         "upNextEmpty": "未來三週沒有安排。",
-        "shiftLegend": "班次圖例"
+        "shiftLegend": "班次圖例",
+        "errorCalendarGone": "此日曆已不存在。",
+        "errorCalendarNameInvalid": "日曆名稱最多 {{limit}} 個字元。",
+        "errorCalendarOrderChanged": "日曆在此期間已變更。",
+        "errorDeleteFeedAdminOnly": "此日曆正在匯出。只有管理員可以刪除它。",
+        "errorEventGone": "此日程已不存在。",
+        "errorSelectedCalendarGone": "所選的日曆已不存在。",
+        "errorSeriesNoOccurrence": "依此重複設定，從開始日期起不會有任何日程。",
+        "localCalendarUploadsHint": "此行事曆中的活動會透過 Apple Calendar 上傳到 iCloud。"
     },
     "noteCategories": {
         "categories": "分類",
@@ -1274,7 +1288,11 @@
         "checklistDone": "已完成",
         "checklistOpen": "待處理",
         "errorNoteGone": "這則便籤已不存在。",
-        "errorSelectedCategoryGone": "所選的其中一個分類已不存在。"
+        "errorSelectedCategoryGone": "所選的其中一個分類已不存在。",
+        "lockedToggle": "鎖定編輯",
+        "lockedBadge": "已鎖定",
+        "lockedHint": "只有你和管理員可以變更、釘選或刪除這則筆記，包括勾選清單項目。其他人仍可閱讀。",
+        "errorLocked": "這則筆記已鎖定。只有建立者和管理員可以變更。"
     },
     "markdown": {
         "bold": "加粗 (Ctrl+B)",
@@ -1944,9 +1962,14 @@
         "themeLight": "淺色",
         "themeDark": "深色",
         "wallModeLabel": "壁掛模式",
-        "wallModeHint": "把本裝置的首頁變成適合牆上平板的安靜顯示：時間、今日安排、今天輪到誰以及天氣，字號大到兩米外也能看清，且無需操作。22 點至 6 點之間會自動變暗。僅對本裝置生效，不影響家裡的其他裝置。",
+        "wallModeHint": "把本裝置的首頁變成適合牆上平板的安靜顯示：時間、今日安排、今天輪到誰以及天氣，字號大到兩米外也能看清，且無需操作。夜間時段會自動變暗。僅對本裝置生效，不影響家裡的其他裝置。",
         "wallModeOn": "壁掛模式已開啟，可在{{page}}中檢視。",
         "wallModeOff": "壁掛模式已關閉。",
+        "nightHoursLabel": "夜間時段",
+        "nightHoursHint": "在這段時間內，壁掛模式與螢幕保護會依家庭時間自動變暗。僅適用於此裝置。",
+        "nightHoursFrom": "變暗開始",
+        "nightHoursUntil": "變暗結束",
+        "nightHoursSaved": "此裝置的夜間時段：{{from}} 至 {{until}}。",
         "screensaverIdleLabel": "螢幕保護程式啟動前等待",
         "screensaverIdleHint": "本裝置在無人觸碰多久後啟動照片螢幕保護程式。僅適用於本裝置，不影響家庭中的其他裝置。管理員連線 Immich 後生效。",
         "screensaverIdleSaved": "此裝置的螢幕保護等待時間：{{delay}}",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "已成功連線到 Immich。",
         "immichPreview": "預覽",
         "immichPreviewUnavailable": "無法從 Immich 載入照片。",
+        "immichErrorUrlInvalid": "伺服器 URL 無效，必須以 http:// 或 https:// 開頭。",
+        "immichErrorAlbumIdInvalid": "相簿 ID 無效。可以在 Immich 中相簿的網址裡找到它。",
+        "immichErrorApiKeyInvalid": "API 金鑰過長。請從 Immich 重新複製金鑰。",
+        "immichErrorNotConfigured": "測試需要伺服器 URL 和 API 金鑰。",
+        "immichErrorApiKeyRejected": "Immich 拒絕了此 API 金鑰。它可能已過期、遭撤銷或缺少權限。",
+        "immichErrorStatus": "Immich 回傳了錯誤（狀態 {{status}}）。請檢查伺服器 URL 或稍後再試。",
+        "immichErrorUnreachable": "無法連線到 Immich。請檢查伺服器 URL 以及 Immich 是否正在執行。",
+        "immichSaveFailed": "無法儲存 Immich 設定。",
+        "immichTestFailed": "無法檢查與 Immich 的連線。",
         "backToSettings": "返回設定",
         "retry": "重試",
         "loadError": "無法載入設定。",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "變更家庭排序",
         "permChildRoleHint": "新的兒童帳戶在建立時還會獲得自己的初始權限：{{list}}。之後會顯示在該成員處。",
         "activeModulesHintMore": "只想在自己這裡隱藏，請前往「模組 → 導航」。",
-        "permIntroMore": "各個成員可以不同於角色的預設設定。若不設定，每個角色都擁有完全存取權限；管理員始終如此。"
+        "permIntroMore": "各個成員可以不同於角色的預設設定。若不設定，每個角色都擁有完全存取權限；管理員始終如此。",
+        "preferenceSaveFailed": "無法儲存設定。",
+        "caldavCalendarReadOnly": "唯讀：無法在此儲存新活動",
+        "caldavCalendarReadOnlyWaiting_one": "唯讀：等待上傳到這裡的 {{count}} 個活動不會送達",
+        "caldavCalendarReadOnlyWaiting": "唯讀：等待上傳到這裡的 {{count}} 個活動不會送達",
+        "reminderListReadOnly": "唯讀：無法在此儲存新項目",
+        "reminderListReadOnlyWaiting_one": "唯讀：等待上傳到這裡的 {{count}} 個項目不會送達",
+        "reminderListReadOnlyWaiting": "唯讀：等待上傳到這裡的 {{count}} 個項目不會送達"
     },
     "login": {
         "tagline": "歡迎回來。你的家，盡在一處。",
@@ -3955,7 +3994,8 @@
             "reasonNameTooLong": "檔名或資料夾名過長。",
             "reasonTooDeep": "路徑超過五層資料夾限制。",
             "reasonParentFailed": "無法建立上級資料夾。",
-            "reasonRateLimited": "伺服器當前收到的請求過多。請稍後重試上傳。"
+            "reasonRateLimited": "伺服器當前收到的請求過多。請稍後重試上傳。",
+            "folderGoneReplanned": "此上傳中的一個資料夾在此期間已被刪除。預覽顯示目前狀態，請重新開始上傳。"
         },
         "errorFolderGone": "此資料夾已不存在。",
         "errorSelectedFolderGone": "所選資料夾已不存在。",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} 欠你",
         "debtOwes": "{{from}} 欠 {{to}}",
         "balanced": "已結清",
-        "balancedInGroup": "{{group}}：已結清"
+        "balancedInGroup": "{{group}}：已結清",
+        "totalsByMember": "每人已付",
+        "totalsByMemberHint": "各自墊付的金額，下方為自己的份額",
+        "ownShare": "自己的份額：{{amount}}",
+        "paidLabel": "已付",
+        "totalsByCategory": "依類別",
+        "categoryFilter": "依類別篩選支出",
+        "noExpensesInCategory": "此類別沒有支出。"
     },
     "wmo": {
         "0": "晴天",
@@ -4924,6 +4971,7 @@
             "saveError": "無法儲存測量值。",
             "invalidValue": "請輸入有效的數值。",
             "range": {
+                "day": "日",
                 "week": "週",
                 "month": "月",
                 "year": "年"
@@ -4963,6 +5011,7 @@
                 "family": "家庭"
             },
             "sparse": "測量資料太少，無法顯示趨勢。",
+            "bandValue": "{{mean}}，{{low}} 至 {{high}}",
             "recentMeasurements": "最近的測量",
             "deleteMeasurement": "刪除測量 {{value}}（{{date}}）",
             "measurementDeleted": "測量已刪除",

@@ -35,6 +35,7 @@ import { startFakeDavServer } from './caldav-fake-server.js';
 const dbmod = await import('../server/db.js');
 const db = dbmod.get();
 const { default: shoppingRouter } = await import('../server/routes/shopping.js');
+const { default: remindersRouter } = await import('../server/routes/reminders.js');
 const todoOutbound  = await import('../server/services/caldav-todo-outbound.js');
 const remindersSync = await import('../server/services/caldav-reminders-sync.js');
 const { runSerialized } = await import('../server/utils/sync-lock.js');
@@ -53,6 +54,7 @@ app.use((req, _res, next) => {
   req.session = { userId: U, role: 'admin' };
   next();
 });
+app.use('/reminders', remindersRouter);
 app.use('/', shoppingRouter);
 const http = app.listen(0, '127.0.0.1');
 const baseUrl = await new Promise((r) => http.on('listening', () => r(`http://127.0.0.1:${http.address().port}`)));
@@ -94,6 +96,10 @@ function reset() {
     'caldav_upload_attempts', 'caldav_todo_pending_deletions', 'shopping_item_tags',
     'shopping_items', 'shopping_lists', 'caldav_reminder_selection', 'caldav_accounts',
   ]) db.prepare(`DELETE FROM ${table}`).run();
+  // Die Meldungen aus #1912; ihre Erinnerungen gehen per Trigger mit.
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'shopping_move_notices'").get()) {
+    db.prepare('DELETE FROM shopping_move_notices').run();
+  }
   dav.reset();
   dav2.reset();
   account1 = Number(db.prepare(
@@ -1052,4 +1058,325 @@ for (const [shape, as404] of [['ausgelassen', false], ['404-Eintrag', true]]) te
   await remindersSync.sync();
   assert.deepEqual(rowsOf(), [], 'der Abruf raeumt die Zeile wie jede, deren Objekt der Server nicht mehr fuehrt');
   assert.equal(b2, b.url);
+});
+
+// ── Ein wartender Umzug bekommt ein Ende (#1911) ────────────────────────────────
+
+/**
+ * Stellt den Beginn eines wartenden Umzugs um mehr als die Frist zurueck -
+ * relativ zur Uhr von jetzt, kein fester Kalendertag.
+ */
+function backdate(id, days = todoOutbound.SHOPPING_MOVE_WAIT_DAYS + 1) {
+  const columns = db.prepare('PRAGMA table_info(shopping_items)').all().map((c) => c.name);
+  if (!columns.includes('outbound_move_since')) return;
+  db.prepare(`UPDATE shopping_items SET outbound_move_since = datetime('now', ?) WHERE id = ?`).run(`-${days} days`, id);
+}
+
+test('Schema: ein Umzug merkt sich, seit wann er wartet (Migration 259)', async () => {
+  const columns = db.prepare('PRAGMA table_info(shopping_items)').all().map((c) => c.name);
+  assert.ok(columns.includes('outbound_move_since'));
+  const { b, item } = await mirroredItem({ target: { enabled: false } });
+  await patch(item.id, { list_id: b.listId });
+  const since = row(item.id).outbound_move_since;
+  assert.ok(since, 'die Vormerkung setzt den Beginn');
+  assert.ok(Math.abs(Date.parse(`${since.replace(' ', 'T')}Z`) - Date.now()) < 60_000, 'der Beginn ist jetzt');
+});
+
+test('Quellliste abgewaehlt, die Frist ist um: der Artikel geht zurueck, sein Eintrag bleibt unberuehrt und kommt mit der Liste wieder', async () => {
+  const { a, b, item } = await mirroredItem();
+  select(account1, a.url, false);
+  await patch(item.id, { list_id: b.listId });
+  await remindersSync.sync();
+  assert.deepEqual([row(item.id).list_id, row(item.id).outbound_move], [b.listId, 1], 'in der Frist wartet der Umzug');
+
+  backdate(item.id);
+  dav.requests.length = 0;
+  await remindersSync.sync();
+
+  assert.deepEqual(
+    dav.requests.filter((req) => req.method !== 'PROPFIND' && req.path.startsWith(new URL(a.url).pathname)), [],
+    'in der abgewaehlten Liste wird weiter nichts gelesen oder entfernt',
+  );
+  assert.equal(dav.seen('PUT').length, 0, 'am neuen Platz wird nichts abgelegt');
+  assert.equal(objectsWith(dav, a.url)[0]?.data, original(), 'das Original ist, wie es war');
+  assert.deepEqual(objectsWith(dav, b.url), []);
+  // Die Zeile steht nicht mehr auf der neuen Liste. Auf der abgewaehlten
+  // alten raeumt der Abruf sie ab wie jeden Artikel dort - ihr Eintrag lebt
+  // auf dem Server weiter und kommt mit der Liste zurueck.
+  assert.ok(!named('Milch').some((x) => x.list_id === b.listId || x.outbound_move === 1));
+  assert.deepEqual(orders(), [], 'kein Loeschauftrag fuer das Original');
+
+  select(account1, a.url, true);
+  await remindersSync.sync();
+  assert.deepEqual(named('Milch').map((x) => [x.list_id, x.outbound_move]), [[a.listId, 0]]);
+  assert.equal(objectsWith(dav, a.url)[0]?.data, original());
+});
+
+test('Die Quellliste gibt es auf dem Server nicht mehr: der Artikel bleibt auf der neuen Liste und wird dort neu angelegt', async () => {
+  const { a, b, item } = await mirroredItem();
+  dav.removeCollection(a.url);
+  await patch(item.id, { list_id: b.listId });
+  assert.equal(row(item.id).outbound_move, 1);
+
+  await remindersSync.sync();
+
+  const now = row(item.id);
+  assert.ok(now, 'der Artikel ist noch da');
+  assert.deepEqual([now.list_id, now.outbound_move], [b.listId, 0]);
+  assert.equal(named('Milch').length, 1);
+  const there = server_objects(dav, b.url, 'SUMMARY:Milch');
+  assert.equal(there.length, 1, 'in der Zielliste liegt der Artikel als neuer Eintrag');
+  await remindersSync.sync();
+  assert.deepEqual(named('Milch').map((x) => [x.id, x.list_id]), [[item.id, b.listId]], 'der naechste Abruf laesst ihn stehen');
+  assert.deepEqual(orders(), []);
+});
+
+/** Die Objekte einer Collection, deren Text `needle` enthaelt. */
+function server_objects(server, collectionUrl, needle) {
+  return server.objectNames(collectionUrl)
+    .map((name) => server.getObject(collectionUrl, name))
+    .filter((obj) => obj.data.includes(needle));
+}
+
+/** Das Original im zweiten Konto, alle seine Listen abgeschaltet, Ziel im ersten. */
+async function itemFromSwitchedOffAccount() {
+  reset();
+  secondAccount();
+  const a = mirroredList('alt', { server: dav2, accountId: account2 });
+  const b = mirroredList('neu');
+  dav2.putObject(a.url, FILE, original());
+  await remindersSync.sync();
+  const [item] = rowsOf();
+  assert.equal(item?.list_id, a.listId);
+  select(account2, a.url, false);
+  await patch(item.id, { list_id: b.listId });
+  await remindersSync.sync();
+  assert.deepEqual([row(item.id).list_id, row(item.id).outbound_move], [b.listId, 1], 'in der Frist wartet der Umzug');
+  return { a, b, item };
+}
+
+test('Das Konto der alten Liste hat keine Liste eingeschaltet, die Frist ist um: der Lauf erreicht es trotzdem, der Artikel geht zurueck', async () => {
+  const { a, item } = await itemFromSwitchedOffAccount();
+  backdate(item.id);
+
+  await remindersSync.sync();
+
+  assert.deepEqual([row(item.id)?.list_id, row(item.id)?.outbound_move], [a.listId, 0]);
+  assert.equal(objectsWith(dav2, a.url)[0]?.data, original());
+  assert.equal(dav2.seen('DELETE').length, 0);
+});
+
+test('Das Konto der alten Liste hat keine Liste eingeschaltet, die Zuordnung des Ziels faellt: der Umzug wird zum Loeschen, der Artikel bleibt', async () => {
+  const { a, b, item } = await itemFromSwitchedOffAccount();
+  db.prepare('DELETE FROM caldav_reminder_selection WHERE list_url = ?').run(b.url);
+
+  await remindersSync.sync();
+
+  const now = row(item.id);
+  assert.deepEqual([now.list_id, now.external_source, now.outbound_move], [b.listId, 'local', 0]);
+  assert.deepEqual(orders().map((o) => [o.account_id, o.uid]), [[account2, UID]], 'der Auftrag wartet auf die abgeschaltete Liste');
+  assert.equal(objectsWith(dav2, a.url).length, 1, 'abgeschaltet heisst: dort wird nichts entfernt');
+});
+
+test('Das Konto der alten Liste hat keine Liste eingeschaltet, und die alte gibt es nicht mehr: der Artikel wird in der neuen angelegt', async () => {
+  const { a, b, item } = await itemFromSwitchedOffAccount();
+  dav2.removeCollection(a.url);
+  dav2.addCollection('anderes', { name: 'anderes', components: ['VTODO'] });
+
+  await remindersSync.sync();
+  assert.deepEqual([row(item.id)?.list_id, row(item.id)?.outbound_move], [b.listId, 0], 'der Umzug ist geloest');
+  // Das Zielkonto lief in diesem Durchgang vor dem der alten Liste: der Upload
+  // geht mit dem naechsten.
+  await remindersSync.sync();
+
+  const now = row(item.id);
+  assert.deepEqual([now?.list_id, now?.outbound_move, now?.external_account_id], [b.listId, 0, account1]);
+  assert.equal(server_objects(dav, b.url, 'SUMMARY:Milch').length, 1);
+});
+
+test('Die alte Liste ist inzwischen den Aufgaben zugeordnet: aus ihr wird nichts mitgenommen, der Umzug wartet', async () => {
+  const { a, b, item } = await mirroredItem();
+  db.prepare("UPDATE caldav_reminder_selection SET target_module = 'tasks', target_list_id = NULL WHERE list_url = ?").run(a.url);
+  dav.requests.length = 0;
+
+  await patch(item.id, { list_id: b.listId });
+
+  assert.deepEqual(
+    dav.requests.filter((req) => req.method !== 'PROPFIND' && req.path.startsWith(new URL(a.url).pathname)), [],
+  );
+  assert.equal(dav.seen('PUT').length, 0);
+  assert.equal(objectsWith(dav, a.url)[0]?.data, original());
+  assert.deepEqual([row(item.id).list_id, row(item.id).outbound_move], [b.listId, 1]);
+
+  // Der Lauf liest die alte Liste jetzt als Aufgabenliste: fuer den Prune des
+  // Einkaufs ist sie nicht gelesen, der wartende Artikel bleibt stehen.
+  await remindersSync.sync();
+  assert.deepEqual([row(item.id)?.list_id, row(item.id)?.outbound_move], [b.listId, 1], 'der Prune nimmt den wartenden Artikel nicht fort');
+});
+
+test('Die alte Liste wird abgeschaltet, waehrend das Original gelesen wird: am neuen Platz wird nichts abgelegt, der Umzug wartet', async () => {
+  const { a, b, item } = await mirroredItem();
+  let once = true;
+  dav.refuse({
+    method: 'REPORT', path: new URL(a.url).pathname,
+    when: () => {
+      if (once) { once = false; select(account1, a.url, false); }
+      return false;
+    },
+  });
+
+  await patch(item.id, { list_id: b.listId });
+
+  assert.equal(once, false, 'das Original wurde nicht gelesen - der Fall misst etwas anderes');
+  assert.equal(dav.seen('PUT').length, 0);
+  assert.equal(dav.seen('DELETE').length, 0);
+  assert.equal(objectsWith(dav, a.url)[0]?.data, original());
+  assert.deepEqual([row(item.id).list_id, row(item.id).outbound_move], [b.listId, 1]);
+  assert.deepEqual(notes(), []);
+});
+
+test('Nachtragen nach einem 412, und der neue Platz antwortet 404: die Notiz des ALTEN Platzes bleibt, sein Objekt auch', async () => {
+  const { a, b, item } = await mirroredItem();
+  let changed = false;
+  dav.refuse({
+    method: 'DELETE',
+    when: () => {
+      if (!changed) { changed = true; dav.putObject(a.url, FILE, original({ summary: 'Milch laktosefrei' })); }
+      return false;
+    },
+  });
+  dav.refuse({ method: 'PUT', path: `${new URL(b.url).pathname}${FILE}`, status: 404, when: () => changed });
+
+  await patch(item.id, { list_id: b.listId });
+
+  assert.ok(changed, 'am alten Platz kam kein DELETE an - der Fall misst etwas anderes');
+  assert.ok(dav.seen('PUT').some((r) => r.status === 404), 'das Nachtragen kam nicht beim neuen Platz an');
+  assert.match(objectsWith(dav, a.url)[0]?.data || '', /SUMMARY:Milch laktosefrei/, 'das geaenderte Objekt am alten Platz bleibt');
+  assert.ok(
+    notes().some((n) => n.row_id === item.id && n.account_id === account1 && n.collection_url === a.url),
+    'die Notiz des alten Platzes bleibt fuer den naechsten Durchgang',
+  );
+});
+
+// ── Wer verschoben hat, erfaehrt, dass der Umzug zurueckging (#1912) ──────────
+
+/** Die Meldungen an der Glocke, wie die Glocke sie liefert. */
+async function bell() {
+  const res = await fetch(`${baseUrl}/reminders/pending`);
+  assert.equal(res.status, 200);
+  return (await res.json()).data.filter((r) => r.entity_type === 'shopping_move_returned');
+}
+
+const notices = () => {
+  const has = db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'shopping_move_notices'").get();
+  return has ? db.prepare('SELECT * FROM shopping_move_notices ORDER BY id').all() : [];
+};
+
+test('Der Umzug merkt sich, wer verschoben hat (Migration 260)', async () => {
+  const { b, item } = await mirroredItem({ target: { enabled: false } });
+  await patch(item.id, { list_id: b.listId });
+  assert.equal(row(item.id).outbound_move_by, U);
+});
+
+test('Fuenfte Absage: wer verschoben hat, bekommt EINE Meldung an der Glocke, mit Artikel, alter und neuer Liste', async () => {
+  const { a, b, item } = await mirroredItem();
+  dav.refuse({ method: 'PUT', status: 403 });
+  await patch(item.id, { list_id: b.listId });
+  for (let n = 2; n <= 4; n++) await remindersSync.sync();
+  assert.deepEqual(await bell(), [], 'vor der fuenften Absage meldet sich nichts');
+  await remindersSync.sync();
+  assert.equal(row(item.id).list_id, a.listId);
+
+  const shown = await bell();
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].created_by, U);
+  assert.equal(shown[0].entity_title, 'Milch');
+  assert.deepEqual(
+    { ...shown[0].move_notice },
+    { item_name: 'Milch', back_list_id: a.listId, back_list_name: 'alt', target_list_name: 'neu', reason: 'refused' },
+  );
+  assert.equal(shown[0].target_url, `/shopping?list=${a.listId}`);
+  assert.equal(row(item.id).outbound_move_by, null, 'mit dem Umzug faellt auch, wer ihn angestossen hat');
+
+  dav.allowAll();
+  await remindersSync.sync();
+  assert.equal(notices().length, 1, 'ein weiterer Lauf meldet nichts doppelt');
+});
+
+test('Die Zielliste gibt es nicht mehr: die Meldung kommt ebenso', async () => {
+  const { a, b, item } = await mirroredItem();
+  dav.removeCollection(b.url);
+  await patch(item.id, { list_id: b.listId });
+  await remindersSync.sync();
+  assert.equal(row(item.id).list_id, a.listId);
+  assert.deepEqual(notices().map((n) => [n.user_id, n.item_name, n.back_list_name, n.target_list_name, n.reason]),
+    [[U, 'Milch', 'alt', 'neu', 'refused']]);
+  assert.equal((await bell()).length, 1);
+});
+
+test('Die Frist ist um: die Meldung kommt mit ihrem eigenen Grund und bleibt, auch wenn der Abruf die Zeile auf der abgeschalteten Liste abraeumt', async () => {
+  const { a, b, item } = await mirroredItem();
+  select(account1, a.url, false);
+  await patch(item.id, { list_id: b.listId });
+  await remindersSync.sync();
+  assert.deepEqual(notices(), [], 'in der Frist meldet sich nichts');
+  backdate(item.id);
+  await remindersSync.sync();
+  await remindersSync.sync();
+
+  const shown = await bell();
+  assert.equal(shown.length, 1);
+  assert.deepEqual([shown[0].move_notice.reason, shown[0].move_notice.back_list_name, shown[0].move_notice.target_list_name],
+    ['waited', 'alt', 'neu']);
+  assert.equal(shown[0].entity_title, 'Milch', 'der Name kommt aus der Meldung, nicht aus der Zeile');
+  // Der Satz sagt, dass nicht verschoben wurde, warum, und wann der Artikel
+  // wiederkommt - er verschwindet ja lokal mit der abgeschalteten Liste.
+  const { translate } = await import('../server/utils/i18n.js');
+  const params = { item: 'Milch', back: 'alt', target: 'neu' };
+  assert.equal(
+    translate('de', 'shopping.moveReturned.waited', params),
+    '„Milch“ wurde nicht nach „neu“ verschoben: Der Abgleich von „alt“ ist seit über einer Woche aus. Der Artikel erscheint wieder auf „alt“, sobald die Liste eingeschaltet wird.',
+  );
+  assert.match(translate('en', 'shopping.moveReturned.waited', params), /was not moved to "neu".*once that list is switched on/);
+});
+
+test('Unbekannt, wer verschoben hat (Umzug von vor dem Update): keine Meldung, der Artikel geht trotzdem zurueck', async () => {
+  const { a, b, item } = await mirroredItem();
+  dav.removeCollection(b.url);
+  await patch(item.id, { list_id: b.listId });
+  db.prepare('UPDATE shopping_items SET outbound_move_by = NULL WHERE id = ?').run(item.id);
+  await remindersSync.sync();
+  assert.equal(row(item.id).list_id, a.listId);
+  assert.deepEqual(notices(), []);
+});
+
+test('Wer verschoben hat, darf den Einkauf nicht mehr sehen: keine Meldung', async () => {
+  const { a, b, item } = await mirroredItem();
+  const member = Number(db.prepare(
+    "INSERT INTO users (username, display_name, password_hash, role) VALUES (?, 'Kind', 'x', 'member')"
+  ).run(`kind-${Date.now()}`).lastInsertRowid);
+  db.prepare(`INSERT INTO access_permissions (subject_type, subject_id, resource_type, resource_key, access)
+    VALUES ('user', ?, 'module', 'shopping', 'none')`).run(String(member));
+  dav.removeCollection(b.url);
+  await patch(item.id, { list_id: b.listId });
+  db.prepare('UPDATE shopping_items SET outbound_move_by = ? WHERE id = ?').run(member, item.id);
+  await remindersSync.sync();
+  assert.equal(row(item.id).list_id, a.listId);
+  assert.deepEqual(notices(), []);
+});
+
+test('Meldung und Absender eines Umzugs halten ein Konto nicht fest: es bleibt loeschbar (#1912)', async () => {
+  const { userTraces } = await import('../server/services/user-removal.js');
+  const { a, b, item } = await mirroredItem();
+  const member = Number(db.prepare(
+    "INSERT INTO users (username, display_name, password_hash, role) VALUES (?, 'Mitglied', 'x', 'member')"
+  ).run(`mitglied-${Date.now()}`).lastInsertRowid);
+  dav.removeCollection(b.url);
+  await patch(item.id, { list_id: b.listId });
+  db.prepare('UPDATE shopping_items SET outbound_move_by = ? WHERE id = ?').run(member, item.id);
+  assert.deepEqual(userTraces(db, member), [], 'der wartende Umzug ist keine Spur in geteilten Daten');
+  await remindersSync.sync();
+  assert.equal(row(item.id).list_id, a.listId);
+  assert.equal(notices().filter((n) => n.user_id === member).length, 1);
+  assert.deepEqual(userTraces(db, member), [], 'die Meldung ist eine Zustellung an das Konto, keine Spur');
 });

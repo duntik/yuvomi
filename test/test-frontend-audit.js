@@ -7177,9 +7177,10 @@ test('route failures expose a localized recoverable alert instead of raw technic
   // setAttribute hier. Geprueft wird deshalb die Variante - die Rolle selbst
   // haelt der Renderer-Guard weiter oben fest.
   // Seit der Re-Critique 2026-10-17 nimmt renderError den Seitennamen mit
-  // (Test darunter); die Ursache bleibt friendlyError(err).
+  // (Test darunter); die Ursache sagt seit #1909 unhandledErrorSentence(err),
+  // nie den Text des Servers.
   assert.match(router, /function renderError\(container,\s*err[,)][\s\S]*emptyStateEl\(\{[\s\S]{0,1200}?variant:\s*'error'/);
-  assert.match(router, /function renderError\(container,\s*err[,)][\s\S]*const cause = friendlyError\(err\);[\s\S]*description:[^\n]*: cause,/);
+  assert.match(router, /function renderError\(container,\s*err[,)][\s\S]*const cause = unhandledErrorSentence\(err\);[\s\S]*description:[^\n]*: cause,/);
   assert.match(router, /state\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
   assert.match(friendly, /Failed to fetch\|NetworkError\|Load failed/i);
   assert.match(friendly, /return t\(['"]common\.errorServer['"]\)/);
@@ -15784,6 +15785,9 @@ test('index.html and offline.html declare color-scheme before any stylesheet', (
  */
 test('theme-init.js pins the color-scheme meta to an explicit theme', () => {
   const source = read('../public/theme-init.js');
+  // Die Nacht fragt theme-init.js bei /night-hours.js (#2234), das im Kopf
+  // davor laeuft - hier wie dort zuerst geladen.
+  new Function(read('../public/night-hours.js'))();
   const run = (entries, hours = 12) => {
     const map = new Map(Object.entries(entries));
     const storage = {
@@ -17184,8 +17188,8 @@ test('der Wand-Modus laesst die Shell abtreten - und versteckt den FAB NICHT per
 
 test('der Vorab-Wand-Modus in theme-init.js driftet nicht von utils/wall-mode.js', () => {
   // theme-init.js laeuft als klassisches <script> im <head>, vor jedem Modul -
-  // es KANN nicht importieren und traegt die Werte deshalb als Literale. Die
-  // Quelle der Wahrheit bleibt utils/wall-mode.js; hier steht die Naht.
+  // es KANN nicht importieren und traegt Schluessel und Route deshalb als
+  // Literale. Die Quelle der Wahrheit bleibt utils/wall-mode.js; hier steht die Naht.
   const init = read('../public/theme-init.js');
   const mod = read('../public/utils/wall-mode.js');
 
@@ -17193,19 +17197,48 @@ test('der Vorab-Wand-Modus in theme-init.js driftet nicht von utils/wall-mode.js
   assert.equal(modKey, 'yuvomi-wall-mode', 'der Schluessel steht in wall-mode.js');
   assert.ok(init.includes(`'${modKey}'`), `theme-init.js liest denselben Schluessel (${modKey})`);
 
-  const from = Number(mod.match(/export const WALL_NIGHT_FROM = (\d+)/)?.[1]);
-  const to = Number(mod.match(/export const WALL_NIGHT_TO = (\d+)/)?.[1]);
-  assert.equal(from, 22);
-  assert.equal(to, 6);
-
-  const initWindow = init.match(/hour >= (\d+) \|\| hour < (\d+)/);
-  assert.ok(initWindow, 'theme-init.js traegt ein Nachtfenster');
-  assert.equal(Number(initWindow[1]), from, 'dieselbe Nachtgrenze wie wall-mode.js');
-  assert.equal(Number(initWindow[2]), to, 'dieselbe Morgengrenze wie wall-mode.js');
-
   // Und die Route: der Modus ist ein Zustand des Dashboards, kein zweiter Ort.
   assert.match(mod, /export function isWallRoute\(path\) \{\s*return path === '\/';/);
   assert.ok(init.includes("location.pathname !== '/'"), 'theme-init.js kennt dieselbe Route');
+});
+
+test('die Nacht hat EINE Rechnung: theme-init.js und isWallNight fragen /night-hours.js (#2234)', () => {
+  // Bis #2234 standen die Stunden zweimal da (Konstanten im Modul, Literale im
+  // Kopf) und lasen zwei Uhren. Jetzt rechnet nur /night-hours.js; der Kopf
+  // fragt es mit Stunden und Zone aus dem Storage, die Module ueber
+  // utils/night-hours.js.
+  const init = read('../public/theme-init.js');
+  const core = read('../public/night-hours.js');
+  const mod = read('../public/utils/night-hours.js');
+  const wall = read('../public/utils/wall-mode.js');
+
+  const initCode = init.split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n');
+  assert.doesNotMatch(initCode, /getHours\(\)|hour >= \d+/, 'kein eigenes Nachtfenster und keine Geraeteuhr im Kopf');
+  assert.match(init, /night\.isNight\(new Date\(\), night\.readZone\(localStorage\), night\.read\(localStorage\)\)/,
+    'theme-init.js fragt die geteilte Funktion mit Zone und Stunden dieses Geraets');
+  assert.match(mod, /import '\.\.\/night-hours\.js';/, 'das Modul laedt dieselbe Datei');
+  assert.match(mod, /core\.isNight\(now, displayTimeZone\(\), getNightHours\(\)\)/);
+  assert.match(wall, /export function isWallNight\(now = new Date\(\)\) \{\s*return isNightHours\(now\);/,
+    'die Wand fragt dieselbe Funktion');
+  assert.doesNotMatch(core, /^\s*(?:import|export)\b/m, 'klassisch ladbar: kein import/export');
+  assert.match(core, /DEFAULT_FROM = 22;/);
+  assert.match(core, /DEFAULT_TO = 6;/);
+
+  // Derselbe Zonen-Schluessel wie utils/timezone.js.
+  const zoneKey = read('../public/utils/timezone.js').match(/const STORAGE_KEY = '([^']+)'/)?.[1];
+  assert.equal(zoneKey, 'yuvomi-timezone');
+  assert.ok(core.includes(`var ZONE_KEY = '${zoneKey}'`), 'night-hours.js liest dieselbe Haushaltszone');
+
+  // Beide Dokumente laden die Rechnung VOR theme-init.js, und offline liegt sie im Precache.
+  for (const doc of ['index.html', 'offline.html']) {
+    const html = read(`../public/${doc}`);
+    const at = html.indexOf('<script src="/night-hours.js"></script>');
+    assert.ok(at !== -1 && at < html.indexOf('<script src="/theme-init.js"></script>'),
+      `${doc} laedt /night-hours.js vor /theme-init.js`);
+  }
+  const sw = read('../public/sw.js');
+  assert.ok(sw.includes("'/night-hours.js',"), 'im Precache des Service Workers');
+  assert.ok(sw.includes("'/utils/night-hours.js',"));
 });
 
 test('the early screensaver delay in theme-init.js does not drift from utils/screensaver-idle.js (#885)', () => {
@@ -21134,10 +21167,12 @@ test('R16: im Budget steht jeder Abschnittstitel auf der Buehne, die Zeilen lieg
     const flaeche = subsCss.filter((rule) => selectorsOf(rule).includes(sel) && /background(?:-color)?:|box-shadow:|padding:/.test(rule.body));
     assert.deepStrictEqual(flaeche.map((rule) => rule.selector.trim()), [], `${sel} traegt keine Flaeche mehr - der Titel stuende sonst wieder darin`);
   }
-  // Aufteilung: vier Abschnitte (seit #1647 mit den wiederkehrenden Ausgaben),
-  // Titel ueber dem Traeger.
+  // Aufteilung: sechs Abschnitte (seit #1647 mit den wiederkehrenden Ausgaben,
+  // seit #1888/#1941 mit den Summen je Person und je Kategorie), Titel ueber
+  // dem Traeger.
   assert.doesNotMatch(split, /split-card\b/, 'die Karte mit Titel darin ist entfallen');
-  assert.equal((split.match(/class="split-section-title u-section-title"/g) ?? []).length, 4);
+  assert.equal((split.match(/class="split-section-title u-section-title"/g) ?? []).length, 6);
+  assert.equal((split.match(/return `<div class="row-carrier">\$\{rows\.map/g) ?? []).length, 2, 'Summen je Person und je Kategorie im Traeger');
   assert.match(split, /return `<div class="row-carrier">\$\{rows\}<\/div>`;/, 'Serien im Traeger');
   assert.match(split, /return `<div class="row-carrier">\$\{debts\.map/, 'Salden im Traeger');
   assert.match(split, /return `<div class="row-carrier split-expense-rows" tabindex="-1">\$\{state\.expenses\.map/, 'Ausgaben im Traeger');
@@ -22111,14 +22146,15 @@ const SERVER_TEXT_OWNERS = new Set([
 // Der allgemeine Satz naehme dort z. B. der Namenspruefung (400) die Ursache,
 // deshalb stieg hier die Zahl (pages/calendar.js 5 -> 7, components/modal.js
 // 0 -> 1) statt dass die Stellen blind umgestellt wurden. Die Kalender-Scheibe
-// von #1909 raeumt sie mit eigenen Gruenden und Saetzen ab.
+// von #1909 raeumt sie mit eigenen Gruenden und Saetzen ab. Die beiden Toasts
+// des Kalender-Managers sind abgeraeumt (calendar 7 -> 5), danach Speichern,
+// ICS-Zuruecksetzen und die drei Loeschwege eines Termins (calendar 5 -> 0).
 //
 // `settings/module-install-errors.js` liest den Text nur noch an EINER Stelle,
 // und bewusst: `bad_manifest` setzt die Angabe des Modul-Laders (welches Feld
 // in module.json fehlt) in einen uebersetzten Satz - eine Angabe zum Modul fuer
 // den, der es installiert, kein Satz an seiner Stelle (#1909).
 const SERVER_TEXT_OPEN = new Map([
-  ['pages/calendar.js', 7],
   ['pages/meals.js', 5],
   ['pages/pantry.js', 6],
   ['settings/module-install-errors.js', 1],
@@ -22183,7 +22219,8 @@ test('keine Seite zeigt den Text des Servers ohne Zuordnung, die offenen stehen 
     'pages/documents.js', 'utils/document-folder-delete.js', 'pages/recipes.js', 'pages/subscriptions.js',
     'pages/inventory.js', 'pages/notes.js', 'pages/contacts.js', 'pages/birthdays.js', 'pages/tasks.js',
     'components/task-detail.js', 'components/modal.js', 'pages/schedule.js',
-    'components/quick-links-manager.js', 'settings/pages/modules-kitchen.js']) {
+    'components/quick-links-manager.js', 'settings/pages/modules-kitchen.js', 'pages/calendar.js',
+    'settings/pages/admin-immich.js', 'pages/dashboard.js']) {
     assert.equal(SERVER_TEXT_OPEN.has(name), false, `${name} steht auf 0 und gehoert nicht in die Liste`);
   }
 });
@@ -22225,6 +22262,23 @@ const ERROR_MESSAGE_CLEAN = [
   'pages/shopping.js',
   'components/quick-links-manager.js',
   'settings/pages/modules-kitchen.js',
+  'pages/calendar.js',
+  'settings/pages/admin-immich.js',
+  'pages/dashboard.js',
+  // Die Preferences-Scheibe von #1695: der Server spricht dort Englisch, die
+  // Blaetter sagen ihren eigenen Satz (settings.preferenceSaveFailed).
+  'settings/components.js',
+  'settings/pages/admin-weather.js',
+  'settings/pages/modules-active.js',
+  'settings/pages/modules-calendar.js',
+  'settings/pages/modules-countdowns.js',
+  'settings/pages/modules-navigation.js',
+  'settings/pages/modules-options.js',
+  'settings/pages/personal-appearance.js',
+  'settings/pages/personal-calendar.js',
+  'settings/pages/personal-tasks.js',
+  'settings/pages/personal-weather.js',
+  'utils/household-zone-hint.js',
 ];
 
 test('der Leser fuer err.message sieht beide Schreibweisen und keinen Kommentar (#1909)', () => {
@@ -22399,7 +22453,6 @@ function countFriendlyErrorCalls(source) {
 // Datei -> Zahl der Aufrufe von friendlyError. Nur senken.
 const FRIENDLY_ERROR_CALLERS = new Map([
   ['pages/meals.js', 3],
-  ['router.js', 2],   // Fehlerbildschirm und unbehandelte Rejection
 ]);
 
 test('der Zaehler fuer friendlyError sieht beide Wege und keine eigene Funktion (#1909)', () => {
@@ -22464,6 +22517,10 @@ test('friendlyError hat keinen neuen Aufrufer, die verbliebenen stehen als Zahl 
   // Das Budget ebenso (#1909): die Absagen ueber errorSentence, der Rest ueber loadErrorSentence.
   assert.equal(counts.has('pages/budget.js'), false, 'pages/budget.js ruft friendlyError() - das Budget zeigt nie den Text des Servers');
   assert.equal(FRIENDLY_ERROR_CALLERS.has('pages/budget.js'), false, 'pages/budget.js steht auf 0 und gehoert nicht in die Liste');
+  // Der Router ebenso (#1909): Fehlerbildschirm und unbehandelte Rejection sagen
+  // unhandledErrorSentence; window.yuvomi.friendlyError reicht er nur weiter.
+  assert.equal(counts.has('router.js'), false, 'router.js ruft friendlyError() - Fehlerbildschirm und Rejection zeigen nie den Text des Servers');
+  assert.equal(FRIENDLY_ERROR_CALLERS.has('router.js'), false, 'router.js steht auf 0 und gehoert nicht in die Liste');
 });
 
 /* ────────────────────────────────────────────────────────────────────────────

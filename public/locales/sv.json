@@ -355,6 +355,8 @@
         "customizeResetDone": "Din översikt följer hushållet igen.",
         "optionsFor": "Alternativ för {{widget}}",
         "optionCalendarScope": "Vilka händelser?",
+        "optionCalendarCalendars": "Vilka kalendrar?",
+        "optionCalendarCalendarsHint": "Utan val visar rutan händelser från alla kalendrar.",
         "optionCalendarAll": "Alla händelser",
         "optionCalendarLimit": "Hur många händelser?",
         "optionCalendarLimitHint": "Gäller de höga storlekarna och gör rutan högre i motsvarande grad. I ”{{small}}” visar den bara de närmaste händelserna, i ”{{size}}” veckan.",
@@ -788,7 +790,11 @@
         "tickedSection": "Avbockat",
         "itemBackToast": "”{{name}}” är tillbaka på listan.",
         "itemStateOpen": "inte avbockad",
-        "itemAddedToast": "”{{name}}” lades till under ”{{category}}”."
+        "itemAddedToast": "”{{name}}” lades till under ”{{category}}”.",
+        "moveReturned": {
+            "refused": "”{{item}}” är tillbaka på ”{{back}}”: servern tog inte emot den i ”{{target}}”.",
+            "waited": "”{{item}}” flyttades inte till ”{{target}}”: synkroniseringen av ”{{back}}” har varit avstängd i över en vecka. Varan dyker upp på ”{{back}}” igen när listan slås på."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} ingrediens",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "Kalenderns sidofält",
         "upNextTitle": "Härnäst",
         "upNextEmpty": "Inget de närmaste tre veckorna.",
-        "shiftLegend": "Förklaring av skift"
+        "shiftLegend": "Förklaring av skift",
+        "errorCalendarGone": "Den här kalendern finns inte längre.",
+        "errorCalendarNameInvalid": "Ge kalendern ett namn på högst {{limit}} tecken.",
+        "errorCalendarOrderChanged": "Kalendrarna har ändrats under tiden.",
+        "errorDeleteFeedAdminOnly": "Den här kalendern exporteras. Bara en administratör kan ta bort den.",
+        "errorEventGone": "Den här händelsen finns inte längre.",
+        "errorSelectedCalendarGone": "Den valda kalendern finns inte längre.",
+        "errorSeriesNoOccurrence": "Med den här upprepningen skulle det inte finnas en enda händelse från startdatumet.",
+        "localCalendarUploadsHint": "Händelser i den här kalendern laddas upp till iCloud via Apple Calendar."
     },
     "noteCategories": {
         "categories": "Kategorier",
@@ -1274,7 +1288,11 @@
         "checklistDone": "Klart",
         "checklistOpen": "Öppet",
         "errorNoteGone": "Den här anteckningen finns inte längre.",
-        "errorSelectedCategoryGone": "En vald kategori finns inte längre."
+        "errorSelectedCategoryGone": "En vald kategori finns inte längre.",
+        "lockedToggle": "Lås redigering",
+        "lockedBadge": "Låst",
+        "lockedHint": "Bara du och administratörer kan ändra, fästa eller ta bort den här anteckningen - även bocka av punkter i listan. Alla andra kan fortfarande läsa den.",
+        "errorLocked": "Den här anteckningen är låst. Bara den som skapade den och administratörer kan ändra den."
     },
     "markdown": {
         "bold": "Fet (Ctrl+B)",
@@ -1944,9 +1962,14 @@
         "themeLight": "Ljus",
         "themeDark": "Mörk",
         "wallModeLabel": "Väggläge",
-        "wallModeHint": "Gör startsidan på den här enheten till en lugn skärm för en väggplatta: klockslag, dagens program, vem som står på tur och vädret - stort nog att läsa på två meters håll, utan något att trycka på. Mellan 22 och 6 dämpas den. Gäller bara här, inte för hushållets övriga enheter.",
+        "wallModeHint": "Gör startsidan på den här enheten till en lugn skärm för en väggplatta: klockslag, dagens program, vem som står på tur och vädret - stort nog att läsa på två meters håll, utan något att trycka på. Under nattimmarna dämpas den. Gäller bara här, inte för hushållets övriga enheter.",
         "wallModeOn": "Väggläge på, syns under {{page}}.",
         "wallModeOff": "Väggläge av.",
+        "nightHoursLabel": "Nattimmar",
+        "nightHoursHint": "Under de här timmarna dämpas väggläget och skärmsläckaren, efter hushållets klocka. Gäller bara den här enheten.",
+        "nightHoursFrom": "Dämpa från",
+        "nightHoursUntil": "Dämpa till",
+        "nightHoursSaved": "Nattimmar på den här enheten: {{from}} till {{until}}.",
         "screensaverIdleLabel": "Starta skärmsläckaren efter",
         "screensaverIdleHint": "Hur länge den här enheten är orörd innan fotoskärmsläckaren startar. Gäller bara den här enheten, inte resten av hushållet. Gäller när en administratör har anslutit Immich.",
         "screensaverIdleSaved": "Väntetid för skärmsläckaren på den här enheten: {{delay}}.",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "Anslutningen till Immich lyckades.",
         "immichPreview": "Förhandsgranska",
         "immichPreviewUnavailable": "Det gick inte att läsa in ett foto från Immich.",
+        "immichErrorUrlInvalid": "Serverns URL är ogiltig. Den måste börja med http:// eller https://.",
+        "immichErrorAlbumIdInvalid": "Album-ID:t är ogiltigt. Du hittar det i Immich i albumets adress.",
+        "immichErrorApiKeyInvalid": "API-nyckeln är för lång. Kopiera nyckeln från Immich igen.",
+        "immichErrorNotConfigured": "Testet behöver serverns URL och API-nyckeln.",
+        "immichErrorApiKeyRejected": "Immich avvisar API-nyckeln. Den kan ha gått ut, återkallats eller sakna en behörighet.",
+        "immichErrorStatus": "Immich svarade med ett fel (status {{status}}). Kontrollera serverns URL eller försök igen senare.",
+        "immichErrorUnreachable": "Immich kan inte nås. Kontrollera serverns URL och att Immich körs.",
+        "immichSaveFailed": "Immich-konfigurationen kunde inte sparas.",
+        "immichTestFailed": "Anslutningen till Immich kunde inte kontrolleras.",
         "backToSettings": "Tillbaka till inställningar",
         "retry": "Försök igen",
         "loadError": "Inställningarna kunde inte läsas in.",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "Ändra familjens ordning",
         "permChildRoleHint": "Nya barnkonton får dessutom egna startbehörigheter när de skapas: {{list}}. Därefter står de hos respektive medlem.",
         "activeModulesHintMore": "Vill du dölja en modul bara för dig, gå till Moduler → Navigering.",
-        "permIntroMore": "Enskilda medlemmar kan avvika från rollens standard. Utan inställning har varje roll full åtkomst; administratörer alltid."
+        "permIntroMore": "Enskilda medlemmar kan avvika från rollens standard. Utan inställning har varje roll full åtkomst; administratörer alltid.",
+        "preferenceSaveFailed": "Inställningen kunde inte sparas.",
+        "caldavCalendarReadOnly": "Skrivskyddad: nya händelser kan inte sparas här",
+        "caldavCalendarReadOnlyWaiting_one": "Skrivskyddad: {{count}} händelse som väntar på uppladdning hit kommer inte fram",
+        "caldavCalendarReadOnlyWaiting": "Skrivskyddad: {{count}} händelser som väntar på uppladdning hit kommer inte fram",
+        "reminderListReadOnly": "Skrivskyddad: nya poster kan inte sparas här",
+        "reminderListReadOnlyWaiting_one": "Skrivskyddad: {{count}} post som väntar på uppladdning hit kommer inte fram",
+        "reminderListReadOnlyWaiting": "Skrivskyddad: {{count}} poster som väntar på uppladdning hit kommer inte fram"
     },
     "login": {
         "tagline": "Välkommen tillbaka. Ditt hem samlat på ett ställe.",
@@ -3955,7 +3994,8 @@
             "reasonNameTooLong": "Ett fil- eller mappnamn är för långt.",
             "reasonTooDeep": "Sökvägen överskrider gränsen på fem mappnivåer.",
             "reasonParentFailed": "Den överordnade mappen kunde inte skapas.",
-            "reasonRateLimited": "Servern tar emot för många förfrågningar. Försök ladda upp igen senare."
+            "reasonRateLimited": "Servern tar emot för många förfrågningar. Försök ladda upp igen senare.",
+            "folderGoneReplanned": "En mapp i den här uppladdningen raderades under tiden. Förhandsvisningen visar aktuellt läge - starta uppladdningen igen."
         },
         "errorFolderGone": "Den här mappen finns inte längre.",
         "errorSelectedFolderGone": "Den valda mappen finns inte längre.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} är skyldig dig",
         "debtOwes": "{{from}} är skyldig {{to}}",
         "balanced": "Kvitt",
-        "balancedInGroup": "{{group}}: Kvitt"
+        "balancedInGroup": "{{group}}: Kvitt",
+        "totalsByMember": "Betalt per person",
+        "totalsByMemberHint": "Utlagt, med egen andel under",
+        "ownShare": "Egen andel: {{amount}}",
+        "paidLabel": "Betalt",
+        "totalsByCategory": "Per kategori",
+        "categoryFilter": "Filtrera utgifter efter kategori",
+        "noExpensesInCategory": "Inga utgifter i den här kategorin."
     },
     "wmo": {
         "0": "Klart",
@@ -4924,6 +4971,7 @@
             "saveError": "Mätvärdet kunde inte sparas.",
             "invalidValue": "Ange giltiga värden.",
             "range": {
+                "day": "Dag",
                 "week": "Vecka",
                 "month": "Månad",
                 "year": "År"
@@ -4963,6 +5011,7 @@
                 "family": "Familj"
             },
             "sparse": "För få mätvärden för att visa en trend.",
+            "bandValue": "{{mean}}, från {{low}} till {{high}}",
             "recentMeasurements": "Senaste mätningar",
             "deleteMeasurement": "Ta bort mätning {{value}} från {{date}}",
             "measurementDeleted": "Mätning borttagen",

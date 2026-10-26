@@ -44,31 +44,47 @@ function localCalendarById(conn, id) {
   return conn.prepare('SELECT * FROM local_calendars WHERE id = ?').get(numeric) ?? null;
 }
 
+// Ein gewaehlter Kalender, den es inzwischen nicht mehr gibt, ist ein Fall, den
+// ein Nutzer im Termin-Dialog erreicht (jemand hat ihn in der Verwaltung
+// geloescht): er traegt `reason` (#1909). Eine Kennung, die keine Zahl ist,
+// schickt nur ein Aufrufer der API.
 function validateCalendarId(conn, raw, { required = false } = {}) {
   if (raw === undefined || raw === null || raw === '') {
-    return { value: required ? null : undefined, error: required ? 'Kalender: Wähle einen gültigen Kalender aus.' : null };
+    return { value: required ? null : undefined, error: required ? 'Calendar: choose a valid calendar.' : null };
   }
   const id = Number(raw);
   if (!Number.isInteger(id) || id < 1) {
-    return { value: null, error: 'Kalender: Wähle einen gültigen Kalender aus.' };
+    return { value: null, error: 'Calendar: choose a valid calendar.' };
   }
   const row = localCalendarById(conn, id);
-  if (!row) return { value: null, error: 'Kalender: Dieser Kalender existiert nicht mehr.' };
+  if (!row) {
+    return { value: null, error: 'Calendar: this calendar no longer exists.', reason: 'calendar_selected_calendar_not_found' };
+  }
   return { value: row.id, error: null };
 }
 
+const CALENDAR_NAME_MAX = 80;
+
+// Ein leerer oder zu langer Name ist ein Fall, den ein Nutzer im Dialog
+// erreicht: er traegt `reason` und die Grenze (#1909). Ein Name, der kein Text
+// ist, kommt nur von einem Aufrufer der API.
 function validateCalendarName(value) {
-  if (typeof value !== 'string') return { value: null, error: 'Name muss als Text angegeben werden.' };
+  if (typeof value !== 'string') return { value: null, error: 'Name must be text.' };
   const name = value.trim();
-  if (!name || name.length > 80) {
-    return { value: null, error: 'Name: Gib einen Namen mit höchstens 80 Zeichen ein.' };
+  if (!name || name.length > CALENDAR_NAME_MAX) {
+    return {
+      value: null,
+      error: `Name: enter a name of at most ${CALENDAR_NAME_MAX} characters.`,
+      reason: 'calendar_name_invalid',
+      params: { limit: CALENDAR_NAME_MAX },
+    };
   }
   return { value: name, error: null };
 }
 
 function validateCalendarColor(value) {
   if (typeof value !== 'string' || !HEX_COLOR_RE.test(value.trim())) {
-    return { value: null, error: 'Farbe: Gib eine gültige Hex-Farbe an.' };
+    return { value: null, error: 'Color: enter a valid hex color.' };
   }
   return { value: value.trim().toUpperCase(), error: null };
 }
@@ -96,6 +112,7 @@ function clearCalendarFeedToken(conn, calendarId) {
 }
 
 export {
+  CALENDAR_NAME_MAX,
   DEFAULT_CALENDAR_NAME,
   DEFAULT_CALENDAR_COLOR,
   ensureDefaultCalendar,

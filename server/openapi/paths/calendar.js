@@ -1,4 +1,4 @@
-import { op, jsonBody, idParam, stringPathParam } from '../helpers.js';
+import { op, jsonBody, idParam, stringPathParam, withCaseReasons } from '../helpers.js';
 
 const apiError = (description) => ({
   description,
@@ -35,7 +35,7 @@ const ATTACHMENT_RIGHTS = ' A new attachment creates a document in the Documents
 // Ein Serienende vor dem Start (#1607). Steht an POST und PUT, weil beide es
 // abweisen - und PUT nur dann, wenn die Anfrage die Serie anfasst.
 const SERIES_END_INPUT = ' A `recurrence_rule` whose `UNTIL` day lies before the start day is rejected with 400 '
-  + '(`recurrence_rule: the series ends before the start date.`); an `UNTIL` on the start day is a series with one '
+  + '(`recurrence_rule: the series ends before the start date.`, `reason: calendar_series_ends_before_start`); an `UNTIL` on the start day is a series with one '
   + 'occurrence and is accepted. PUT checks this only when the request changes the rule or the start day, so an '
   + 'imported series that already carries such a rule stays editable; the start day is compared as the household calendar '
   + 'day, so sending the wall-clock form of a stored instant is not a change. For an event with a time zone of its own, whose '
@@ -49,7 +49,7 @@ const DATETIME_INPUT = ' `start_datetime` and `end_datetime` take the forms of `
   + 'the offset was dropped and its digits kept as wall-clock time.';
 
 export function calendarPaths() {
-  return withCaseReasons({
+  return withCaseReasons('calendar', CASE_REASONS, {
     '/api/v1/calendar': {
       get: op({
         summary: 'List calendar events',
@@ -132,12 +132,42 @@ export function calendarPaths() {
       get: op({
         summary: 'List local calendars',
         tag: 'Calendar',
-        description: 'Feed URLs and tokens are included only for administrators. `uploads_to_icloud` is true on the default calendar while the legacy Apple Calendar connection is configured: its events upload to iCloud, events in other local calendars stay local.',
+        description: 'Feed URLs and tokens are included only for administrators. `uploads_to_icloud` is true on the default calendar while the legacy Apple Calendar connection is configured: its events upload to iCloud, events in other local calendars stay local. Beside `data` (the local calendars) the answer carries `sources`: every calendar the caller can pick for the calendar tile of the overview, under the keys `GET /dashboard` takes as `events_calendar` - own calendars first in their managed order, then synced calendars that hold an appointment the caller may see and the ICS subscriptions the caller sees (shared or own), sorted by name.',
+        responses: {
+          200: {
+            description: 'Local calendars and the catalogue of selectable calendars',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['data', 'sources'],
+                  properties: {
+                    data: { type: 'array', items: { type: 'object', additionalProperties: true } },
+                    sources: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['key', 'name', 'color'],
+                        properties: {
+                          key: { type: 'string', pattern: '^(local|cal|sub):[1-9][0-9]{0,14}$', description: '`local:<id>`, `cal:<id>` or `sub:<id>`' },
+                          name: { type: 'string' },
+                          color: { type: ['string', 'null'] },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          500: { $ref: '#/components/responses/InternalServerError' },
+        },
       }),
       post: op({
         summary: 'Create local calendar',
         tag: 'Calendar',
-        description: 'Requires write access to the calendar module.',
+        description: 'Requires write access to the calendar module. An empty name or one longer than 80 characters returns 400 with `reason: calendar_name_invalid` and `params: { limit }`.',
         stateChanging: true,
         responses: {
           201: { description: 'Local calendar created' },
@@ -153,7 +183,7 @@ export function calendarPaths() {
       patch: op({
         summary: 'Reorder local calendars',
         tag: 'Calendar',
-        description: 'Requires calendar write access. Supply every current calendar ID exactly once in `order`; all sort_order values are updated atomically to consecutive values starting at zero. An incomplete, duplicate or stale list returns 400 without changes.',
+        description: 'Requires calendar write access. Supply every current calendar ID exactly once in `order`; all sort_order values are updated atomically to consecutive values starting at zero. An incomplete, duplicate or stale list returns 400 without changes; a list of distinct IDs that no longer matches the current calendars carries `reason: calendar_order_changed`.',
         stateChanging: true,
         requestBody: jsonBody('#/components/schemas/LocalCalendarReorderInput'),
       }),
@@ -162,7 +192,7 @@ export function calendarPaths() {
       put: op({
         summary: 'Update local calendar',
         tag: 'Calendar',
-        description: 'Requires write access to the calendar module.',
+        description: 'Requires write access to the calendar module. An empty name or one longer than 80 characters returns 400 with `reason: calendar_name_invalid` and `params: { limit }`; an unknown calendar returns 404 with `reason: calendar_calendar_not_found`.',
         params: [idParam()],
         stateChanging: true,
         responses: {
@@ -178,7 +208,7 @@ export function calendarPaths() {
       delete: op({
         summary: 'Delete local calendar and reassign events to the default calendar',
         tag: 'Calendar',
-        description: 'Requires calendar write access. An active feed link also requires admin access.',
+        description: 'Requires calendar write access. An active feed link also requires admin access: otherwise 403 with `reason: calendar_feed_admin_only`. An unknown calendar returns 404 with `reason: calendar_calendar_not_found`.',
         params: [idParam()],
         stateChanging: true,
         responses: {
@@ -201,7 +231,7 @@ export function calendarPaths() {
       get: op({
         summary: 'List selectable sync targets for the event editor',
         tag: 'Calendar',
-        description: 'Available to every authenticated user (#618). Returns `{ data: { google: [{ id, summary, defaultAssigneeUserId }], caldav: [{ accountId, accountName, calendarUrl, calendarName, defaultAssigneeUserId }], outlook: [{ accountId, accountName, calendarId, calendarName }] } }`, pre-filtered to enabled (and, for Google, writable) calendars. `defaultAssigneeUserId` is the default assignee set on that calendar (#459), or null; the event editor reads it backwards to pick the calendar of the person a new event is assigned to (#1060). Carries no credentials, server URLs, or usernames - account management stays admin-only. A provider that cannot be reached yields an empty list instead of failing the request.',
+        description: 'Available to every authenticated user (#618). Returns `{ data: { google: [{ id, summary, defaultAssigneeUserId }], caldav: [{ accountId, accountName, calendarUrl, calendarName, defaultAssigneeUserId }], outlook: [{ accountId, accountName, calendarId, calendarName }] } }`, pre-filtered to enabled and writable calendars (#1840: for CalDAV a calendar whose `current-user-privilege-set` grants neither `all`, `write` nor `bind` is left out; a server that does not report privileges counts as writable). POST/PUT /calendar refuse such a calendar as a new `target_caldav_calendar_url` with 400; an event whose stored target became read-only later can still be edited with that target unchanged, and waits locally. `defaultAssigneeUserId` is the default assignee set on that calendar (#459), or null; the event editor reads it backwards to pick the calendar of the person a new event is assigned to (#1060). Carries no credentials, server URLs, or usernames - account management stays admin-only. A provider that cannot be reached yields an empty list instead of failing the request.',
       }),
     },
     '/api/v1/calendar/caldav/accounts': {
@@ -221,7 +251,13 @@ export function calendarPaths() {
       delete: op({ summary: 'Delete CalDAV account', tag: 'Calendar', admin: true, params: [idParam()], stateChanging: true }),
     },
     '/api/v1/calendar/caldav/accounts/{id}/calendars': {
-      get: op({ summary: 'List calendars for a CalDAV account', tag: 'Calendar', admin: true, params: [idParam()] }),
+      get: op({
+        summary: 'List calendars for a CalDAV account',
+        tag: 'Calendar',
+        admin: true,
+        description: 'Each calendar carries `writable` (#1840): true when it takes new events, false when it is shared read-only, null when the server does not say (treated as writable). The value is read from `current-user-privilege-set` on every listing and sync run. A read-only calendar can still be enabled for reading; it is not offered as a target, and nothing is uploaded to it. `waitingUploads` counts the local events that name the calendar as their target and have not been uploaded yet - for a read-only calendar these never arrive until they get another calendar. With `?refresh=true` the answer comes from the server and carries `writable` but no `waitingUploads`.',
+        params: [idParam()],
+      }),
       patch: op({ summary: 'Enable or disable a CalDAV calendar', tag: 'Calendar', admin: true, params: [idParam()], stateChanging: true, requestBody: jsonBody(null) }),
     },
     '/api/v1/calendar/caldav/sync': {
@@ -231,7 +267,13 @@ export function calendarPaths() {
       get: op({ summary: 'Get CalDAV event sync status', tag: 'Calendar' }),
     },
     '/api/v1/calendar/caldav/accounts/{id}/reminder-lists': {
-      get: op({ summary: 'List reminder lists for a CalDAV account', tag: 'Calendar', admin: true, params: [idParam()] }),
+      get: op({
+        summary: 'List reminder lists for a CalDAV account',
+        tag: 'Calendar',
+        admin: true,
+        description: 'Each list carries `writable` (#1840, same meaning as on the calendars of the account) and, when read from the database, `waitingUploads`: for a list mapped to tasks the local tasks that name it as their target, for a list mapped to shopping the local items of its shopping list. A read-only list is still read, is not offered in `GET /tasks/sync-targets`, and nothing is uploaded to it.',
+        params: [idParam()],
+      }),
       patch: op({ summary: 'Enable/disable a CalDAV reminder list and target module', tag: 'Calendar', admin: true, params: [idParam()], stateChanging: true, requestBody: jsonBody(null) }),
     },
     '/api/v1/calendar/caldav/reminders/sync': {
@@ -435,26 +477,39 @@ export function calendarPaths() {
 // #1909: die Faelle, die ein Nutzer erreicht, tragen einen `reason` neben dem
 // `error` - je Operation der Satz, der sie nennt.
 const NOT_OWNER = '`not_owner` (403, without the module\'s `*_edit_others` capability only events you created or are assigned to can be changed or deleted - R23)';
+const EVENT_GONE = '`calendar_event_not_found` (404, the event does not exist or is not visible to the caller)';
+const SERIES_GONE = '`calendar_series_not_found` (404, the series does not exist or is not visible to the caller)';
+const SELECTED_CALENDAR_GONE = '`calendar_selected_calendar_not_found` (400, the `local_calendar_id` names a local calendar that no longer exists)';
+const SERIES_CASES = '`calendar_series_no_occurrence` (400, the `recurrence_rule` has no occurrence on or after the start date), '
+  + '`calendar_series_ends_before_start` (400, its `UNTIL` lies before the start day)';
+// Die Verwaltung der eigenen Kalender und die Liste der Sync-Ziele brauchen
+// Schreibzugriff auf den Kalender (#2267) - ein Leser bekommt sie nicht.
+const CALENDAR_WRITE_REQUIRED = '`cross_module_access` (403, the caller has no write access to the calendar module - for API tokens a `calendar:write` scope)';
 const CASE_REASONS = {
-  '/api/v1/calendar/{id}': { put: NOT_OWNER, delete: NOT_OWNER },
-  '/api/v1/calendar/{seriesId}/occurrences/{recurrenceId}': { put: NOT_OWNER, delete: NOT_OWNER },
-  '/api/v1/calendar/{seriesId}/occurrences/{recurrenceId}/following': { put: NOT_OWNER, delete: NOT_OWNER },
+  '/api/v1/calendar/calendars': { post: CALENDAR_WRITE_REQUIRED },
+  '/api/v1/calendar/calendars/reorder': { patch: CALENDAR_WRITE_REQUIRED },
+  '/api/v1/calendar/calendars/{id}': { put: CALENDAR_WRITE_REQUIRED, delete: CALENDAR_WRITE_REQUIRED },
+  '/api/v1/calendar/sync-targets': { get: CALENDAR_WRITE_REQUIRED },
+  '/api/v1/calendar': { post: `${SELECTED_CALENDAR_GONE}, ${SERIES_CASES}` },
+  '/api/v1/calendar/{id}': {
+    get: EVENT_GONE,
+    put: `${NOT_OWNER}, ${EVENT_GONE}, ${SELECTED_CALENDAR_GONE}, ${SERIES_CASES}`,
+    delete: `${NOT_OWNER}, ${EVENT_GONE}`,
+  },
+  '/api/v1/calendar/{seriesId}/occurrences/{recurrenceId}': {
+    put: `${NOT_OWNER}, ${SERIES_GONE}`,
+    delete: `${NOT_OWNER}, ${SERIES_GONE}`,
+  },
+  '/api/v1/calendar/{seriesId}/occurrences/{recurrenceId}/following': {
+    put: `${NOT_OWNER}, ${SERIES_GONE}, ${SELECTED_CALENDAR_GONE}, `
+      + '`empty_successor_series` (400, the successor series has no occurrence on or after its start date)',
+    delete: `${NOT_OWNER}, ${SERIES_GONE}`,
+  },
+  '/api/v1/calendar/{id}/reset': { post: EVENT_GONE },
   '/api/v1/calendar/{id}/exceptions': {
-    post: `${NOT_OWNER}, `
+    post: `${NOT_OWNER}, ${EVENT_GONE}, `
       + '`malformed_recurrence_id` (400, `recurrence_id` or `date` is not an occurrence key), '
       + '`invalid_recurrence_id` (400, the key names no occurrence of this series), '
       + '`ambiguous_recurrence_id` (409, a date-only key matches two occurrences)',
   },
 };
-
-function withCaseReasons(paths) {
-  for (const [path, operations] of Object.entries(CASE_REASONS)) {
-    for (const [method, reasons] of Object.entries(operations)) {
-      const operation = paths[path]?.[method];
-      if (!operation) throw new Error(`openapi calendar: ${method} ${path} is not documented`);
-      const note = `A refusal a user can reach carries a \`reason\` next to \`error\` (#1909): ${reasons}.`;
-      operation.description = operation.description ? `${operation.description}\n\n${note}` : note;
-    }
-  }
-  return paths;
-}

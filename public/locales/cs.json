@@ -387,6 +387,8 @@
         "customizeResetDone": "Tvůj přehled se opět řídí domácností.",
         "optionsFor": "Možnosti: {{widget}}",
         "optionCalendarScope": "Které události?",
+        "optionCalendarCalendars": "Které kalendáře?",
+        "optionCalendarCalendarsHint": "Bez výběru dlaždice zobrazuje události ze všech kalendářů.",
         "optionCalendarAll": "Všechny události",
         "optionCalendarLimit": "Kolik událostí?",
         "optionCalendarLimitHint": "Platí pro vysoké velikosti a dlaždici odpovídajícím způsobem prodlouží. Ve velikosti „{{small}}“ zobrazuje jen nejbližší události, ve velikosti „{{size}}“ týden.",
@@ -853,7 +855,11 @@
         "tickedSection": "Odškrtnuto",
         "itemBackToast": "Položka „{{name}}“ je zpět na seznamu.",
         "itemStateOpen": "neodškrtnuto",
-        "itemAddedToast": "„{{name}}“ přidáno do „{{category}}“."
+        "itemAddedToast": "„{{name}}“ přidáno do „{{category}}“.",
+        "moveReturned": {
+            "refused": "Položka „{{item}}“ je zpět v seznamu „{{back}}“: server ji v seznamu „{{target}}“ nepřijal.",
+            "waited": "Položka „{{item}}“ nebyla přesunuta do seznamu „{{target}}“: synchronizace seznamu „{{back}}“ je přes týden vypnutá. Položka se v seznamu „{{back}}“ znovu objeví, jakmile ho zapnete."
+        }
     },
     "meals": {
         "randomizeSuccess_few": "Naplánována {{count}} jídla.",
@@ -1280,7 +1286,15 @@
         "sidebarLabel": "Postranní panel kalendáře",
         "upNextTitle": "Následuje",
         "upNextEmpty": "V příštích třech týdnech nic není.",
-        "shiftLegend": "Legenda směn"
+        "shiftLegend": "Legenda směn",
+        "errorCalendarGone": "Tento kalendář už neexistuje.",
+        "errorCalendarNameInvalid": "Dejte kalendáři název s nejvýše {{limit}} znaky.",
+        "errorCalendarOrderChanged": "Kalendáře se mezitím změnily.",
+        "errorDeleteFeedAdminOnly": "Tento kalendář se exportuje. Smazat ho může jen správce.",
+        "errorEventGone": "Tento termín už neexistuje.",
+        "errorSelectedCalendarGone": "Vybraný kalendář už neexistuje.",
+        "errorSeriesNoOccurrence": "S tímto opakováním by od data zahájení nebyl žádný termín.",
+        "localCalendarUploadsHint": "Události v tomto kalendáři se nahrávají do iCloudu přes Apple Calendar."
     },
     "noteCategories": {
         "categories": "Kategorie",
@@ -1352,7 +1366,11 @@
         "checklistDone": "Hotovo",
         "checklistOpen": "Otevřeno",
         "errorNoteGone": "Tato poznámka už neexistuje.",
-        "errorSelectedCategoryGone": "Jedna z vybraných kategorií už neexistuje."
+        "errorSelectedCategoryGone": "Jedna z vybraných kategorií už neexistuje.",
+        "lockedToggle": "Zamknout úpravy",
+        "lockedBadge": "Zamčeno",
+        "lockedHint": "Tuto poznámku můžete měnit, připínat nebo mazat jen vy a správci - včetně odškrtávání položek seznamu. Ostatní ji mohou dál číst.",
+        "errorLocked": "Tato poznámka je zamčená. Měnit ji může jen osoba, která ji vytvořila, a správci."
     },
     "markdown": {
         "bold": "Tučné (Ctrl+B)",
@@ -2168,9 +2186,14 @@
         "themeLight": "Světlý",
         "themeDark": "Tmavý",
         "wallModeLabel": "Nástěnný režim",
-        "wallModeHint": "Promění domovskou stránku na tomto zařízení v klidný displej pro nástěnný tablet: čas, program dne, kdo je dnes na řadě a počasí - dost velké na čtení ze dvou metrů, bez ovládání. Mezi 22. a 6. hodinou ztlumí. Platí jen zde, ne pro ostatní zařízení v domácnosti.",
+        "wallModeHint": "Promění domovskou stránku na tomto zařízení v klidný displej pro nástěnný tablet: čas, program dne, kdo je dnes na řadě a počasí - dost velké na čtení ze dvou metrů, bez ovládání. V nočních hodinách ztlumí. Platí jen zde, ne pro ostatní zařízení v domácnosti.",
         "wallModeOn": "Nástěnný režim zapnut, uvidíte ho v {{page}}.",
         "wallModeOff": "Nástěnný režim vypnut.",
+        "nightHoursLabel": "Noční hodiny",
+        "nightHoursHint": "V těchto hodinách se nástěnný režim a spořič obrazovky ztlumí, podle času domácnosti. Platí jen pro toto zařízení.",
+        "nightHoursFrom": "Ztlumit od",
+        "nightHoursUntil": "Ztlumit do",
+        "nightHoursSaved": "Noční hodiny na tomto zařízení: {{from}} až {{until}}.",
         "screensaverIdleLabel": "Doba nečinnosti před spuštěním spořiče",
         "screensaverIdleHint": "Jak dlouho zůstane toto zařízení bez dotyku, než se spustí fotografický spořič obrazovky. Platí jen pro toto zařízení, ne pro zbytek domácnosti. Projeví se, jakmile správce připojí Immich.",
         "screensaverIdleSaved": "Prodleva spořiče na tomto zařízení: {{delay}}.",
@@ -2977,6 +3000,15 @@
         "immichTestOk": "Připojení k Immich bylo úspěšné.",
         "immichPreview": "Náhled",
         "immichPreviewUnavailable": "Fotografii z Immich se nepodařilo načíst.",
+        "immichErrorUrlInvalid": "Adresa URL serveru je neplatná. Musí začínat http:// nebo https://.",
+        "immichErrorAlbumIdInvalid": "ID alba je neplatné. Najdete ho v Immichi v adrese alba.",
+        "immichErrorApiKeyInvalid": "Klíč API je příliš dlouhý. Zkopírujte klíč z Immiche znovu.",
+        "immichErrorNotConfigured": "K testu chybí adresa URL serveru nebo klíč API.",
+        "immichErrorApiKeyRejected": "Immich odmítá klíč API. Možná vypršel, byl odvolán nebo mu chybí oprávnění.",
+        "immichErrorStatus": "Immich odpověděl chybou (stav {{status}}). Zkontrolujte adresu URL serveru nebo to zkuste později.",
+        "immichErrorUnreachable": "Immich není dostupný. Zkontrolujte adresu URL serveru a zda Immich běží.",
+        "immichSaveFailed": "Konfiguraci Immiche se nepodařilo uložit.",
+        "immichTestFailed": "Připojení k Immichi se nepodařilo ověřit.",
         "backToSettings": "Zpět do nastavení",
         "retry": "Zkusit znovu",
         "loadError": "Nastavení se nepodařilo načíst.",
@@ -3472,7 +3504,18 @@
         "permCapabilityTasksReorder": "Měnit pořadí rodiny",
         "permChildRoleHint": "Nové dětské účty dostanou při vytvoření navíc vlastní počáteční oprávnění: {{list}}. Potom jsou uvedena u daného člena.",
         "activeModulesHintMore": "Skrýt modul jen u sebe můžeš v Moduly → Navigace.",
-        "permIntroMore": "Jednotliví členové se mohou od výchozího nastavení role lišit. Bez nastavení má každá role plný přístup; správci vždy."
+        "permIntroMore": "Jednotliví členové se mohou od výchozího nastavení role lišit. Bez nastavení má každá role plný přístup; správci vždy.",
+        "preferenceSaveFailed": "Nastavení se nepodařilo uložit.",
+        "caldavCalendarReadOnly": "Jen pro čtení: sem nelze uložit nové události",
+        "caldavCalendarReadOnlyWaiting_one": "Jen pro čtení: {{count}} událost čekající na nahrání sem nedorazí",
+        "caldavCalendarReadOnlyWaiting": "Jen pro čtení: {{count}} události čekající na nahrání sem nedorazí",
+        "reminderListReadOnly": "Jen pro čtení: sem nelze uložit nové položky",
+        "reminderListReadOnlyWaiting_one": "Jen pro čtení: {{count}} položka čekající na nahrání sem nedorazí",
+        "reminderListReadOnlyWaiting": "Jen pro čtení: {{count}} položky čekající na nahrání sem nedorazí",
+        "caldavCalendarReadOnlyWaiting_few": "Jen pro čtení: {{count}} události čekající na nahrání sem nedorazí",
+        "caldavCalendarReadOnlyWaiting_many": "Jen pro čtení: {{count}} události čekající na nahrání sem nedorazí",
+        "reminderListReadOnlyWaiting_few": "Jen pro čtení: {{count}} položky čekající na nahrání sem nedorazí",
+        "reminderListReadOnlyWaiting_many": "Jen pro čtení: {{count}} položky čekající na nahrání sem nedorazí"
     },
     "login": {
         "tagline": "Vítejte zpět. Váš domov na jednom místě.",
@@ -4034,7 +4077,14 @@
         "debtOwesYou": "{{name}} vám dluží",
         "debtOwes": "{{from}} dluží {{to}}",
         "balanced": "Vyrovnáno",
-        "balancedInGroup": "{{group}}: Vyrovnáno"
+        "balancedInGroup": "{{group}}: Vyrovnáno",
+        "totalsByMember": "Zaplaceno podle osob",
+        "totalsByMemberHint": "Kolik kdo vyložil, pod tím jeho vlastní podíl",
+        "ownShare": "Vlastní podíl: {{amount}}",
+        "paidLabel": "Zaplaceno",
+        "totalsByCategory": "Podle kategorie",
+        "categoryFilter": "Filtrovat výdaje podle kategorie",
+        "noExpensesInCategory": "V této kategorii nejsou žádné výdaje."
     },
     "documents": {
         "title": "Dokumenty",
@@ -4288,7 +4338,8 @@
             "reasonNameTooLong": "Název souboru nebo složky je příliš dlouhý.",
             "reasonTooDeep": "Cesta překračuje limit pěti úrovní složek.",
             "reasonParentFailed": "Nadřazenou složku se nepodařilo vytvořit.",
-            "reasonRateLimited": "Server nyní přijímá příliš mnoho požadavků. Zkuste nahrávání později znovu."
+            "reasonRateLimited": "Server nyní přijímá příliš mnoho požadavků. Zkuste nahrávání později znovu.",
+            "folderGoneReplanned": "Jedna ze složek tohoto nahrávání byla mezitím smazána. Náhled ukazuje aktuální stav - spusťte nahrávání znovu."
         },
         "errorFolderGone": "Tato složka už neexistuje.",
         "errorSelectedFolderGone": "Vybraná složka už neexistuje.",
@@ -5052,6 +5103,7 @@
             "saveError": "Měření se nepodařilo uložit.",
             "invalidValue": "Zadejte platné hodnoty.",
             "range": {
+                "day": "Den",
                 "week": "Týden",
                 "month": "Měsíc",
                 "year": "Rok"
@@ -5091,6 +5143,7 @@
                 "family": "Rodina"
             },
             "sparse": "Příliš málo měření pro zobrazení trendu.",
+            "bandValue": "{{mean}}, od {{low}} do {{high}}",
             "recentMeasurements": "Poslední měření",
             "deleteMeasurement": "Smazat měření {{value}} z {{date}}",
             "measurementDeleted": "Měření smazáno",

@@ -1,4 +1,5 @@
 import {
+  formatTime,
   formatUnit,
   getLocale,
   getSupportedLocales,
@@ -14,6 +15,7 @@ import { settingRowHtml, settingSwitchRowHtml } from '/settings/components.js';
 import { wireTablist } from '/utils/tablist.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { isWallModeEnabled, setWallModeEnabled } from '/utils/wall-mode.js';
+import { getNightHours, setNightHours } from '/utils/night-hours.js';
 import {
   SCREENSAVER_IDLE_STEPS,
   getScreensaverIdleSeconds,
@@ -40,6 +42,7 @@ import {
   SHORT_NAME_LANGUAGES,
   numberLocaleFor,
 } from '/settings/region-presets.js';
+import { errorSentence } from '/utils/friendly-error.js';
 
 // Der Name jedes Segments ist sein sichtbares Wort - vorher trug es ein
 // abweichendes aria-label („Dunkles Design" zu „Dunkel"), und die Gruppe
@@ -385,6 +388,52 @@ export function bindScreensaverIdleSelect(select) {
   });
 }
 
+// A whole hour as the household writes its times ("22:00", "10:00 PM"). A
+// bare "HH:MM" is wall time to formatTime, so no zone shifts the hour.
+function nightHourText(hour) {
+  return formatTime(`${String(hour).padStart(2, '0')}:00`);
+}
+
+/**
+ * The 24 hours of one end of the night window (#2234). The hour the OTHER end
+ * stands on is disabled: equal ends would be an empty window, an "off" the
+ * setting does not offer. Exported so test:screensaver-device can check the
+ * selects open on the stored value.
+ */
+export function nightHourOptions(selected, other) {
+  return Array.from({ length: 24 }, (_, hour) => `
+    <option value="${hour}"${hour === selected ? ' selected' : ''}${hour === other ? ' disabled' : ''}>${esc(nightHourText(hour))}</option>`).join('');
+}
+
+/**
+ * Device-local like wall mode (#2234): no server request. Wall and
+ * screensaver ask the stored hours each time they look - the wall on the next
+ * route change and the clock's minute, the screensaver at every photo - so
+ * nothing needs a reload. Each select disables the hour the other one holds, and the toast
+ * names the window that now applies. Exported so test:screensaver-device can
+ * drive the real handler.
+ */
+export function bindNightHoursSelects(fromSelect, untilSelect) {
+  if (!fromSelect || !untilSelect) return;
+  const sync = () => {
+    for (const [select, other] of [[fromSelect, untilSelect], [untilSelect, fromSelect]]) {
+      for (const option of select.options) option.disabled = option.value === other.value;
+    }
+  };
+  const onChange = () => {
+    const hours = setNightHours(Number(fromSelect.value), Number(untilSelect.value));
+    fromSelect.value = String(hours.from);
+    untilSelect.value = String(hours.to);
+    sync();
+    window.yuvomi?.showToast(
+      t('settings.nightHoursSaved', { from: nightHourText(hours.from), until: nightHourText(hours.to) }),
+      'success',
+    );
+  };
+  fromSelect.addEventListener('change', onChange);
+  untilSelect.addEventListener('change', onChange);
+}
+
 function renderLoadError(container) {
   container.replaceChildren();
   container.insertAdjacentHTML('beforeend', `
@@ -728,8 +777,8 @@ function mountTimezoneMismatch(container, preferences, isAdmin) {
       if (result.adopted) window.yuvomi?.showToast(t('settings.timezoneSaved'), 'success');
     } : undefined,
     onError: (error) => {
-      if (errorElement) showError(errorElement, error?.message);
-      else window.yuvomi?.showToast(error?.message || t('common.errorGeneric'), 'danger');
+      if (errorElement) showError(errorElement, errorSentence(error, 'settings.preferenceSaveFailed'));
+      else window.yuvomi?.showToast(errorSentence(error, 'settings.preferenceSaveFailed'), 'danger');
     },
   }));
 }
@@ -758,6 +807,7 @@ function deviceDisplayRowsHtml({ screensaverOn = true, isAdmin = false } = {}) {
           descriptionId: 'wall-mode-hint',
           attrs: { id: 'wall-mode-toggle', 'aria-describedby': 'wall-mode-hint' },
         })}
+        ${nightHoursRowHtml()}
         <!-- Next to wall mode and for the same reason: device-local (#885). A
              photo frame and a kitchen tablet in one household want different
              delays, and a household value would reach every phone too. The
@@ -803,6 +853,28 @@ function deviceDisplayRowsHtml({ screensaverOn = true, isAdmin = false } = {}) {
 `;
 }
 
+/**
+ * DIE NACHTSTUNDEN STEHEN UNTER DEM WAND-MODUS UND VOR DEM SCHONER (#2234,
+ * #1901): sie gelten fuer beide, deshalb immer sichtbar - auch ohne Immich,
+ * denn die Wand dunkelt trotzdem ab. Eine Zeile, zwei randlose Auswahlen im
+ * zusammengesetzten Feld ("22:00 - 06:00"), die Gruppe heisst wie die Zeile.
+ */
+function nightHoursRowHtml() {
+  const { from, to } = getNightHours();
+  return settingRowHtml({
+    label: t('settings.nightHoursLabel'),
+    labelId: 'night-hours-label',
+    description: t('settings.nightHoursHint'),
+    descriptionId: 'night-hours-hint',
+    control: `<span class="form-composite" role="group" aria-labelledby="night-hours-label" aria-describedby="night-hours-hint">
+      <select class="form-input" id="night-hours-from" aria-label="${esc(t('settings.nightHoursFrom'))}">${nightHourOptions(from, to)}</select>
+      <span class="form-composite__sep" aria-hidden="true">-</span>
+      <select class="form-input" id="night-hours-until" aria-label="${esc(t('settings.nightHoursUntil'))}">${nightHourOptions(to, from)}</select>
+    </span>`,
+    attrs: { id: 'night-hours-row' },
+  });
+}
+
 function renderDeviceDisplay(container, options = {}) {
   container.replaceChildren();
   container.insertAdjacentHTML('beforeend', `
@@ -845,6 +917,7 @@ function bindDeviceDisplay(container) {
     window.yuvomi.navigate('/settings/admin/integrations');
   });
 
+  bindNightHoursSelects(container.querySelector('#night-hours-from'), container.querySelector('#night-hours-until'));
   bindScreensaverIdleSelect(container.querySelector('#screensaver-idle-select'));
   bindScreensaverSwitch(container.querySelector('#screensaver-clock-toggle'), setScreensaverClockOn);
   bindScreensaverSwitch(container.querySelector('#screensaver-cover-toggle'), setScreensaverCoverOn);
@@ -915,7 +988,7 @@ function bindEvents(container, user) {
       // Zurück auf den gespeicherten Wert: sonst zeigt die Seite eine
       // Datensprache an, die nie geschrieben wurde.
       dataLanguageSelect.value = persistedDataLanguage;
-      showError(errorElement, error.message);
+      showError(errorElement, errorSentence(error, 'settings.preferenceSaveFailed'));
     } finally {
       if (dataLanguageSelect.isConnected) dataLanguageSelect.disabled = false;
     }
@@ -943,7 +1016,7 @@ function bindEvents(container, user) {
       }));
       window.yuvomi?.showToast(t('settings.timezoneSaved'), 'success');
     } catch (error) {
-      showError(errorElement, error.message);
+      showError(errorElement, errorSentence(error, 'settings.preferenceSaveFailed'));
     } finally {
       if (timezoneSelect.isConnected) timezoneSelect.disabled = false;
     }
@@ -1006,7 +1079,7 @@ function bindEvents(container, user) {
       await refreshDataLanguageOptions(container).catch(() => {});
       window.yuvomi?.showToast(t('settings.regionSaved'), 'success');
     } catch (error) {
-      showError(errorElement, error.message);
+      showError(errorElement, errorSentence(error, 'settings.preferenceSaveFailed'));
     } finally {
       if (regionSelect.isConnected) regionSelect.disabled = false;
       if (currencyDuringRegion?.isConnected) currencyDuringRegion.disabled = false;
@@ -1050,7 +1123,7 @@ function bindEvents(container, user) {
       window.yuvomi?.showToast(t('settings.currencySaved'), 'success');
     } catch (error) {
       syncCurrencyHint(container);
-      showError(errorElement, error.message);
+      showError(errorElement, errorSentence(error, 'settings.preferenceSaveFailed'));
     }
   });
 
@@ -1069,7 +1142,7 @@ function bindEvents(container, user) {
       applyNumberLocale(readFormatState(container));
       window.yuvomi?.showToast(t('settings.dateFormatSavedToast'), 'success');
     } catch (error) {
-      showError(errorElement, error.message);
+      showError(errorElement, errorSentence(error, 'settings.preferenceSaveFailed'));
     } finally {
       dateFormatSelect.disabled = false;
     }
@@ -1090,7 +1163,7 @@ function bindEvents(container, user) {
       applyNumberLocale(readFormatState(container));
       window.yuvomi?.showToast(t('settings.timeFormatSavedToast'), 'success');
     } catch (error) {
-      showError(errorElement, error.message);
+      showError(errorElement, errorSentence(error, 'settings.preferenceSaveFailed'));
     } finally {
       timeFormatSelect.disabled = false;
     }

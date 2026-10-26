@@ -11293,7 +11293,136 @@ const MIGRATIONS = [
       `).run();
     },
   },
+  {
+    version: 259,
+    description: 'Shopping: a waiting move of a mirrored item remembers when it began (#1911)',
+    // EIN WARTENDER UMZUG BEKOMMT EIN ENDE (#1911). Ein Umzug (#1700, v243)
+    // wartet, solange die Server-Liste seines Objekts nicht eingeschaltet ist -
+    // ohne Zaehler und ohne Uhr, also fuer immer, mit einem Eintrag, der am
+    // alten Platz weiterlebt. `outbound_move_since` ist der Zeitpunkt, an dem
+    // die Vormerkung gesetzt wurde (UTC, `datetime('now')`); nach der Frist
+    // geht die Zeile auf die Liste ihres Objekts zurueck.
+    //
+    // NACHTRAG: ein schon wartender Umzug beginnt seine Frist mit dem Update,
+    // nicht mit einem geratenen Zeitpunkt davor - sonst ginge er beim ersten
+    // Lauf danach ohne Frist zurueck.
+    up(db) {
+      const has = db.prepare('PRAGMA table_info(shopping_items)').all().some((c) => c.name === 'outbound_move_since');
+      if (!has) db.exec('ALTER TABLE shopping_items ADD COLUMN outbound_move_since TEXT');
+      backfillShoppingMoveSince(db);
+    },
+  },
+  {
+    version: 260,
+    description: 'Shopping: tell whoever moved a mirrored item when the move was taken back (#1912)',
+    foreignKeysOff: true,
+    up: `
+      -- WER HAT VERSCHOBEN (#1912). Geht ein Umzug zurueck (fuenfte Absage des
+      -- Ziels, Zielliste auf dem Server fort, Frist aus #1911), bekommt die
+      -- Person, die verschoben hat, eine Meldung an der Glocke. Die Zeile
+      -- kannte sie bisher nicht. NULL heisst: unbekannt (Umzug von vor dem
+      -- Update, Konto geloescht) - dann gibt es keine Meldung, nur das Log.
+      ALTER TABLE shopping_items ADD COLUMN outbound_move_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+      -- DIE MELDUNG SELBST, als Momentaufnahme. Namen statt nur Verweise: nach
+      -- der Frist steht der Artikel auf einer abgeschalteten Liste, und der
+      -- naechste Abruf nimmt ihn dort lokal fort (sein Eintrag lebt auf dem
+      -- Server weiter). Die Meldung muss trotzdem sagen koennen, was passiert
+      -- ist. Die Verweise tragen nur den Sprung auf die Liste.
+      CREATE TABLE shopping_move_notices (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        item_id          INTEGER REFERENCES shopping_items(id) ON DELETE SET NULL,
+        item_name        TEXT    NOT NULL,
+        back_list_id     INTEGER REFERENCES shopping_lists(id) ON DELETE SET NULL,
+        back_list_name   TEXT    NOT NULL,
+        target_list_name TEXT    NOT NULL,
+        -- 'refused': das Ziel hat nicht angenommen (fuenfte Absage, Liste fort);
+        -- 'waited': die alte Liste war zu lange abgeschaltet (#1911).
+        reason           TEXT    NOT NULL CHECK(reason IN ('refused', 'waited')),
+        created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      );
+      CREATE INDEX idx_shopping_move_notices_user ON shopping_move_notices(user_id);
+
+      -- Die Glocke ist die Erinnerungstabelle; ihr CHECK waechst nur per
+      -- Rebuild (wie v220, dessen Werte hier alle wieder stehen muessen).
+      DROP TRIGGER IF EXISTS trg_reminders_tasks_ad;
+      DROP TRIGGER IF EXISTS trg_reminders_events_ad;
+      CREATE TABLE reminders_new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT    NOT NULL CHECK(entity_type IN ('task', 'event', 'subscription', 'inventory_item', 'inventory_tracked_date', 'pantry_item', 'cycle_period', 'cycle_log_nudge', 'schedule_entry', 'schedule_extra_entry', 'waste_pickup', 'document_expiry', 'health_prevention_due', 'fasting_goal', 'fasting_next_start', 'shopping_move_returned')),
+        entity_id   INTEGER NOT NULL,
+        remind_at   TEXT    NOT NULL,
+        dismissed   INTEGER NOT NULL DEFAULT 0,
+        created_by  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        pushed_at   TEXT,
+        assigned_from INTEGER REFERENCES users(id) ON DELETE SET NULL
+      );
+      INSERT INTO reminders_new (id, entity_type, entity_id, remind_at, dismissed, created_by, created_at, pushed_at, assigned_from)
+        SELECT id, entity_type, entity_id, remind_at, dismissed, created_by, created_at, pushed_at, assigned_from FROM reminders;
+      DROP TABLE reminders;
+      ALTER TABLE reminders_new RENAME TO reminders;
+      CREATE INDEX idx_reminders_entity ON reminders(entity_type, entity_id);
+      CREATE INDEX idx_reminders_remind ON reminders(remind_at);
+      CREATE INDEX idx_reminders_user ON reminders(created_by);
+      CREATE INDEX idx_reminders_assigned_from ON reminders(assigned_from);
+
+      CREATE TRIGGER trg_reminders_tasks_ad
+      AFTER DELETE ON tasks BEGIN
+        DELETE FROM reminders WHERE entity_type = 'task' AND entity_id = OLD.id;
+      END;
+      CREATE TRIGGER trg_reminders_events_ad
+      AFTER DELETE ON calendar_events BEGIN
+        DELETE FROM reminders WHERE entity_type = 'event' AND entity_id = OLD.id;
+      END;
+      -- Die Meldung geht mit ihrer Momentaufnahme (Konto geloescht).
+      CREATE TRIGGER trg_reminders_shopping_move_notices_ad
+      AFTER DELETE ON shopping_move_notices BEGIN
+        DELETE FROM reminders WHERE entity_type = 'shopping_move_returned' AND entity_id = OLD.id;
+      END;
+    `,
+  },
+  {
+    version: 261,
+    description: 'CalDAV: remember whether a calendar or list takes new entries (#1840)',
+    up: `
+      -- DARF HIER GESCHRIEBEN WERDEN (#1840). Die Auflistung liest je
+      -- Collection current-user-privilege-set (RFC 3744); die Ziel-Auswahl der
+      -- Formulare bietet nur an, was neue Eintraege annimmt. 1 = ja, 0 = nein,
+      -- NULL = der Server sagt es nicht (oder die Liste ist von vor dem
+      -- Update): gilt als beschreibbar, wie bisher.
+      ALTER TABLE caldav_calendar_selection ADD COLUMN writable INTEGER;
+      ALTER TABLE caldav_reminder_selection ADD COLUMN writable INTEGER;
+    `,
+  },
+  {
+    version: 262,
+    description: 'notes: a visibility of their own and a lock on a single note (#1514, #1602)',
+    up: `
+      -- SICHTBARKEIT (#1514): 'all' (der Haushalt) oder 'private' (nur wer sie
+      -- angelegt hat), dieselben Woerter wie Aufgaben und Termine (DECISIONS 5).
+      -- Default 'all': jede bestehende Notiz bleibt, wer sie bisher sah.
+      ALTER TABLE notes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'all'
+        CHECK (visibility IN ('all', 'private'));
+      -- SPERRE (#1602): 1 = nur Ersteller:in und Admins aendern die Notiz,
+      -- auch ihre Checklisten-Haken. Default 0, also wie bisher.
+      ALTER TABLE notes ADD COLUMN locked INTEGER NOT NULL DEFAULT 0
+        CHECK (locked IN (0, 1));
+    `,
+  },
 ];
+
+/**
+ * Der Nachtrag aus Migration 259 (#1911): wartende Umzuege beginnen ihre
+ * Frist jetzt.
+ */
+function backfillShoppingMoveSince(database) {
+  database.exec(`
+    UPDATE shopping_items SET outbound_move_since = datetime('now')
+     WHERE outbound_move = 1 AND outbound_move_since IS NULL
+  `);
+}
 
 /**
  * Der Nachtrag zu Migration 246 (#1935): lokale Zeilen sind hier verfasst.
@@ -11602,6 +11731,15 @@ const CRITICAL_COLUMNS = [
   // Sofortversuch.
   { table: 'shopping_items', column: 'outbound_move', type: 'INTEGER NOT NULL DEFAULT 0' },
   { table: 'shopping_items', column: 'outbound_move_attempts', type: 'INTEGER NOT NULL DEFAULT 0' },
+  // #1911: v259 traegt den Beginn eines Umzugs nach; ohne die Spalte scheitert
+  // jeder Umzug eines gespiegelten Artikels (die Route schreibt sie) und jeder
+  // Lauf (er liest sie). MIT NACHTRAG: wartende Umzuege beginnen ihre Frist
+  // mit der Spalte, wie in der Migration.
+  { table: 'shopping_items', column: 'outbound_move_since', type: 'TEXT',
+    backfill: backfillShoppingMoveSince },
+  // #1912: v260 merkt sich, wer verschoben hat; die Route schreibt die Spalte
+  // bei jedem Umzug eines gespiegelten Artikels.
+  { table: 'shopping_items', column: 'outbound_move_by', type: 'INTEGER REFERENCES users(id) ON DELETE SET NULL' },
   // #1935: v246 traegt nach, wer Start und Regel eines Termins verfasst hat;
   // ohne die Spalte scheitert das Anlegen jedes Termins und jeder Abruf von
   // Google, CalDAV und iCloud (er liest sie, bevor er die Zeile anfasst).

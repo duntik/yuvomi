@@ -16,13 +16,14 @@ import { ORIGIN_MODULE, withoutSwitchedOffModules } from '../services/reminder-o
 import { reminderTargetVisible, reminderTargetVisibleSql } from '../services/reminder-targets.js';
 import { remindAtCompareKey, remindAtUtcSql } from '../utils/reminder-schedule.js';
 import { asksHouseholdAudience } from '../services/visibility.js';
+import { moveNoticeFields } from '../services/shopping-move-notices.js';
 
 const log    = createLogger('Reminders');
 const router = express.Router();
 
 // Exportiert fuer den Guard in test/test-disabled-module-reminders.js: jeder
 // Wert muss in ORIGIN_MODULE stehen, sonst faellt er still aus `/pending`.
-export const VALID_ENTITY_TYPES = ['task', 'event', 'subscription', 'inventory_item', 'inventory_tracked_date', 'pantry_item', 'cycle_period', 'cycle_log_nudge', 'schedule_entry', 'schedule_extra_entry', 'waste_pickup', 'document_expiry', 'health_prevention_due', 'fasting_goal', 'fasting_next_start'];
+export const VALID_ENTITY_TYPES = ['task', 'event', 'subscription', 'inventory_item', 'inventory_tracked_date', 'pantry_item', 'cycle_period', 'cycle_log_nudge', 'schedule_entry', 'schedule_extra_entry', 'waste_pickup', 'document_expiry', 'health_prevention_due', 'fasting_goal', 'fasting_next_start', 'shopping_move_returned'];
 
 /**
  * Nach jedem Schreibvorgang an den Erinnerungen eines Termins: die Zugewiesenen
@@ -105,7 +106,7 @@ function syncEventFanout(entityType, entityId, userId) {
  * Die LESEWEGE (GET) kennen alle Typen weiter: der Erinnerungs-Toast muss eine
  * abgeleitete Meldung anzeigen und wegwischen können.
  */
-const DERIVED_ENTITY_TYPES = ['pantry_item', 'cycle_period', 'cycle_log_nudge', 'schedule_entry', 'schedule_extra_entry', 'waste_pickup', 'document_expiry', 'health_prevention_due', 'fasting_goal', 'fasting_next_start'];
+const DERIVED_ENTITY_TYPES = ['pantry_item', 'cycle_period', 'cycle_log_nudge', 'schedule_entry', 'schedule_extra_entry', 'waste_pickup', 'document_expiry', 'health_prevention_due', 'fasting_goal', 'fasting_next_start', 'shopping_move_returned'];
 
 /* DIESER ROUTER IST EINE MISCHSTELLE, UND SEIN PFAD SAGT DAS NICHT.
  *
@@ -323,6 +324,16 @@ router.get('/pending', (req, res) => {
       // #preventionDueBody haelt denselben Riegel fuer die Push-Benachrichtigung,
       // hier fuer den In-App-Toast (Review #1256: die eine Stelle folgte der
       // anderen nicht).
+      // Die Meldung "Umzug zurueckgenommen" (#1912) traegt ihre Namen selbst:
+      // verzoegert geholt wie oben, nur fuer ihre Zeilen.
+      if (row.entity_type === 'shopping_move_returned') {
+        const notice = moveNoticeFields(db.get(), row.entity_id);
+        if (notice) {
+          row.entity_title = notice.item_name;
+          row.move_notice = notice;
+          if (notice.back_list_id) row.target_url = `/shopping?list=${notice.back_list_id}`;
+        }
+      }
       if (row.entity_type === 'health_prevention_due' && row.assigned_from != null) {
         row.prevention_subject_name = db.get().prepare(`
           SELECT u.display_name FROM health_prevention_records pr
@@ -353,7 +364,7 @@ router.get('/all', (req, res) => {
     const entityId   = parseInt(req.query.entity_id, 10);
 
     if (!VALID_ENTITY_TYPES.includes(entityType) || !entityId) {
-      return res.status(400).json({ error: 'entity_type und entity_id sind erforderlich.', code: 400 });
+      return res.status(400).json({ error: 'entity_type and entity_id are required.', code: 400 });
     }
     if (!mayTouchOrigin(req, entityType)) {
       return res.status(403).json({ error: 'You do not have access to this module.', code: 403, reason: 'module_access_denied' });
@@ -384,7 +395,7 @@ router.get('/', (req, res) => {
     const entityId    = parseInt(req.query.entity_id, 10);
 
     if (!VALID_ENTITY_TYPES.includes(entityType) || !entityId) {
-      return res.status(400).json({ error: 'entity_type und entity_id sind erforderlich.', code: 400 });
+      return res.status(400).json({ error: 'entity_type and entity_id are required.', code: 400 });
     }
     if (!mayTouchOrigin(req, entityType)) {
       return res.status(403).json({ error: 'You do not have access to this module.', code: 403, reason: 'module_access_denied' });
@@ -481,7 +492,7 @@ router.put('/', (req, res) => {
     const remindAts  = req.body?.remind_ats;
 
     if (!VALID_ENTITY_TYPES.includes(entityType) || !entityId) {
-      return res.status(400).json({ error: 'entity_type und entity_id sind erforderlich.', code: 400 });
+      return res.status(400).json({ error: 'entity_type and entity_id are required.', code: 400 });
     }
     // DERSELBE RIEGEL WIE IN POST. Er fehlte hier zunächst, und das war der
     // teurere Weg: PUT ersetzt die ganze Menge und darf bis zu fünf Termine
@@ -498,7 +509,7 @@ router.put('/', (req, res) => {
       return res.status(404).json(TARGET_NOT_FOUND);
     }
     if (!Array.isArray(remindAts)) {
-      return res.status(400).json({ error: 'remind_ats muss ein Array sein.', code: 400 });
+      return res.status(400).json({ error: 'remind_ats must be an array.', code: 400 });
     }
 
     // Jeden Eintrag validieren und nach naiv-UTC bringen (#1364), DANACH
@@ -512,7 +523,7 @@ router.put('/', (req, res) => {
     }
     const unique = [...new Set(checked.map((result) => result.value))];
     if (unique.length > MAX_REMINDERS_PER_ENTITY) {
-      return res.status(400).json({ error: `Maximal ${MAX_REMINDERS_PER_ENTITY} Erinnerungen je Eintrag.`, code: 400 });
+      return res.status(400).json({ error: `At most ${MAX_REMINDERS_PER_ENTITY} reminders per entity.`, code: 400 });
     }
 
     const replace = db.get().transaction((values) => {
@@ -556,7 +567,7 @@ router.patch('/:id/dismiss', (req, res) => {
     const reminderId = parseInt(req.params.id, 10);
 
     if (!reminderId) {
-      return res.status(400).json({ error: 'Ungültige Erinnerungs-ID.', code: 400 });
+      return res.status(400).json({ error: 'Invalid reminder ID.', code: 400 });
     }
 
     const reminder = db.get().prepare(
@@ -564,7 +575,7 @@ router.patch('/:id/dismiss', (req, res) => {
     ).get(reminderId, userId);
 
     if (!reminder) {
-      return res.status(404).json({ error: 'Erinnerung nicht gefunden.', code: 404 });
+      return res.status(404).json({ error: 'Reminder not found.', code: 404 });
     }
     // Verwerfen ist ein Schreibvorgang am fremden Modul: ein Token mit
     // `calendar:write` durfte hier bis zur Review von #811 eine Vorrats- oder
@@ -592,7 +603,7 @@ router.delete('/:id', (req, res) => {
     const reminderId = parseInt(req.params.id, 10);
 
     if (!reminderId) {
-      return res.status(400).json({ error: 'Ungültige Erinnerungs-ID.', code: 400 });
+      return res.status(400).json({ error: 'Invalid reminder ID.', code: 400 });
     }
 
     const reminder = db.get().prepare(
@@ -600,7 +611,7 @@ router.delete('/:id', (req, res) => {
     ).get(reminderId, userId);
 
     if (!reminder) {
-      return res.status(404).json({ error: 'Erinnerung nicht gefunden.', code: 404 });
+      return res.status(404).json({ error: 'Reminder not found.', code: 404 });
     }
     if (!mayTouchOrigin(req, reminder.entity_type, 'write')) {
       return res.status(403).json({ error: 'You do not have access to this module.', code: 403, reason: 'module_access_denied' });
@@ -632,7 +643,7 @@ router.delete('/', (req, res) => {
     const entityId   = parseInt(req.query.entity_id, 10);
 
     if (!VALID_ENTITY_TYPES.includes(entityType) || !entityId) {
-      return res.status(400).json({ error: 'entity_type und entity_id sind erforderlich.', code: 400 });
+      return res.status(400).json({ error: 'entity_type and entity_id are required.', code: 400 });
     }
     if (!mayTouchOrigin(req, entityType, 'write')) {
       return res.status(403).json({ error: 'You do not have access to this module.', code: 403, reason: 'module_access_denied' });

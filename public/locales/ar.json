@@ -451,6 +451,8 @@
         "customizeResetDone": "عادت لوحتك تتبع الأسرة.",
         "optionsFor": "خيارات {{widget}}",
         "optionCalendarScope": "أي المواعيد؟",
+        "optionCalendarCalendars": "أي تقويمات؟",
+        "optionCalendarCalendarsHint": "بدون تحديد تعرض البطاقة المواعيد من جميع التقويمات.",
         "optionCalendarAll": "كل المواعيد",
         "optionCalendarLimit": "كم عدد المواعيد؟",
         "optionCalendarLimitHint": "ينطبق على الأحجام الطويلة ويجعل البطاقة أطول بما يناسب. في «{{small}}» تعرض المواعيد التالية فقط، وفي «{{size}}» الأسبوع.",
@@ -980,7 +982,11 @@
         "tickedSection": "تم التأشير عليها",
         "itemBackToast": "عاد «{{name}}» إلى القائمة.",
         "itemStateOpen": "لم يُؤشَّر عليه",
-        "itemAddedToast": "أُضيف \"{{name}}\" ضمن \"{{category}}\"."
+        "itemAddedToast": "أُضيف \"{{name}}\" ضمن \"{{category}}\".",
+        "moveReturned": {
+            "refused": "عاد «{{item}}» إلى «{{back}}»: لم يقبله الخادم في «{{target}}».",
+            "waited": "لم يُنقل «{{item}}» إلى «{{target}}»: مزامنة «{{back}}» متوقفة منذ أكثر من أسبوع. سيظهر العنصر في «{{back}}» مجددًا بمجرد تشغيل القائمة."
+        }
     },
     "meals": {
         "randomizeSuccess_few": "تم تخطيط {{count}} وجبات.",
@@ -1432,7 +1438,15 @@
         "sidebarLabel": "الشريط الجانبي للتقويم",
         "upNextTitle": "التالي",
         "upNextEmpty": "لا شيء في الأسابيع الثلاثة القادمة.",
-        "shiftLegend": "مفتاح المناوبات"
+        "shiftLegend": "مفتاح المناوبات",
+        "errorCalendarGone": "هذا التقويم لم يعد موجودًا.",
+        "errorCalendarNameInvalid": "أعطِ التقويم اسمًا لا يتجاوز {{limit}} حرفًا.",
+        "errorCalendarOrderChanged": "تغيّرت التقويمات في هذه الأثناء.",
+        "errorDeleteFeedAdminOnly": "يتم تصدير هذا التقويم. يمكن للمسؤول فقط حذفه.",
+        "errorEventGone": "هذا الموعد لم يعد موجودًا.",
+        "errorSelectedCalendarGone": "التقويم المختار لم يعد موجودًا.",
+        "errorSeriesNoOccurrence": "مع هذا التكرار لن يكون هناك أي موعد ابتداءً من تاريخ البداية.",
+        "localCalendarUploadsHint": "تُرفع أحداث هذا التقويم إلى iCloud عبر Apple Calendar."
     },
     "noteCategories": {
         "categories": "الفئات",
@@ -1506,7 +1520,11 @@
         "checklistDone": "منجز",
         "checklistOpen": "مفتوح",
         "errorNoteGone": "هذه الملاحظة لم تعد موجودة.",
-        "errorSelectedCategoryGone": "إحدى الفئات المحددة لم تعد موجودة."
+        "errorSelectedCategoryGone": "إحدى الفئات المحددة لم تعد موجودة.",
+        "lockedToggle": "قفل التحرير",
+        "lockedBadge": "مقفلة",
+        "lockedHint": "لا يمكن لأحد غيرك وغير المسؤولين تغيير هذه الملاحظة أو تثبيتها أو حذفها - بما في ذلك تحديد عناصر قائمة التحقق. يمكن للجميع الآخرين قراءتها.",
+        "errorLocked": "هذه الملاحظة مقفلة. لا يمكن تغييرها إلا من قبل الشخص الذي أنشأها والمسؤولين."
     },
     "markdown": {
         "bold": "عريض (Ctrl+B)",
@@ -2197,9 +2215,14 @@
         "themeLight": "فاتح",
         "themeDark": "داكن",
         "wallModeLabel": "وضع الحائط",
-        "wallModeHint": "يحوّل الصفحة الرئيسية على هذا الجهاز إلى شاشة هادئة للوح المثبت على الحائط: الوقت وبرنامج اليوم ومن عليه الدور اليوم والطقس، بحجم يمكن قراءته من مسافة مترين ودون أي تحكم. تخفت الشاشة بين الساعة 22 و6. ينطبق على هذا الجهاز فقط لا على بقية أجهزة المنزل.",
+        "wallModeHint": "يحوّل الصفحة الرئيسية على هذا الجهاز إلى شاشة هادئة للوح المثبت على الحائط: الوقت وبرنامج اليوم ومن عليه الدور اليوم والطقس، بحجم يمكن قراءته من مسافة مترين ودون أي تحكم. تخفت الشاشة في ساعات الليل. ينطبق على هذا الجهاز فقط لا على بقية أجهزة المنزل.",
         "wallModeOn": "وضع الحائط مُفعَّل، ويظهر في {{page}}.",
         "wallModeOff": "وضع الحائط مُعطَّل.",
+        "nightHoursLabel": "ساعات الليل",
+        "nightHoursHint": "في هذه الساعات يخفت وضع الحائط وشاشة التوقف، حسب ساعة المنزل. ينطبق على هذا الجهاز فقط.",
+        "nightHoursFrom": "التعتيم من",
+        "nightHoursUntil": "التعتيم حتى",
+        "nightHoursSaved": "ساعات الليل على هذا الجهاز: من {{from}} إلى {{until}}.",
         "screensaverIdleLabel": "بدء شاشة التوقف بعد",
         "screensaverIdleHint": "المدة التي يبقى فيها هذا الجهاز دون لمس قبل أن تبدأ شاشة توقف الصور. ينطبق على هذا الجهاز فقط، وليس على بقية أجهزة الأسرة. يسري بعد أن يربط المسؤول Immich.",
         "screensaverIdleSaved": "مدة انتظار شاشة التوقف على هذا الجهاز: {{delay}}.",
@@ -3167,6 +3190,15 @@
         "immichTestOk": "تم الاتصال بـ Immich بنجاح.",
         "immichPreview": "معاينة",
         "immichPreviewUnavailable": "تعذر تحميل صورة من Immich.",
+        "immichErrorUrlInvalid": "عنوان URL للخادم غير صالح. يجب أن يبدأ بـ http:// أو https://.",
+        "immichErrorAlbumIdInvalid": "معرّف الألبوم غير صالح. تجده في Immich ضمن عنوان الألبوم.",
+        "immichErrorApiKeyInvalid": "مفتاح API طويل جدًا. انسخ المفتاح من Immich مرة أخرى.",
+        "immichErrorNotConfigured": "يحتاج الاختبار إلى عنوان URL للخادم ومفتاح API.",
+        "immichErrorApiKeyRejected": "يرفض Immich مفتاح API. ربما انتهت صلاحيته أو أُلغي أو تنقصه صلاحية.",
+        "immichErrorStatus": "ردّ Immich بخطأ (الحالة {{status}}). تحقّق من عنوان URL للخادم أو حاول لاحقًا.",
+        "immichErrorUnreachable": "تعذّر الوصول إلى Immich. تحقّق من عنوان URL للخادم ومن أن Immich يعمل.",
+        "immichSaveFailed": "تعذّر حفظ إعدادات Immich.",
+        "immichTestFailed": "تعذّر التحقق من الاتصال بـ Immich.",
         "backToSettings": "العودة إلى الإعدادات",
         "retry": "إعادة المحاولة",
         "loadError": "تعذر تحميل الإعدادات.",
@@ -3682,7 +3714,20 @@
         "permCapabilityTasksReorder": "تغيير ترتيب العائلة",
         "permChildRoleHint": "تحصل حسابات الأطفال الجديدة عند إنشائها أيضًا على أذونات بدء خاصة: {{list}}. بعد ذلك تظهر لدى العضو نفسه.",
         "activeModulesHintMore": "لإخفاء وحدة من تنقلك أنت فقط، اذهب إلى الوحدات ← التنقل.",
-        "permIntroMore": "يمكن أن يختلف الأعضاء الأفراد عن الإعداد الافتراضي للدور. بدون أي إعداد، يتمتع كل دور بوصول كامل؛ والمشرفون دائمًا."
+        "permIntroMore": "يمكن أن يختلف الأعضاء الأفراد عن الإعداد الافتراضي للدور. بدون أي إعداد، يتمتع كل دور بوصول كامل؛ والمشرفون دائمًا.",
+        "preferenceSaveFailed": "تعذّر حفظ الإعداد.",
+        "caldavCalendarReadOnly": "للقراءة فقط: لا يمكن حفظ أحداث جديدة هنا",
+        "caldavCalendarReadOnlyWaiting_one": "للقراءة فقط: لن يصل حدث واحد ({{count}}) بانتظار الرفع إلى هنا",
+        "caldavCalendarReadOnlyWaiting": "للقراءة فقط: لن يصل {{count}} حدث بانتظار الرفع إلى هنا",
+        "reminderListReadOnly": "للقراءة فقط: لا يمكن حفظ إدخالات جديدة هنا",
+        "reminderListReadOnlyWaiting_one": "للقراءة فقط: لن يصل إدخال واحد ({{count}}) بانتظار الرفع إلى هنا",
+        "reminderListReadOnlyWaiting": "للقراءة فقط: لن يصل {{count}} إدخال بانتظار الرفع إلى هنا",
+        "caldavCalendarReadOnlyWaiting_two": "للقراءة فقط: لن يصل حدثان ({{count}}) بانتظار الرفع إلى هنا",
+        "caldavCalendarReadOnlyWaiting_few": "للقراءة فقط: لن تصل {{count}} أحداث بانتظار الرفع إلى هنا",
+        "caldavCalendarReadOnlyWaiting_many": "للقراءة فقط: لن يصل {{count}} حدثًا بانتظار الرفع إلى هنا",
+        "reminderListReadOnlyWaiting_two": "للقراءة فقط: لن يصل إدخالان ({{count}}) بانتظار الرفع إلى هنا",
+        "reminderListReadOnlyWaiting_few": "للقراءة فقط: لن تصل {{count}} إدخالات بانتظار الرفع إلى هنا",
+        "reminderListReadOnlyWaiting_many": "للقراءة فقط: لن يصل {{count}} إدخالًا بانتظار الرفع إلى هنا"
     },
     "login": {
         "tagline": "مرحبًا بعودتك. منزلك في مكان واحد.",
@@ -4307,7 +4352,8 @@
             "reasonNameTooLong": "اسم ملف أو مجلد طويل جدًا.",
             "reasonTooDeep": "يتجاوز المسار حد خمسة مستويات من المجلدات.",
             "reasonParentFailed": "تعذر إنشاء المجلد الأب.",
-            "reasonRateLimited": "يتلقى الخادم طلبات كثيرة جدًا الآن. حاول التحميل مرة أخرى لاحقًا."
+            "reasonRateLimited": "يتلقى الخادم طلبات كثيرة جدًا الآن. حاول التحميل مرة أخرى لاحقًا.",
+            "folderGoneReplanned": "حُذف مجلد من هذا الرفع في هذه الأثناء. تعرض المعاينة الحالة الحالية - ابدأ الرفع من جديد."
         },
         "errorFolderGone": "هذا المجلد لم يعد موجودًا.",
         "errorSelectedFolderGone": "المجلد المحدد لم يعد موجودًا.",
@@ -4773,7 +4819,14 @@
         "debtOwesYou": "{{name}} مدين لك",
         "debtOwes": "{{from}} مدين لـ {{to}}",
         "balanced": "متسوّى",
-        "balancedInGroup": "{{group}}: متسوّى"
+        "balancedInGroup": "{{group}}: متسوّى",
+        "totalsByMember": "المدفوع لكل شخص",
+        "totalsByMemberHint": "ما دفعه كل شخص، وتحته حصته الخاصة",
+        "ownShare": "الحصة الخاصة: {{amount}}",
+        "paidLabel": "المدفوع",
+        "totalsByCategory": "حسب الفئة",
+        "categoryFilter": "تصفية النفقات حسب الفئة",
+        "noExpensesInCategory": "لا توجد نفقات في هذه الفئة."
     },
     "wmo": {
         "0": "سماء صافية",
@@ -5303,6 +5356,7 @@
             "saveError": "تعذّر حفظ القياس.",
             "invalidValue": "يرجى إدخال قيم صحيحة.",
             "range": {
+                "day": "يوم",
                 "week": "أسبوع",
                 "month": "شهر",
                 "year": "سنة"
@@ -5342,6 +5396,7 @@
                 "family": "العائلة"
             },
             "sparse": "قياسات قليلة جدًا لعرض اتجاه.",
+            "bandValue": "{{mean}}، من {{low}} إلى {{high}}",
             "recentMeasurements": "آخر القياسات",
             "deleteMeasurement": "حذف القياس {{value}} ({{date}})",
             "measurementDeleted": "تم حذف القياس",

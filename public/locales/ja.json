@@ -355,6 +355,8 @@
         "customizeResetDone": "あなたのダッシュボードは再び世帯に従います。",
         "optionsFor": "{{widget}}のオプション",
         "optionCalendarScope": "どの予定を表示しますか？",
+        "optionCalendarCalendars": "どのカレンダーを表示しますか？",
+        "optionCalendarCalendarsHint": "選択しない場合、タイルはすべてのカレンダーの予定を表示します。",
         "optionCalendarAll": "すべての予定",
         "optionCalendarLimit": "予定を何件表示しますか？",
         "optionCalendarLimitHint": "縦長のサイズに適用され、それに合わせてタイルが高くなります。「{{small}}」では次の予定だけを、「{{size}}」では週を表示します。",
@@ -788,7 +790,11 @@
         "tickedSection": "チェック済み",
         "itemBackToast": "「{{name}}」をリストに戻しました。",
         "itemStateOpen": "未チェック",
-        "itemAddedToast": "「{{name}}」を「{{category}}」に追加しました。"
+        "itemAddedToast": "「{{name}}」を「{{category}}」に追加しました。",
+        "moveReturned": {
+            "refused": "「{{item}}」は「{{back}}」に戻りました。サーバーが「{{target}}」への追加を受け付けませんでした。",
+            "waited": "「{{item}}」は「{{target}}」に移動されませんでした。「{{back}}」の同期が1週間以上オフになっています。リストをオンにすると、「{{back}}」に再び表示されます。"
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} 品の材料",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "カレンダーのサイドバー",
         "upNextTitle": "次の予定",
         "upNextEmpty": "今後3週間の予定はありません。",
-        "shiftLegend": "シフトの凡例"
+        "shiftLegend": "シフトの凡例",
+        "errorCalendarGone": "このカレンダーはもう存在しません。",
+        "errorCalendarNameInvalid": "カレンダー名は{{limit}}文字以内で入力してください。",
+        "errorCalendarOrderChanged": "その間にカレンダーが変更されました。",
+        "errorDeleteFeedAdminOnly": "このカレンダーは書き出し中です。削除できるのは管理者だけです。",
+        "errorEventGone": "この予定はもう存在しません。",
+        "errorSelectedCalendarGone": "選んだカレンダーはもう存在しません。",
+        "errorSeriesNoOccurrence": "この繰り返しでは、開始日以降に予定が1件もありません。",
+        "localCalendarUploadsHint": "このカレンダーの予定は Apple Calendar を通じて iCloud にアップロードされます。"
     },
     "noteCategories": {
         "categories": "カテゴリー",
@@ -1274,7 +1288,11 @@
         "checklistDone": "完了",
         "checklistOpen": "未完了",
         "errorNoteGone": "このメモはもうありません。",
-        "errorSelectedCategoryGone": "選択したカテゴリの一つがもう存在しません。"
+        "errorSelectedCategoryGone": "選択したカテゴリの一つがもう存在しません。",
+        "lockedToggle": "編集をロックする",
+        "lockedBadge": "ロック中",
+        "lockedHint": "このメモを変更・ピン留め・削除できるのは、あなたと管理者だけです。チェックリストの項目にチェックを入れることも含みます。ほかの人は引き続き読むことができます。",
+        "errorLocked": "このメモはロックされています。変更できるのは作成した人と管理者だけです。"
     },
     "markdown": {
         "bold": "太字 (Ctrl+B)",
@@ -1944,9 +1962,14 @@
         "themeLight": "ライト",
         "themeDark": "ダーク",
         "wallModeLabel": "ウォールモード",
-        "wallModeHint": "このデバイスのホームを、壁掛けタブレット向けの静かな表示に切り替えます。時刻、今日の予定、今日の担当、天気を、2メートル離れても読める大きさで、操作なしに表示します。22時から6時のあいだは暗くなります。適用されるのはこのデバイスだけで、家の他の端末には及びません。",
+        "wallModeHint": "このデバイスのホームを、壁掛けタブレット向けの静かな表示に切り替えます。時刻、今日の予定、今日の担当、天気を、2メートル離れても読める大きさで、操作なしに表示します。夜間の時間帯は暗くなります。適用されるのはこのデバイスだけで、家の他の端末には及びません。",
         "wallModeOn": "ウォールモードをオンにしました。{{page}} に表示されます。",
         "wallModeOff": "ウォールモードをオフにしました。",
+        "nightHoursLabel": "夜間の時間帯",
+        "nightHoursHint": "この時間帯は、ウォールモードとスクリーンセーバーが家庭の時刻に合わせて暗くなります。このデバイスにのみ適用されます。",
+        "nightHoursFrom": "暗くする開始",
+        "nightHoursUntil": "暗くする終了",
+        "nightHoursSaved": "このデバイスの夜間の時間帯: {{from}}から{{until}}まで。",
         "screensaverIdleLabel": "スクリーンセーバーを開始するまで",
         "screensaverIdleHint": "写真スクリーンセーバーが始まるまで、このデバイスに触れない状態が続く時間です。このデバイスにのみ適用され、世帯の他のデバイスには影響しません。管理者が Immich を接続すると有効になります。",
         "screensaverIdleSaved": "このデバイスのスクリーンセーバー待ち時間: {{delay}}",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "Immich への接続に成功しました。",
         "immichPreview": "プレビュー",
         "immichPreviewUnavailable": "Immich から写真を読み込めませんでした。",
+        "immichErrorUrlInvalid": "サーバーURLが無効です。http:// または https:// で始まる必要があります。",
+        "immichErrorAlbumIdInvalid": "アルバムIDが無効です。Immich のアルバムのアドレスで確認できます。",
+        "immichErrorApiKeyInvalid": "APIキーが長すぎます。Immich からキーをもう一度コピーしてください。",
+        "immichErrorNotConfigured": "テストにはサーバーURLとAPIキーが必要です。",
+        "immichErrorApiKeyRejected": "Immich がAPIキーを拒否しています。期限切れか取り消されたか、権限が不足している可能性があります。",
+        "immichErrorStatus": "Immich がエラーを返しました（ステータス {{status}}）。サーバーURLを確認するか、後でもう一度お試しください。",
+        "immichErrorUnreachable": "Immich に到達できません。サーバーURLと Immich が動作しているかを確認してください。",
+        "immichSaveFailed": "Immich の設定を保存できませんでした。",
+        "immichTestFailed": "Immich への接続を確認できませんでした。",
         "backToSettings": "設定に戻る",
         "retry": "再試行",
         "loadError": "設定を読み込めませんでした。",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "家族の並び順を変更",
         "permChildRoleHint": "新しい子どものアカウントには、作成時に独自の初期権限も付きます: {{list}}。その後は各メンバーに表示されます。",
         "activeModulesHintMore": "自分の画面だけで隠す場合は「モジュール → ナビゲーション」へ。",
-        "permIntroMore": "個々のメンバーは役割の既定値と異なる設定にできます。未設定の場合、すべての役割がフルアクセスを持ち、管理者は常にフルアクセスです。"
+        "permIntroMore": "個々のメンバーは役割の既定値と異なる設定にできます。未設定の場合、すべての役割がフルアクセスを持ち、管理者は常にフルアクセスです。",
+        "preferenceSaveFailed": "設定を保存できませんでした。",
+        "caldavCalendarReadOnly": "読み取り専用：ここには新しい予定を保存できません",
+        "caldavCalendarReadOnlyWaiting_one": "読み取り専用：ここへのアップロードを待っている予定 {{count}} 件は届きません",
+        "caldavCalendarReadOnlyWaiting": "読み取り専用：ここへのアップロードを待っている予定 {{count}} 件は届きません",
+        "reminderListReadOnly": "読み取り専用：ここには新しい項目を保存できません",
+        "reminderListReadOnlyWaiting_one": "読み取り専用：ここへのアップロードを待っている項目 {{count}} 件は届きません",
+        "reminderListReadOnlyWaiting": "読み取り専用：ここへのアップロードを待っている項目 {{count}} 件は届きません"
     },
     "login": {
         "tagline": "おかえりなさい。暮らしのことを一か所に。",
@@ -3955,7 +3994,8 @@
             "reasonNameTooLong": "ファイル名またはフォルダー名が長すぎます。",
             "reasonTooDeep": "パスがフォルダー5階層の上限を超えています。",
             "reasonParentFailed": "親フォルダーを作成できませんでした。",
-            "reasonRateLimited": "サーバーへのリクエストが多すぎます。しばらくしてからもう一度アップロードしてください。"
+            "reasonRateLimited": "サーバーへのリクエストが多すぎます。しばらくしてからもう一度アップロードしてください。",
+            "folderGoneReplanned": "このアップロードのフォルダーがその間に削除されました。プレビューに現在の状態が表示されています。アップロードをもう一度開始してください。"
         },
         "errorFolderGone": "このフォルダーはもう存在しません。",
         "errorSelectedFolderGone": "選択したフォルダーはもう存在しません。",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}}さんから受け取り",
         "debtOwes": "{{from}}さんから{{to}}さんへ支払い",
         "balanced": "精算済み",
-        "balancedInGroup": "{{group}}: 精算済み"
+        "balancedInGroup": "{{group}}: 精算済み",
+        "totalsByMember": "各自の支払額",
+        "totalsByMemberHint": "立て替えた額と、その下に自分の負担分",
+        "ownShare": "自分の負担分: {{amount}}",
+        "paidLabel": "支払額",
+        "totalsByCategory": "カテゴリ別",
+        "categoryFilter": "カテゴリで支出を絞り込む",
+        "noExpensesInCategory": "このカテゴリの支出はありません。"
     },
     "wmo": {
         "0": "快晴",
@@ -4924,6 +4971,7 @@
             "saveError": "測定値を保存できませんでした。",
             "invalidValue": "有効な値を入力してください。",
             "range": {
+                "day": "日",
                 "week": "週",
                 "month": "月",
                 "year": "年"
@@ -4963,6 +5011,7 @@
                 "family": "家族"
             },
             "sparse": "傾向を表示するには測定値が少なすぎます。",
+            "bandValue": "{{mean}}（{{low}}～{{high}}）",
             "recentMeasurements": "最近の測定",
             "deleteMeasurement": "測定 {{value}}（{{date}}）を削除",
             "measurementDeleted": "測定を削除しました",

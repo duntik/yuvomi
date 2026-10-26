@@ -355,6 +355,8 @@
         "customizeResetDone": "Az áttekintésed újra a háztartást követi.",
         "optionsFor": "{{widget}} beállításai",
         "optionCalendarScope": "Mely események?",
+        "optionCalendarCalendars": "Mely naptárak?",
+        "optionCalendarCalendarsHint": "Kijelölés nélkül a csempe az összes naptár eseményeit mutatja.",
         "optionCalendarAll": "Minden esemény",
         "optionCalendarLimit": "Hány esemény?",
         "optionCalendarLimitHint": "A magas méretekre vonatkozik, és a csempét ennek megfelelően magasabbá teszi. „{{small}}” méretben csak a következő eseményeket mutatja, „{{size}}” méretben a hetet.",
@@ -788,7 +790,11 @@
         "tickedSection": "Kipipálva",
         "itemBackToast": "„{{name}}” újra a listán van.",
         "itemStateOpen": "nincs kipipálva",
-        "itemAddedToast": "„{{name}}” hozzáadva ide: „{{category}}”."
+        "itemAddedToast": "„{{name}}” hozzáadva ide: „{{category}}”.",
+        "moveReturned": {
+            "refused": "„{{item}}” visszakerült ide: „{{back}}”. A szerver nem fogadta el itt: „{{target}}”.",
+            "waited": "„{{item}}” nem került át ide: „{{target}}”. A(z) „{{back}}” szinkronizálása több mint egy hete ki van kapcsolva. A tétel újra megjelenik itt: „{{back}}”, amint bekapcsolod a listát."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} hozzávaló",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "Naptár oldalsáv",
         "upNextTitle": "Következik",
         "upNextEmpty": "A következő három hétben nincs semmi.",
-        "shiftLegend": "Műszakok jelmagyarázata"
+        "shiftLegend": "Műszakok jelmagyarázata",
+        "errorCalendarGone": "Ez a naptár már nem létezik.",
+        "errorCalendarNameInvalid": "Adj a naptárnak legfeljebb {{limit}} karakteres nevet.",
+        "errorCalendarOrderChanged": "A naptárak időközben megváltoztak.",
+        "errorDeleteFeedAdminOnly": "Ez a naptár exportálva van. Csak egy rendszergazda törölheti.",
+        "errorEventGone": "Ez az esemény már nem létezik.",
+        "errorSelectedCalendarGone": "A kiválasztott naptár már nem létezik.",
+        "errorSeriesNoOccurrence": "Ezzel az ismétléssel a kezdő dátumtól egyetlen esemény sem lenne.",
+        "localCalendarUploadsHint": "Az ebben a naptárban lévő események az Apple Calendaron keresztül feltöltődnek az iCloudba."
     },
     "noteCategories": {
         "categories": "Kategóriák",
@@ -1274,7 +1288,11 @@
         "checklistDone": "Kész",
         "checklistOpen": "Nyitott",
         "errorNoteGone": "Ez a jegyzet már nem létezik.",
-        "errorSelectedCategoryGone": "Az egyik kiválasztott kategória már nem létezik."
+        "errorSelectedCategoryGone": "Az egyik kiválasztott kategória már nem létezik.",
+        "lockedToggle": "Szerkesztés zárolása",
+        "lockedBadge": "Zárolva",
+        "lockedHint": "Ezt a jegyzetet csak te és a rendszergazdák módosíthatjátok, tűzhetitek ki vagy törölhetitek - a lista elemeinek kipipálását is beleértve. Mindenki más továbbra is olvashatja.",
+        "errorLocked": "Ez a jegyzet zárolva van. Csak az módosíthatja, aki létrehozta, és a rendszergazdák."
     },
     "markdown": {
         "bold": "Félkövér (Ctrl+B)",
@@ -2055,9 +2073,14 @@
         "themeLight": "Világos",
         "themeDark": "Sötét",
         "wallModeLabel": "Fali mód",
-        "wallModeHint": "A kezdőlapot ezen az eszközön nyugodt kijelzővé alakítja fali táblagéphez: óra, napi program, hogy ma kin a sor, és az időjárás - két méterről is olvasható méretben, kezelnivaló nélkül. 22 és 6 óra között elhalványul. Csak erre az eszközre vonatkozik, a háztartás többi eszközére nem.",
+        "wallModeHint": "A kezdőlapot ezen az eszközön nyugodt kijelzővé alakítja fali táblagéphez: óra, napi program, hogy ma kin a sor, és az időjárás - két méterről is olvasható méretben, kezelnivaló nélkül. Az éjszakai órákban elhalványul. Csak erre az eszközre vonatkozik, a háztartás többi eszközére nem.",
         "wallModeOn": "Fali mód bekapcsolva, itt látszik: {{page}}.",
         "wallModeOff": "Fali mód kikapcsolva.",
+        "nightHoursLabel": "Éjszakai órák",
+        "nightHoursHint": "Ezekben az órákban a fali mód és a képernyővédő elhalványul, a háztartás órája szerint. Csak erre az eszközre vonatkozik.",
+        "nightHoursFrom": "Halványítás ettől",
+        "nightHoursUntil": "Halványítás eddig",
+        "nightHoursSaved": "Éjszakai órák ezen az eszközön: {{from}} - {{until}}.",
         "screensaverIdleLabel": "Képernyővédő indítása ennyi idő után",
         "screensaverIdleHint": "Ennyi ideig marad érintés nélkül ez az eszköz, mielőtt elindul a fényképes képernyővédő. Csak erre az eszközre vonatkozik, a háztartás többi tagjára nem. Akkor lép érvénybe, ha egy adminisztrátor csatlakoztatta az Immich-et.",
         "screensaverIdleSaved": "Képernyővédő várakozási ideje ezen az eszközön: {{delay}}.",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "Sikeres kapcsolódás az Immichhez.",
         "immichPreview": "Előnézet",
         "immichPreviewUnavailable": "Nem sikerült fényképet betölteni az Immichből.",
+        "immichErrorUrlInvalid": "A szerver URL-je érvénytelen. http:// vagy https:// előtaggal kell kezdődnie.",
+        "immichErrorAlbumIdInvalid": "Az album azonosítója érvénytelen. Az Immichben az album címében találod.",
+        "immichErrorApiKeyInvalid": "Az API-kulcs túl hosszú. Másold ki újra a kulcsot az Immichből.",
+        "immichErrorNotConfigured": "A teszthez hiányzik a szerver URL-je vagy az API-kulcs.",
+        "immichErrorApiKeyRejected": "Az Immich elutasítja az API-kulcsot. Lehet, hogy lejárt, visszavonták, vagy hiányzik egy jogosultsága.",
+        "immichErrorStatus": "Az Immich hibával válaszolt ({{status}} állapot). Ellenőrizd a szerver URL-jét, vagy próbáld újra később.",
+        "immichErrorUnreachable": "Az Immich nem érhető el. Ellenőrizd a szerver URL-jét, és hogy fut-e az Immich.",
+        "immichSaveFailed": "Az Immich-beállítás nem menthető.",
+        "immichTestFailed": "Az Immich-kapcsolat nem ellenőrizhető.",
         "backToSettings": "Vissza a beállításokhoz",
         "retry": "Próbálja újra",
         "loadError": "A beállítások betöltése sikertelen.",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "A család sorrendjének módosítása",
         "permChildRoleHint": "Az új gyerekfiókok létrehozáskor saját kezdő jogosultságokat is kapnak: {{list}}. Ezek utána az adott tagnál láthatók.",
         "activeModulesHintMore": "Ha csak magadnál rejtenéd el, nézd meg a Modulok → Navigáció oldalt.",
-        "permIntroMore": "Az egyes tagok eltérhetnek a szerep alapértelmezésétől. Beállítás nélkül minden szerep teljes hozzáférést kap; a rendszergazdák mindig."
+        "permIntroMore": "Az egyes tagok eltérhetnek a szerep alapértelmezésétől. Beállítás nélkül minden szerep teljes hozzáférést kap; a rendszergazdák mindig.",
+        "preferenceSaveFailed": "A beállítás nem menthető.",
+        "caldavCalendarReadOnly": "Csak olvasható: ide nem menthetők új események",
+        "caldavCalendarReadOnlyWaiting_one": "Csak olvasható: {{count}} ide feltöltésre váró esemény nem érkezik meg",
+        "caldavCalendarReadOnlyWaiting": "Csak olvasható: {{count}} ide feltöltésre váró esemény nem érkezik meg",
+        "reminderListReadOnly": "Csak olvasható: ide nem menthetők új bejegyzések",
+        "reminderListReadOnlyWaiting_one": "Csak olvasható: {{count}} ide feltöltésre váró bejegyzés nem érkezik meg",
+        "reminderListReadOnlyWaiting": "Csak olvasható: {{count}} ide feltöltésre váró bejegyzés nem érkezik meg"
     },
     "login": {
         "tagline": "Üdv újra! Az otthon ügyei egy helyen.",
@@ -4019,7 +4058,8 @@
             "reasonNameTooLong": "Egy fájl- vagy mappanév túl hosszú.",
             "reasonTooDeep": "Az elérési út meghaladja az öt mappaszint korlátját.",
             "reasonParentFailed": "A szülőmappát nem sikerült létrehozni.",
-            "reasonRateLimited": "A szerver túl sok kérést kap. Próbáld meg később újra a feltöltést."
+            "reasonRateLimited": "A szerver túl sok kérést kap. Próbáld meg később újra a feltöltést.",
+            "folderGoneReplanned": "A feltöltés egyik mappáját időközben törölték. Az előnézet a jelenlegi állapotot mutatja - indítsd újra a feltöltést."
         },
         "errorFolderGone": "Ez a mappa már nem létezik.",
         "errorSelectedFolderGone": "A kiválasztott mappa már nem létezik.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} tartozik Önnek",
         "debtOwes": "{{from}} tartozik neki: {{to}}",
         "balanced": "Rendezve",
-        "balancedInGroup": "{{group}}: Rendezve"
+        "balancedInGroup": "{{group}}: Rendezve",
+        "totalsByMember": "Személyenként fizetve",
+        "totalsByMemberHint": "Amit kiki kifizetett, alatta a saját része",
+        "ownShare": "Saját rész: {{amount}}",
+        "paidLabel": "Fizetve",
+        "totalsByCategory": "Kategória szerint",
+        "categoryFilter": "Kiadások szűrése kategória szerint",
+        "noExpensesInCategory": "Ebben a kategóriában nincs kiadás."
     },
     "wmo": {
         "0": "Tiszta égbolt",
@@ -4924,6 +4971,7 @@
             "saveError": "A mérés nem menthető.",
             "invalidValue": "Adj meg érvényes értékeket.",
             "range": {
+                "day": "Nap",
                 "week": "Hét",
                 "month": "Hónap",
                 "year": "Év"
@@ -4963,6 +5011,7 @@
                 "family": "Család"
             },
             "sparse": "Túl kevés mérés a trend megjelenítéséhez.",
+            "bandValue": "{{mean}}, {{low}} és {{high}} között",
             "recentMeasurements": "Legutóbbi mérések",
             "deleteMeasurement": "Mérés törlése: {{value}} ({{date}})",
             "measurementDeleted": "Mérés törölve",

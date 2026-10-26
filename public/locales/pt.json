@@ -355,6 +355,8 @@
         "customizeResetDone": "A tua vista geral volta a seguir a casa.",
         "optionsFor": "Opções de {{widget}}",
         "optionCalendarScope": "Que compromissos?",
+        "optionCalendarCalendars": "Que calendários?",
+        "optionCalendarCalendarsHint": "Sem seleção, o mosaico mostra compromissos de todos os calendários.",
         "optionCalendarAll": "Todos os compromissos",
         "optionCalendarLimit": "Quantos compromissos?",
         "optionCalendarLimitHint": "Aplica-se aos tamanhos altos e torna o cartão mais alto em conformidade. Em «{{small}}» mostra apenas os próximos compromissos; em «{{size}}», a semana.",
@@ -788,7 +790,11 @@
         "tickedSection": "Marcados",
         "itemBackToast": "«{{name}}» está de novo na lista.",
         "itemStateOpen": "não marcado",
-        "itemAddedToast": "\"{{name}}\" adicionado em \"{{category}}\"."
+        "itemAddedToast": "\"{{name}}\" adicionado em \"{{category}}\".",
+        "moveReturned": {
+            "refused": "«{{item}}» voltou para «{{back}}»: o servidor não o aceitou em «{{target}}».",
+            "waited": "«{{item}}» não foi movido para «{{target}}»: a sincronização de «{{back}}» está desativada há mais de uma semana. O artigo volta a aparecer em «{{back}}» assim que essa lista for ativada."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} ingrediente",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "Barra lateral do calendário",
         "upNextTitle": "A seguir",
         "upNextEmpty": "Nada nas próximas três semanas.",
-        "shiftLegend": "Legenda dos turnos"
+        "shiftLegend": "Legenda dos turnos",
+        "errorCalendarGone": "Este calendário já não existe.",
+        "errorCalendarNameInvalid": "Dê ao calendário um nome com no máximo {{limit}} caracteres.",
+        "errorCalendarOrderChanged": "Entretanto, os calendários foram alterados.",
+        "errorDeleteFeedAdminOnly": "Este calendário está a ser exportado. Só um administrador o pode eliminar.",
+        "errorEventGone": "Este evento já não existe.",
+        "errorSelectedCalendarGone": "O calendário escolhido já não existe.",
+        "errorSeriesNoOccurrence": "Com esta repetição não haveria nenhum evento a partir da data de início.",
+        "localCalendarUploadsHint": "Os eventos deste calendário são enviados para o iCloud através do Apple Calendar."
     },
     "noteCategories": {
         "categories": "Categorias",
@@ -1274,7 +1288,11 @@
         "checklistDone": "Concluído",
         "checklistOpen": "Aberto",
         "errorNoteGone": "Esta nota já não existe.",
-        "errorSelectedCategoryGone": "Uma categoria escolhida já não existe."
+        "errorSelectedCategoryGone": "Uma categoria escolhida já não existe.",
+        "lockedToggle": "Bloquear a edição",
+        "lockedBadge": "Bloqueada",
+        "lockedHint": "Só tu e os administradores podem alterar, afixar ou eliminar esta nota, incluindo assinalar os itens da lista. Os restantes continuam a poder lê-la.",
+        "errorLocked": "Esta nota está bloqueada. Só a pessoa que a criou e os administradores a podem alterar."
     },
     "markdown": {
         "bold": "Negrito (Ctrl+B)",
@@ -1944,9 +1962,14 @@
         "themeLight": "Claro",
         "themeDark": "Escuro",
         "wallModeLabel": "Modo parede",
-        "wallModeHint": "Transforma o início neste dispositivo num ecrã tranquilo para um tablet de parede: hora, programa do dia, quem está de serviço hoje e o tempo, num tamanho legível a dois metros e sem nada para operar. Escurece entre as 22 e as 6. Vale só para este dispositivo, não para os restantes da casa.",
+        "wallModeHint": "Transforma o início neste dispositivo num ecrã tranquilo para um tablet de parede: hora, programa do dia, quem está de serviço hoje e o tempo, num tamanho legível a dois metros e sem nada para operar. Escurece nas horas noturnas. Vale só para este dispositivo, não para os restantes da casa.",
         "wallModeOn": "Modo parede ativo, visível em {{page}}.",
         "wallModeOff": "Modo parede desativado.",
+        "nightHoursLabel": "Horas noturnas",
+        "nightHoursHint": "Nestas horas o modo parede e a proteção de ecrã escurecem, pelo relógio da casa. Aplica-se apenas a este dispositivo.",
+        "nightHoursFrom": "Escurecer a partir de",
+        "nightHoursUntil": "Escurecer até",
+        "nightHoursSaved": "Horas noturnas neste dispositivo: das {{from}} às {{until}}.",
         "screensaverIdleLabel": "Iniciar a proteção de ecrã após",
         "screensaverIdleHint": "Quanto tempo este dispositivo fica sem toque antes de a proteção de ecrã com fotos começar. Aplica-se apenas a este dispositivo, não ao resto do agregado. Entra em vigor quando um administrador ligar o Immich.",
         "screensaverIdleSaved": "Espera da proteção de ecrã neste dispositivo: {{delay}}.",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "Ligação ao Immich efetuada com sucesso.",
         "immichPreview": "Pré-visualizar",
         "immichPreviewUnavailable": "Não foi possível carregar uma fotografia do Immich.",
+        "immichErrorUrlInvalid": "O URL do servidor é inválido. Tem de começar por http:// ou https://.",
+        "immichErrorAlbumIdInvalid": "O ID do álbum é inválido. Encontra-o no Immich, no endereço do álbum.",
+        "immichErrorApiKeyInvalid": "A chave API é demasiado longa. Copie novamente a chave do Immich.",
+        "immichErrorNotConfigured": "Para o teste faltam o URL do servidor ou a chave API.",
+        "immichErrorApiKeyRejected": "O Immich recusa a chave API. Pode ter expirado, sido revogada ou faltar-lhe uma permissão.",
+        "immichErrorStatus": "O Immich respondeu com um erro (estado {{status}}). Verifique o URL do servidor ou tente mais tarde.",
+        "immichErrorUnreachable": "Não é possível contactar o Immich. Verifique o URL do servidor e se o Immich está a funcionar.",
+        "immichSaveFailed": "Não foi possível guardar a configuração do Immich.",
+        "immichTestFailed": "Não foi possível verificar a ligação ao Immich.",
         "backToSettings": "Voltar às definições",
         "retry": "Tentar novamente",
         "loadError": "Não foi possível carregar as definições.",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "Alterar a ordem da família",
         "permChildRoleHint": "As novas contas de criança recebem também, ao serem criadas, permissões iniciais próprias: {{list}}. Depois aparecem no respetivo membro.",
         "activeModulesHintMore": "Para ocultar um módulo só para você, vá em Módulos → Navegação.",
-        "permIntroMore": "Cada membro pode divergir do padrão da função. Sem configuração, cada função tem acesso completo; os administradores sempre."
+        "permIntroMore": "Cada membro pode divergir do padrão da função. Sem configuração, cada função tem acesso completo; os administradores sempre.",
+        "preferenceSaveFailed": "Não foi possível guardar a definição.",
+        "caldavCalendarReadOnly": "Só de leitura: não é possível guardar novos eventos aqui",
+        "caldavCalendarReadOnlyWaiting_one": "Só de leitura: {{count}} evento à espera de envio para aqui não vai chegar",
+        "caldavCalendarReadOnlyWaiting": "Só de leitura: {{count}} eventos à espera de envio para aqui não vão chegar",
+        "reminderListReadOnly": "Só de leitura: não é possível guardar novas entradas aqui",
+        "reminderListReadOnlyWaiting_one": "Só de leitura: {{count}} entrada à espera de envio para aqui não vai chegar",
+        "reminderListReadOnlyWaiting": "Só de leitura: {{count}} entradas à espera de envio para aqui não vão chegar"
     },
     "login": {
         "tagline": "Bem-vindo de volta. A tua casa num só lugar.",
@@ -3955,7 +3994,8 @@
             "reasonNameTooLong": "O nome de um ficheiro ou pasta é demasiado longo.",
             "reasonTooDeep": "O caminho excede o limite de cinco níveis de pastas.",
             "reasonParentFailed": "Não foi possível criar a pasta superior.",
-            "reasonRateLimited": "O servidor está a receber demasiados pedidos. Tente carregar novamente mais tarde."
+            "reasonRateLimited": "O servidor está a receber demasiados pedidos. Tente carregar novamente mais tarde.",
+            "folderGoneReplanned": "Entretanto, uma pasta deste carregamento foi eliminada. A pré-visualização mostra o estado atual - inicie o carregamento novamente."
         },
         "errorFolderGone": "Esta pasta já não existe.",
         "errorSelectedFolderGone": "A pasta escolhida já não existe.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} deve a você",
         "debtOwes": "{{from}} deve a {{to}}",
         "balanced": "Quitado",
-        "balancedInGroup": "{{group}}: Quitado"
+        "balancedInGroup": "{{group}}: Quitado",
+        "totalsByMember": "Pago por pessoa",
+        "totalsByMemberHint": "O que cada um adiantou, com a própria parte por baixo",
+        "ownShare": "Parte própria: {{amount}}",
+        "paidLabel": "Pago",
+        "totalsByCategory": "Por categoria",
+        "categoryFilter": "Filtrar despesas por categoria",
+        "noExpensesInCategory": "Nenhuma despesa nesta categoria."
     },
     "wmo": {
         "0": "Céu limpo",
@@ -4924,6 +4971,7 @@
             "saveError": "Não foi possível guardar a medição.",
             "invalidValue": "Introduza valores válidos.",
             "range": {
+                "day": "Dia",
                 "week": "Semana",
                 "month": "Mês",
                 "year": "Ano"
@@ -4963,6 +5011,7 @@
                 "family": "Família"
             },
             "sparse": "Poucas medições para mostrar uma tendência.",
+            "bandValue": "{{mean}}, de {{low}} a {{high}}",
             "recentMeasurements": "Medições recentes",
             "deleteMeasurement": "Eliminar medição {{value}} de {{date}}",
             "measurementDeleted": "Medição eliminada",

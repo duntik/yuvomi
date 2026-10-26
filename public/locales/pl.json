@@ -437,6 +437,8 @@
         "customizeResetDone": "Twój przegląd znów korzysta z układu domu.",
         "optionsFor": "Opcje: {{widget}}",
         "optionCalendarScope": "Które terminy?",
+        "optionCalendarCalendars": "Które kalendarze?",
+        "optionCalendarCalendarsHint": "Bez wyboru kafelek pokazuje wydarzenia ze wszystkich kalendarzy.",
         "optionCalendarAll": "Wszystkie terminy",
         "optionCalendarLimit": "Ile terminów?",
         "optionCalendarLimitHint": "Dotyczy wysokich rozmiarów i odpowiednio wydłuża kafel. W rozmiarze „{{small}}” pokazuje tylko najbliższe wydarzenia, w „{{size}}” tydzień.",
@@ -934,7 +936,11 @@
         "tickedSection": "Odhaczone",
         "itemBackToast": "„{{name}}” jest znowu na liście.",
         "itemStateOpen": "nieodhaczone",
-        "itemAddedToast": "„{{name}}” dodano do „{{category}}”."
+        "itemAddedToast": "„{{name}}” dodano do „{{category}}”.",
+        "moveReturned": {
+            "refused": "„{{item}}” wrócił na listę „{{back}}”: serwer nie przyjął go na liście „{{target}}”.",
+            "waited": "„{{item}}” nie został przeniesiony na listę „{{target}}”: synchronizacja listy „{{back}}” jest wyłączona od ponad tygodnia. Produkt pojawi się znowu na liście „{{back}}”, gdy ją włączysz."
+        }
     },
     "meals": {
         "randomizeSuccess_few": "Zaplanowano {{count}} posiłki.",
@@ -1373,7 +1379,15 @@
         "sidebarLabel": "Pasek boczny kalendarza",
         "upNextTitle": "Następne",
         "upNextEmpty": "Nic w ciągu najbliższych trzech tygodni.",
-        "shiftLegend": "Legenda zmian"
+        "shiftLegend": "Legenda zmian",
+        "errorCalendarGone": "Ten kalendarz już nie istnieje.",
+        "errorCalendarNameInvalid": "Nadaj kalendarzowi nazwę o długości najwyżej {{limit}} znaków.",
+        "errorCalendarOrderChanged": "W międzyczasie kalendarze się zmieniły.",
+        "errorDeleteFeedAdminOnly": "Ten kalendarz jest eksportowany. Usunąć go może tylko administrator.",
+        "errorEventGone": "To wydarzenie już nie istnieje.",
+        "errorSelectedCalendarGone": "Wybrany kalendarz już nie istnieje.",
+        "errorSeriesNoOccurrence": "Przy tym powtarzaniu od daty rozpoczęcia nie byłoby ani jednego wydarzenia.",
+        "localCalendarUploadsHint": "Wydarzenia z tego kalendarza są przesyłane do iCloud przez Apple Calendar."
     },
     "noteCategories": {
         "categories": "Kategorie",
@@ -1446,7 +1460,11 @@
         "checklistDone": "Zrobione",
         "checklistOpen": "Otwarte",
         "errorNoteGone": "Ta notatka już nie istnieje.",
-        "errorSelectedCategoryGone": "Jedna z wybranych kategorii już nie istnieje."
+        "errorSelectedCategoryGone": "Jedna z wybranych kategorii już nie istnieje.",
+        "lockedToggle": "Zablokuj edycję",
+        "lockedBadge": "Zablokowana",
+        "lockedHint": "Tylko ty i administratorzy możecie zmieniać, przypinać lub usuwać tę notatkę - również odhaczać pozycje jej listy. Pozostali nadal mogą ją czytać.",
+        "errorLocked": "Ta notatka jest zablokowana. Zmienić ją może tylko osoba, która ją utworzyła, i administratorzy."
     },
     "markdown": {
         "bold": "Pogrubienie (Ctrl+B)",
@@ -2270,9 +2288,14 @@
         "themeLight": "Jasny",
         "themeDark": "Ciemny",
         "wallModeLabel": "Tryb ścienny",
-        "wallModeHint": "Zamienia stronę główną na tym urządzeniu w spokojny ekran dla tabletu na ścianie: godzina, plan dnia, kto dziś ma dyżur i pogoda - na tyle duże, by czytać z dwóch metrów, bez obsługi. Między 22 a 6 ekran przygasa. Dotyczy tylko tego urządzenia, nie pozostałych w domu.",
+        "wallModeHint": "Zamienia stronę główną na tym urządzeniu w spokojny ekran dla tabletu na ścianie: godzina, plan dnia, kto dziś ma dyżur i pogoda - na tyle duże, by czytać z dwóch metrów, bez obsługi. W godzinach nocnych ekran przygasa. Dotyczy tylko tego urządzenia, nie pozostałych w domu.",
         "wallModeOn": "Tryb ścienny włączony, widoczny w {{page}}.",
         "wallModeOff": "Tryb ścienny wyłączony.",
+        "nightHoursLabel": "Godziny nocne",
+        "nightHoursHint": "W tych godzinach tryb ścienny i wygaszacz przygasają, według zegara domu. Dotyczy tylko tego urządzenia.",
+        "nightHoursFrom": "Przygaś od",
+        "nightHoursUntil": "Przygaś do",
+        "nightHoursSaved": "Godziny nocne na tym urządzeniu: od {{from}} do {{until}}.",
         "screensaverIdleLabel": "Czas bezczynności przed uruchomieniem wygaszacza",
         "screensaverIdleHint": "Jak długo to urządzenie pozostaje nietknięte, zanim uruchomi się wygaszacz ze zdjęciami. Dotyczy tylko tego urządzenia, nie reszty gospodarstwa domowego. Działa, gdy administrator połączy Immich.",
         "screensaverIdleSaved": "Czas oczekiwania wygaszacza na tym urządzeniu: {{delay}}.",
@@ -3089,6 +3112,15 @@
         "immichTestOk": "Połączenie z Immich powiodło się.",
         "immichPreview": "Podgląd",
         "immichPreviewUnavailable": "Nie udało się wczytać zdjęcia z Immich.",
+        "immichErrorUrlInvalid": "Adres URL serwera jest nieprawidłowy. Musi zaczynać się od http:// lub https://.",
+        "immichErrorAlbumIdInvalid": "Identyfikator albumu jest nieprawidłowy. Znajdziesz go w Immich w adresie albumu.",
+        "immichErrorApiKeyInvalid": "Klucz API jest za długi. Skopiuj klucz z Immich ponownie.",
+        "immichErrorNotConfigured": "Do testu brakuje adresu URL serwera lub klucza API.",
+        "immichErrorApiKeyRejected": "Immich odrzuca klucz API. Mógł wygasnąć, zostać unieważniony lub brakuje mu uprawnienia.",
+        "immichErrorStatus": "Immich odpowiedział błędem (status {{status}}). Sprawdź adres URL serwera lub spróbuj później.",
+        "immichErrorUnreachable": "Nie można połączyć się z Immich. Sprawdź adres URL serwera i czy Immich działa.",
+        "immichSaveFailed": "Nie udało się zapisać konfiguracji Immich.",
+        "immichTestFailed": "Nie udało się sprawdzić połączenia z Immich.",
         "backToSettings": "Wróć do ustawień",
         "retry": "Spróbuj ponownie",
         "loadError": "Nie udało się wczytać ustawień.",
@@ -3594,7 +3626,18 @@
         "permCapabilityTasksReorder": "Zmieniać kolejność rodziny",
         "permChildRoleHint": "Nowe konta dzieci dostają przy tworzeniu także własne uprawnienia początkowe: {{list}}. Potem widnieją przy danym członku.",
         "activeModulesHintMore": "Aby ukryć moduł tylko u siebie, wejdź w Moduły → Nawigacja.",
-        "permIntroMore": "Poszczególni członkowie mogą różnić się od domyślnych ustawień roli. Bez ustawienia każda rola ma pełny dostęp; administratorzy zawsze."
+        "permIntroMore": "Poszczególni członkowie mogą różnić się od domyślnych ustawień roli. Bez ustawienia każda rola ma pełny dostęp; administratorzy zawsze.",
+        "preferenceSaveFailed": "Nie udało się zapisać ustawienia.",
+        "caldavCalendarReadOnly": "Tylko do odczytu: nie można tu zapisać nowych wydarzeń",
+        "caldavCalendarReadOnlyWaiting_one": "Tylko do odczytu: {{count}} wydarzenie czekające na przesłanie tutaj nie dotrze",
+        "caldavCalendarReadOnlyWaiting": "Tylko do odczytu: {{count}} wydarzenia czekającego na przesłanie tutaj nie dotrze",
+        "reminderListReadOnly": "Tylko do odczytu: nie można tu zapisać nowych wpisów",
+        "reminderListReadOnlyWaiting_one": "Tylko do odczytu: {{count}} wpis czekający na przesłanie tutaj nie dotrze",
+        "reminderListReadOnlyWaiting": "Tylko do odczytu: {{count}} wpisu czekającego na przesłanie tutaj nie dotrze",
+        "caldavCalendarReadOnlyWaiting_few": "Tylko do odczytu: {{count}} wydarzenia czekające na przesłanie tutaj nie dotrą",
+        "caldavCalendarReadOnlyWaiting_many": "Tylko do odczytu: {{count}} wydarzeń czekających na przesłanie tutaj nie dotrze",
+        "reminderListReadOnlyWaiting_few": "Tylko do odczytu: {{count}} wpisy czekające na przesłanie tutaj nie dotrą",
+        "reminderListReadOnlyWaiting_many": "Tylko do odczytu: {{count}} wpisów czekających na przesłanie tutaj nie dotrze"
     },
     "login": {
         "tagline": "Witaj ponownie. Twój dom w jednym miejscu.",
@@ -4253,7 +4296,8 @@
             "reasonNameTooLong": "Nazwa pliku lub folderu jest za długa.",
             "reasonTooDeep": "Ścieżka przekracza limit pięciu poziomów folderów.",
             "reasonParentFailed": "Nie udało się utworzyć folderu nadrzędnego.",
-            "reasonRateLimited": "Serwer otrzymuje zbyt wiele żądań. Spróbuj przesłać ponownie później."
+            "reasonRateLimited": "Serwer otrzymuje zbyt wiele żądań. Spróbuj przesłać ponownie później.",
+            "folderGoneReplanned": "W międzyczasie usunięto folder tego przesyłania. Podgląd pokazuje aktualny stan - rozpocznij przesyłanie ponownie."
         },
         "errorFolderGone": "Ten folder już nie istnieje.",
         "errorSelectedFolderGone": "Wybrany folder już nie istnieje.",
@@ -4652,7 +4696,14 @@
         "debtOwesYou": "{{name}} ma ci oddać",
         "debtOwes": "{{from}} jest winien {{to}}",
         "balanced": "Rozliczone",
-        "balancedInGroup": "{{group}}: Rozliczone"
+        "balancedInGroup": "{{group}}: Rozliczone",
+        "totalsByMember": "Zapłacono według osób",
+        "totalsByMemberHint": "Ile kto wyłożył, pod spodem jego własny udział",
+        "ownShare": "Własny udział: {{amount}}",
+        "paidLabel": "Zapłacono",
+        "totalsByCategory": "Według kategorii",
+        "categoryFilter": "Filtruj wydatki według kategorii",
+        "noExpensesInCategory": "Brak wydatków w tej kategorii."
     },
     "wmo": {
         "0": "Bezchmurnie",
@@ -5176,6 +5227,7 @@
             "saveError": "Nie udało się zapisać pomiaru.",
             "invalidValue": "Wprowadź prawidłowe wartości.",
             "range": {
+                "day": "Dzień",
                 "week": "Tydzień",
                 "month": "Miesiąc",
                 "year": "Rok"
@@ -5215,6 +5267,7 @@
                 "family": "Rodzina"
             },
             "sparse": "Za mało pomiarów, aby pokazać trend.",
+            "bandValue": "{{mean}}, od {{low}} do {{high}}",
             "recentMeasurements": "Ostatnie pomiary",
             "deleteMeasurement": "Usuń pomiar {{value}} z {{date}}",
             "measurementDeleted": "Pomiar usunięty",

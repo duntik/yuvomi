@@ -210,6 +210,7 @@ const APP_SHELL = [
   '/utils/money.js',
   '/utils/amount-field.js',
   '/utils/nav-badges.js',
+  '/utils/note-access.js',
   '/utils/note-category-filter.js',
   '/utils/note-category-name.js',
   '/utils/note-category-overflow.js',
@@ -277,6 +278,7 @@ const APP_SHELL = [
   '/utils/version.js',
   '/utils/upload-limit.js',
   '/utils/wall-mode.js',
+  '/utils/night-hours.js',
   '/utils/web-share.js',
   '/utils/week-strip.js',
   '/utils/overlap-lanes.js',
@@ -286,6 +288,8 @@ const APP_SHELL = [
   // Ohne Precache waere die Wahl genau dann wirkungslos, wenn die Seite
   // gebraucht wird - offline.
   '/theme-init.js',
+  // theme-init.js fragt die Nachtstunden aus dieser Datei (#2234).
+  '/night-hours.js',
   '/manifest.json',
   '/favicon.ico',
   '/icons/favicon-32.png',

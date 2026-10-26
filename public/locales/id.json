@@ -373,6 +373,8 @@
         "customizeResetDone": "Ikhtisarmu mengikuti rumah tangga lagi.",
         "optionsFor": "Opsi untuk {{widget}}",
         "optionCalendarScope": "Acara yang mana?",
+        "optionCalendarCalendars": "Kalender mana?",
+        "optionCalendarCalendarsHint": "Tanpa pilihan, ubin menampilkan janji dari semua kalender.",
         "optionCalendarAll": "Semua acara",
         "optionCalendarLimit": "Berapa acara?",
         "optionCalendarLimitHint": "Berlaku untuk ukuran tinggi dan membuat kartu lebih tinggi sesuai pilihan. Pada “{{small}}” kartu hanya menampilkan janji berikutnya, pada “{{size}}” mingguan.",
@@ -806,7 +808,11 @@
         "tickedSection": "Sudah dicentang",
         "itemBackToast": "\"{{name}}\" kembali ada di daftar.",
         "itemStateOpen": "belum dicentang",
-        "itemAddedToast": "\"{{name}}\" ditambahkan ke \"{{category}}\"."
+        "itemAddedToast": "\"{{name}}\" ditambahkan ke \"{{category}}\".",
+        "moveReturned": {
+            "refused": "\"{{item}}\" kembali ke \"{{back}}\": server tidak menerimanya di \"{{target}}\".",
+            "waited": "\"{{item}}\" tidak dipindahkan ke \"{{target}}\": sinkronisasi \"{{back}}\" sudah lebih dari seminggu nonaktif. Item akan muncul lagi di \"{{back}}\" setelah daftar itu diaktifkan."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} bahan",
@@ -1221,7 +1227,15 @@
         "sidebarLabel": "Bilah sisi kalender",
         "upNextTitle": "Berikutnya",
         "upNextEmpty": "Tidak ada apa pun dalam tiga minggu ke depan.",
-        "shiftLegend": "Keterangan shift"
+        "shiftLegend": "Keterangan shift",
+        "errorCalendarGone": "Kalender ini sudah tidak ada.",
+        "errorCalendarNameInvalid": "Beri kalender nama dengan paling banyak {{limit}} karakter.",
+        "errorCalendarOrderChanged": "Kalender telah berubah sementara itu.",
+        "errorDeleteFeedAdminOnly": "Kalender ini sedang diekspor. Hanya admin yang dapat menghapusnya.",
+        "errorEventGone": "Acara ini sudah tidak ada.",
+        "errorSelectedCalendarGone": "Kalender yang dipilih sudah tidak ada.",
+        "errorSeriesNoOccurrence": "Dengan pengulangan ini tidak akan ada satu acara pun sejak tanggal mulai.",
+        "localCalendarUploadsHint": "Acara di kalender ini diunggah ke iCloud melalui Apple Calendar."
     },
     "noteCategories": {
         "categories": "Kategori",
@@ -1292,7 +1306,11 @@
         "checklistDone": "Selesai",
         "checklistOpen": "Terbuka",
         "errorNoteGone": "Catatan ini sudah tidak ada.",
-        "errorSelectedCategoryGone": "Salah satu kategori yang dipilih sudah tidak ada."
+        "errorSelectedCategoryGone": "Salah satu kategori yang dipilih sudah tidak ada.",
+        "lockedToggle": "Kunci penyuntingan",
+        "lockedBadge": "Terkunci",
+        "lockedHint": "Hanya kamu dan administrator yang dapat mengubah, menyematkan, atau menghapus catatan ini - termasuk mencentang item daftarnya. Yang lain tetap dapat membacanya.",
+        "errorLocked": "Catatan ini terkunci. Hanya orang yang membuatnya dan administrator yang dapat mengubahnya."
     },
     "markdown": {
         "bold": "Tebal (Ctrl+B)",
@@ -2100,9 +2118,14 @@
         "themeLight": "Terang",
         "themeDark": "Gelap",
         "wallModeLabel": "Mode dinding",
-        "wallModeHint": "Mengubah beranda di perangkat ini menjadi tampilan tenang untuk tablet dinding: jam, program hari ini, siapa yang bertugas, dan cuaca - cukup besar untuk dibaca dari dua meter, tanpa perlu disentuh. Antara pukul 22 dan 6 tampilannya meredup. Hanya berlaku di perangkat ini, bukan perangkat lain di rumah.",
+        "wallModeHint": "Mengubah beranda di perangkat ini menjadi tampilan tenang untuk tablet dinding: jam, program hari ini, siapa yang bertugas, dan cuaca - cukup besar untuk dibaca dari dua meter, tanpa perlu disentuh. Pada jam malam tampilannya meredup. Hanya berlaku di perangkat ini, bukan perangkat lain di rumah.",
         "wallModeOn": "Mode dinding aktif, terlihat di {{page}}.",
         "wallModeOff": "Mode dinding mati.",
+        "nightHoursLabel": "Jam malam",
+        "nightHoursHint": "Pada jam-jam ini mode dinding dan screensaver meredup, mengikuti jam rumah tangga. Hanya berlaku untuk perangkat ini.",
+        "nightHoursFrom": "Redupkan dari",
+        "nightHoursUntil": "Redupkan sampai",
+        "nightHoursSaved": "Jam malam di perangkat ini: {{from}} sampai {{until}}.",
         "screensaverIdleLabel": "Mulai screensaver setelah",
         "screensaverIdleHint": "Berapa lama perangkat ini tidak disentuh sebelum screensaver foto dimulai. Hanya berlaku untuk perangkat ini, bukan untuk anggota rumah tangga lainnya. Berlaku setelah admin menghubungkan Immich.",
         "screensaverIdleSaved": "Jeda screensaver di perangkat ini: {{delay}}.",
@@ -2899,6 +2922,15 @@
         "immichTestOk": "Berhasil terhubung ke Immich.",
         "immichPreview": "Pratinjau",
         "immichPreviewUnavailable": "Tidak dapat memuat foto dari Immich.",
+        "immichErrorUrlInvalid": "URL server tidak valid. Harus diawali http:// atau https://.",
+        "immichErrorAlbumIdInvalid": "ID album tidak valid. Anda dapat menemukannya di Immich pada alamat album.",
+        "immichErrorApiKeyInvalid": "Kunci API terlalu panjang. Salin ulang kunci dari Immich.",
+        "immichErrorNotConfigured": "Untuk pengujian, URL server atau kunci API belum ada.",
+        "immichErrorApiKeyRejected": "Immich menolak kunci API. Mungkin sudah kedaluwarsa, dicabut, atau tidak memiliki izin.",
+        "immichErrorStatus": "Immich menjawab dengan galat (status {{status}}). Periksa URL server atau coba lagi nanti.",
+        "immichErrorUnreachable": "Immich tidak dapat dijangkau. Periksa URL server dan apakah Immich berjalan.",
+        "immichSaveFailed": "Konfigurasi Immich tidak dapat disimpan.",
+        "immichTestFailed": "Koneksi ke Immich tidak dapat diperiksa.",
         "backToSettings": "Kembali ke Pengaturan",
         "retry": "Coba lagi",
         "loadError": "Pengaturan tidak dapat dimuat.",
@@ -3384,7 +3416,14 @@
         "permCapabilityTasksReorder": "Ubah urutan keluarga",
         "permChildRoleHint": "Akun anak baru juga mendapat izin awal sendiri saat dibuat: {{list}}. Setelah itu, izin tersebut tercantum pada anggota itu.",
         "activeModulesHintMore": "Untuk menyembunyikan hanya bagi dirimu, buka Modul → Navigasi.",
-        "permIntroMore": "Anggota individu dapat berbeda dari default peran. Tanpa pengaturan, setiap peran memiliki akses penuh; administrator selalu."
+        "permIntroMore": "Anggota individu dapat berbeda dari default peran. Tanpa pengaturan, setiap peran memiliki akses penuh; administrator selalu.",
+        "preferenceSaveFailed": "Pengaturan tidak dapat disimpan.",
+        "caldavCalendarReadOnly": "Hanya baca: acara baru tidak dapat disimpan di sini",
+        "caldavCalendarReadOnlyWaiting_one": "Hanya baca: {{count}} acara yang menunggu diunggah ke sini tidak akan sampai",
+        "caldavCalendarReadOnlyWaiting": "Hanya baca: {{count}} acara yang menunggu diunggah ke sini tidak akan sampai",
+        "reminderListReadOnly": "Hanya baca: entri baru tidak dapat disimpan di sini",
+        "reminderListReadOnlyWaiting_one": "Hanya baca: {{count}} entri yang menunggu diunggah ke sini tidak akan sampai",
+        "reminderListReadOnlyWaiting": "Hanya baca: {{count}} entri yang menunggu diunggah ke sini tidak akan sampai"
     },
     "login": {
         "tagline": "Selamat datang kembali. Rumah Anda dalam satu tempat.",
@@ -4019,7 +4058,8 @@
             "reasonNameTooLong": "Nama file atau folder terlalu panjang.",
             "reasonTooDeep": "Jalur melebihi batas lima tingkat folder.",
             "reasonParentFailed": "Folder induk tidak dapat dibuat.",
-            "reasonRateLimited": "Server sedang menerima terlalu banyak permintaan. Coba unggah lagi nanti."
+            "reasonRateLimited": "Server sedang menerima terlalu banyak permintaan. Coba unggah lagi nanti.",
+            "folderGoneReplanned": "Sebuah folder dari unggahan ini telah dihapus sementara itu. Pratinjau menampilkan keadaan saat ini - mulai unggahan lagi."
         },
         "errorFolderGone": "Folder ini sudah tidak ada.",
         "errorSelectedFolderGone": "Folder yang dipilih sudah tidak ada.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} berutang kepada Anda",
         "debtOwes": "{{from}} berutang kepada {{to}}",
         "balanced": "Lunas",
-        "balancedInGroup": "{{group}}: Lunas"
+        "balancedInGroup": "{{group}}: Lunas",
+        "totalsByMember": "Dibayar per orang",
+        "totalsByMemberHint": "Yang ditalangi, dengan bagian sendiri di bawahnya",
+        "ownShare": "Bagian sendiri: {{amount}}",
+        "paidLabel": "Dibayar",
+        "totalsByCategory": "Menurut kategori",
+        "categoryFilter": "Saring pengeluaran menurut kategori",
+        "noExpensesInCategory": "Tidak ada pengeluaran dalam kategori ini."
     },
     "wmo": {
         "0": "Langit cerah",
@@ -4924,6 +4971,7 @@
             "saveError": "Pengukuran tidak dapat disimpan.",
             "invalidValue": "Harap masukkan nilai yang valid.",
             "range": {
+                "day": "Hari",
                 "week": "Minggu",
                 "month": "Bulan",
                 "year": "Tahun"
@@ -4963,6 +5011,7 @@
                 "family": "Keluarga"
             },
             "sparse": "Terlalu sedikit pengukuran untuk menampilkan tren.",
+            "bandValue": "{{mean}}, dari {{low}} hingga {{high}}",
             "recentMeasurements": "Pengukuran terakhir",
             "deleteMeasurement": "Hapus pengukuran {{value}} dari {{date}}",
             "measurementDeleted": "Pengukuran dihapus",

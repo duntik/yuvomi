@@ -73,7 +73,7 @@ import { withTimeSuffix, clockText, timeSpanText, shiftTimeText, dateRangeText, 
 import { maxUploadBytes, maxUploadMb } from '/utils/upload-limit.js';
 import { holdDocumentAttachStyle } from '/components/document-attach.js';
 import { emptyStateHTML, emptyHintHTML, mountLoadError, searchEmptyEl } from '/utils/empty-state.js';
-import { loadErrorSentence } from '/utils/friendly-error.js';
+import { errorSentence, isAlreadyDeleted, isGone, loadErrorSentence } from '/utils/friendly-error.js';
 import { overlayHost } from '/utils/overlay-host.js';
 import { isPermAdmin, moduleAccess } from '/permissions.js';
 import { pathAccess } from '/utils/module-access.js';
@@ -1833,7 +1833,7 @@ async function openTaskFromCalendar(taskId) {
     });
   } catch (err) {
     console.error('[Calendar] Aufgabe konnte nicht geöffnet werden:', err);
-    window.yuvomi?.showToast(err.message ?? t('tasks.loadError'), 'danger');
+    window.yuvomi?.showToast(errorSentence(err, 'tasks.loadError'), 'danger');
   }
 }
 
@@ -6373,7 +6373,7 @@ function renderLocalCalendarRow(calendar) {
   return `
     <div class="cal-calendar-row" data-calendar-id="${calendar.id}">
       <span class="cal-calendar-row__swatch" style="background-color:${esc(calendar.color)}" aria-hidden="true"></span>
-      ${writable ? `<input class="form-input cal-calendar-row__name" value="${esc(calendar.name)}" aria-label="${esc(t('calendar.localCalendarName'))}">
+      ${writable ? `<input class="form-input cal-calendar-row__name" maxlength="80" value="${esc(calendar.name)}" aria-label="${esc(t('calendar.localCalendarName'))}">
       <input class="form-input cal-calendar-row__color" type="color" value="${esc(calendar.color)}" aria-label="${esc(t('calendar.localCalendarColor'))}">` : ''}
       <span class="cal-calendar-row__count">${t('calendar.localCalendarEventCount', { count: calendar.event_count ?? 0 })}</span>
       <div class="cal-calendar-row__actions">
@@ -6475,6 +6475,28 @@ async function moveLocalCalendar(id, direction) {
   return true;
 }
 
+/**
+ * Der Satz zu einem gescheiterten Schritt der Kalender-Verwaltung (#1909) -
+ * nie der Text des Servers. Die Absage beim Loeschen eines geteilten Kalenders
+ * liest nur diese Seite (das Mitglied sieht den Abo-Link nicht); alles andere
+ * kommt aus CASE_MESSAGES oder ist der allgemeine Satz.
+ */
+function localCalendarErrorSentence(err) {
+  if (err?.status === 403 && err?.data?.reason === 'calendar_feed_admin_only') {
+    return t('calendar.errorDeleteFeedAdminOnly');
+  }
+  return errorSentence(err, 'calendar.saveError');
+}
+
+/**
+ * Ist der Stand der Verwaltung veraltet? Ein Kalender ist weg, oder die Liste
+ * hat sich beim Umsortieren inzwischen geaendert: dann holt sie sich selbst
+ * den aktuellen Stand, statt dem Nutzer dazu zu raten (#1909).
+ */
+function localCalendarsStale(err) {
+  return isGone(err) || (err?.status === 400 && err?.data?.reason === 'calendar_order_changed');
+}
+
 async function openLocalCalendarsModal() {
   if (moduleAccess('calendar') !== 'write') return;
   // Laden die Kalender erst, nachdem der Nutzer einen anderen Dialog geoeffnet
@@ -6506,7 +6528,7 @@ async function openLocalCalendarsModal() {
       await reloadAfterSave(() => refreshLocalCalendarsPanel(panel));
       refocusAfterRender();
     } catch (err) {
-      window.yuvomi?.showToast(err.data?.error ?? t('calendar.saveError'), 'danger');
+      window.yuvomi?.showToast(localCalendarErrorSentence(err), 'danger');
     }
   });
 
@@ -6563,13 +6585,20 @@ async function openLocalCalendarsModal() {
           danger: true,
         });
         if (!ok) return;
-        await api.delete(`/calendar/calendars/${id}`);
+        try {
+          await api.delete(`/calendar/calendars/${id}`);
+        } catch (err) {
+          // Schon geloescht (von jemand anderem im Haushalt): das ist, was
+          // der Nutzer wollte - kein Fehler (#1909).
+          if (!isAlreadyDeleted(err, 'calendar_calendar_not_found')) throw err;
+        }
         window.yuvomi?.showToast(t('calendar.localCalendarDeleted'), 'success');
         await reloadAfterSave(() => refreshLocalCalendarsPanel(panel));
         refocusAfterRender();
       }
     } catch (err) {
-      window.yuvomi?.showToast(err.data?.error ?? t('calendar.saveError'), 'danger');
+      window.yuvomi?.showToast(localCalendarErrorSentence(err), 'danger');
+      if (localCalendarsStale(err)) await reloadAfterSave(() => refreshLocalCalendarsPanel(panel));
     }
   });
 }
@@ -7191,7 +7220,9 @@ export const __test = {
   buildEventModalContent, eventAdvancedTopics, wireVisibilityWarning,
   // #1974: die Detailzeile der Wiederholung, gemessen an der echten Verdrahtung.
   renderEventDetail,
-  calendarSaveErrorMessage,
+  calendarSaveErrorMessage, occurrenceErrorMessage, eventGone, deleteUnlessGone,
+  // #1909: die drei Loeschwege eines Termins, am echten Undo-Ablauf.
+  deleteEvent, deleteThisAndFollowing, deleteSingleOccurrence,
   hasCurrentAttachment,
   attachmentNode,
   fetchWindow,
@@ -7213,7 +7244,7 @@ export const __test = {
   restorePeopleFilter,
   restoreAssignedToMe,
   restoreHiddenSources,
-  localCalendarDisplayName, eventLocalCalendarDisplayName, renderLocalCalendarRow, moveLocalCalendar, copyText, openLocalCalendarsModal, localCalendarState: state,
+  localCalendarDisplayName, eventLocalCalendarDisplayName, renderLocalCalendarRow, moveLocalCalendar, localCalendarUploadsToIcloud, syncLocalCalendarUploadHint, copyText, openLocalCalendarsModal, localCalendarState: state,
   persistHiddenSources,
   activeFilterCount,
   UNASSIGNED,
@@ -7795,9 +7826,16 @@ async function openEventDetail(ev, anchor = null, { pane = null, formReady: form
           else await notifyAwayChanged();
           window.yuvomi?.showToast(t('calendar.ics.resetToast'), 'success');
         } catch (err) {
-          // Server-Meldung bevorzugen (nutzerorientiert), sonst lokalisierter
-          // Fallback - nie den rohen JS-/Netzwerk-Fehlertext zeigen.
-          window.yuvomi?.showToast(err.data?.error ?? t('calendar.saveError'), 'danger');
+          // Der Satz der App, nie der Text des Servers (#1909). Gibt es den
+          // Termin nicht mehr, schliesst die Ansicht und der Kalender laedt nach.
+          window.yuvomi?.showToast(errorSentence(err, 'calendar.saveError'), 'danger');
+          if (eventGone(err)) {
+            await close({ force: true });
+            if (await reloadEventsAfterGone()) {
+              renderView();
+              refocusAfterRender();
+            }
+          }
         }
       },
     });
@@ -8533,7 +8571,23 @@ async function loadSyncTargets(selectElement, currentEvent = null) {
     }
     selectElement.value = value;
   } else if (currentEvent?.target_caldav_account_id && currentEvent?.target_caldav_calendar_url) {
-    selectElement.value = caldavTargetValue(currentEvent.target_caldav_account_id, currentEvent.target_caldav_calendar_url);
+    const value = caldavTargetValue(currentEvent.target_caldav_account_id, currentEvent.target_caldav_calendar_url);
+    // Wie bei Google: ein gespeichertes Ziel, das die Liste nicht mehr nennt
+    // (inzwischen nur lesbar geteilt, #1840, oder abgewaehlt), bleibt als
+    // Option stehen. Sonst stuende das Feld leer, und schon das Umbenennen
+    // des Termins schickte `null` und leerte sein Ziel still. Der Server
+    // nimmt das unveraenderte Ziel an (`caldavTargetOffered`) und schickt
+    // nichts dorthin, solange der Kalender keine neuen Termine annimmt.
+    if (!Array.from(selectElement.options).some((o) => o.value === value)) {
+      const group = document.createElement('optgroup');
+      group.label = t('calendar.syncTargetCaldavGroup');
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = currentEvent.target_caldav_calendar_url;
+      group.appendChild(option);
+      selectElement.appendChild(group);
+    }
+    selectElement.value = value;
   } else if (currentEvent?.target_outlook_account_id && currentEvent?.target_outlook_calendar_id) {
     selectElement.value = outlookTargetValue(currentEvent.target_outlook_account_id, currentEvent.target_outlook_calendar_id);
   } else if (!currentEvent) {
@@ -8569,6 +8623,53 @@ function defaultLocalCalendar() {
   return state.localCalendars.find((calendar) => calendar.is_default)
     ?? state.localCalendars[0]
     ?? null;
+}
+
+/**
+ * Laedt der gewaehlte Kalender zu iCloud hoch (#1927)? Dann sagt eine ruhige
+ * Zeile unter der Kalenderwahl, dass der Termin dorthin geht - in dem Moment,
+ * in dem die Wahl das wahr macht, und ohne Rueckfrage beim Speichern. Wer
+ * meldet, ob ein Kalender hochlaedt, ist der Server (`uploads_to_icloud`,
+ * dieselbe Bedingung, mit der der Sync-Lauf startet); ohne die alte
+ * Apple-Verbindung bleibt das Formular, wie es war.
+ */
+function localCalendarUploadsToIcloud(id) {
+  return state.localCalendars.some((item) => Number(item.id) === Number(id) && item.uploads_to_icloud);
+}
+
+/**
+ * Bleibt der Termin ein lokaler (und geht damit mit dem Standardkalender zu
+ * iCloud)? Ein gespiegelter Termin oder einer mit Google- bzw. CalDAV-Ziel
+ * nicht; ein Outlook-Ziel ist ein Push daneben und aendert daran nichts.
+ */
+function landsInLocalCalendar(event) {
+  return (event?.external_source ?? 'local') === 'local'
+    && !event?.target_google_calendar_id && !event?.target_caldav_account_id;
+}
+
+function syncLocalCalendarUploadHint(panel) {
+  const select = panel.querySelector('#event-local-calendar');
+  const hint = panel.querySelector('#event-local-calendar-upload-hint');
+  if (!hint) return;
+  // Ohne Kalenderwahl (ein einziger lokaler Kalender) gilt der Standard; ein
+  // Google- oder CalDAV-Ziel nimmt den Termin aus dem lokalen Kalender.
+  if (!select) {
+    const target = panel.querySelector('#event-sync-target')?.value ?? '';
+    hint.hidden = /^(google|caldav):/.test(target) || !localCalendarUploadsToIcloud(defaultLocalCalendar()?.id);
+    return;
+  }
+  const uploads = localCalendarUploadsToIcloud(select.value);
+  hint.hidden = !uploads;
+  // Ein verborgenes Ziel von aria-describedby liest der Screenreader trotzdem
+  // vor: der Verweis steht nur, solange die Zeile gilt.
+  if (uploads) select.setAttribute('aria-describedby', hint.id);
+  else select.removeAttribute('aria-describedby');
+}
+
+function wireLocalCalendarUploadHint(panel) {
+  const select = panel.querySelector('#event-local-calendar');
+  select?.addEventListener('change', () => syncLocalCalendarUploadHint(panel));
+  syncLocalCalendarUploadHint(panel);
 }
 
 function populateLocalCalendarSelect(selectElement, currentEvent = null) {
@@ -8859,6 +8960,7 @@ function wireEventForm(panel, { mode, event = null, reminder = null }) {
 
   // Populate the local calendar destination when several calendars exist.
   populateLocalCalendarSelect(panel.querySelector('#event-local-calendar'), event);
+  wireLocalCalendarUploadHint(panel);
 
   // Load unified sync targets (Google + CalDAV)
   const syncTargetSelect = panel.querySelector('#event-sync-target');
@@ -8876,6 +8978,8 @@ function wireEventForm(panel, { mode, event = null, reminder = null }) {
         localSelect.disabled = /^(google|caldav):/.test(syncTargetSelect.value);
         localSelect.closest('.form-group').hidden = localSelect.disabled;
       }
+      // Ohne Kalenderwahl haengt die iCloud-Zeile am Ziel (#1927).
+      if (!localSelect) syncLocalCalendarUploadHint(panel);
     };
 
     // DAS ZIEL FOLGT DER ZUWEISUNG (#1060) - nur beim Anlegen, und nur bis jemand
@@ -9358,6 +9462,7 @@ function buildEventModalContent({ mode, event, date, reminder = null, time = nul
     ${state.localCalendars.length > 1 && (!isEdit || event.local_calendar_id) ? `<div class="form-group">
       <label class="form-label" for="event-local-calendar">${t('calendar.localCalendarLabel')}</label>
       <select class="form-input" id="event-local-calendar"></select>
+      <p class="form-hint" id="event-local-calendar-upload-hint" hidden>${t('calendar.localCalendarUploadsHint')}</p>
     </div>` : ''}
 
     <div class="form-group">
@@ -9379,6 +9484,8 @@ function buildEventModalContent({ mode, event, date, reminder = null, time = nul
       <label class="form-label cal-when__label" for="modal-allday-end">${t('calendar.toLabel')}</label>
       <yuvomi-datepicker type="date" id="modal-allday-end" value="${esc(formatDateInput(endDate))}"></yuvomi-datepicker>
     </div>
+    ${state.localCalendars.length === 1 && (!isEdit || landsInLocalCalendar(event))
+      ? `<p class="form-hint" id="event-local-calendar-upload-hint" hidden>${t('calendar.localCalendarUploadsHint')}</p>` : ''}
 
     <div class="form-group">
       ${renderUserMultiSelect(withChosenPeople(state.users, isEdit ? event.assigned_users : []), selectedUserIds, 'cal_assigned', 'calendar.assignedLabel')}
@@ -9449,28 +9556,65 @@ function confirmLocalWholeSeriesDelete(event) {
 }
 
 /**
- * Die Meldung zu einem abgewiesenen Speichern. Die beiden Anhang-Absagen
- * (#1358) tragen einen `reason` und bekommen einen uebersetzten Satz statt
- * des englischen Servertexts; alles andere wie bisher.
+ * Die Meldung zu einem abgewiesenen Speichern - nie der Text des Servers
+ * (#1909). Die beiden Anhang-Absagen (#1358) liest nur diese Seite, die Gruende
+ * einer Einzelausnahme occurrenceErrorMessage; alles andere kommt aus
+ * CASE_MESSAGES oder ist der allgemeine Satz.
  */
 function calendarSaveErrorMessage(err) {
   const reason = err?.data?.reason;
   if (reason === 'ATTACHMENT_CHANGE_REFUSED') return t('calendar.attachmentChangeRefused');
   if (reason === 'ATTACHMENT_UPLOAD_REFUSED') return t('calendar.attachmentUploadRefused');
-  return occurrenceErrorMessage(err) ?? err?.data?.error ?? t('calendar.saveError');
+  return occurrenceErrorMessage(err) ?? errorSentence(err, 'calendar.saveError');
 }
 
 /**
  * Der Satz fuer die Gruende, mit denen der Server ein Vorkommen ablehnt
- * (#2034, #1909-Muster) - oder nichts, dann gilt der bisherige Text. Erreicht
- * wird er, wenn der Kalender veraltet ist: das gewaehlte Vorkommen gibt es
- * nicht mehr, oder sein Schluessel kam nicht lesbar an.
+ * (#2034, #1909-Muster) - oder nichts, dann gilt errorSentence. Erreicht wird
+ * er, wenn der Kalender veraltet ist: das gewaehlte Vorkommen oder die ganze
+ * Serie gibt es nicht mehr, sein Schluessel kam nicht lesbar an, oder die
+ * Folgeserie haette ab ihrem Start keinen Termin.
  */
 function occurrenceErrorMessage(err) {
   const reason = err?.data?.reason;
   if (reason === 'invalid_recurrence_id') return t('calendar.occurrenceGoneError');
   if (reason === 'malformed_recurrence_id') return t('calendar.occurrenceMalformedError');
+  if (err?.status === 404 && reason === 'calendar_series_not_found') return t('calendar.errorEventGone');
+  if (reason === 'empty_successor_series') return t('calendar.errorSeriesNoOccurrence');
   return null;
+}
+
+/**
+ * Gibt es den Termin (oder seine Serie) nicht mehr? Geloescht von jemand
+ * anderem im Haushalt, oder fuer diese Person nicht mehr sichtbar (#1909).
+ * Ein Loeschen mit diesem Grund hat erreicht, was es wollte.
+ */
+function eventGone(err) {
+  return isAlreadyDeleted(err, 'calendar_event_not_found')
+    || (err?.status === 404 && err?.data?.reason === 'calendar_series_not_found');
+}
+
+/**
+ * Nach einem Termin, den es nicht mehr gibt: der Kalender holt seine Termine
+ * frisch (reloadForView laedt nur bei geaendertem Bereich) - true heisst, der
+ * Aufrufer zeichnet neu; ueber einer fremden Seite frischt diese sich auf.
+ */
+async function reloadEventsAfterGone() {
+  if (!hostedHere()) {
+    await notifyAwayChanged();
+    return false;
+  }
+  await reloadAfterSave(() => reloadCalendarEventsOnly());
+  return true;
+}
+
+/** Ein Loeschen, das schon jemand anderes erledigt hat, ist kein Fehler (#1909). */
+async function deleteUnlessGone(request) {
+  try {
+    await request();
+  } catch (err) {
+    if (!eventGone(err)) throw err;
+  }
 }
 
 /**
@@ -9580,6 +9724,15 @@ async function saveEvent(overlay, mode, event, existingReminder = null, attachme
   }
   if (reportFieldErrors(fieldErrors)) return;
 
+  // Ein Anhang ueber der Grenze ist kein Fehlschlag des Speicherns, sondern
+  // eine Eingabe, die nicht durchgeht: Satz und Abbruch VOR jeder Rueckfrage
+  // und Anfrage. Im try geworfen, ueberschrieb ihn das allgemeine catch.
+  const attachmentFile = overlay.querySelector('#modal-attachment')?.files?.[0];
+  if (attachmentFile && attachmentFile.size > maxUploadBytes()) {
+    window.yuvomi?.showToast(t('calendar.attachmentTooLarge', { size: maxUploadMb() }), 'danger');
+    return;
+  }
+
   if (mode === 'edit'
       && requiresWholeSeriesConfirmation(event)
       && !await confirmLocalWholeSeriesEdit(event)) return;
@@ -9618,10 +9771,8 @@ async function saveEvent(overlay, mode, event, existingReminder = null, attachme
       saveBtn.textContent = mode === 'edit' ? t('common.save') : t('common.add');
       return;
     }
-    const attachmentFile = overlay.querySelector('#modal-attachment')?.files?.[0];
     let attachmentPayload = null;
     if (attachmentFile) {
-      if (attachmentFile.size > maxUploadBytes()) throw new Error(t('calendar.attachmentTooLarge', { size: maxUploadMb() }));
       attachmentPayload = {
         name: attachmentFile.name,
         mime: attachmentFile.type || 'application/octet-stream',
@@ -9848,6 +9999,21 @@ async function saveEvent(overlay, mode, event, existingReminder = null, attachme
     window.yuvomi?.showToast(calendarSaveErrorMessage(err), 'danger');
     saveBtn.disabled    = false;
     saveBtn.textContent = mode === 'edit' ? t('common.save') : t('common.add');
+    if (eventGone(err)) {
+      // Den Termin gibt es nicht mehr: nichts mehr zu speichern, der Dialog
+      // schliesst, und der Kalender zeigt den aktuellen Stand (#1909).
+      closeModal({ force: true, context: dialog });
+      if (await reloadEventsAfterGone()) {
+        renderView();
+        refocusAfterRender();
+      }
+    } else if (isGone(err) && err.data.reason === 'calendar_selected_calendar_not_found') {
+      // Der gewaehlte Kalender wurde inzwischen geloescht: der Dialog bleibt
+      // mit allen Eingaben offen und bietet die aktuellen Kalender an.
+      await loadLocalCalendars();
+      populateLocalCalendarSelect(overlay.querySelector('#event-local-calendar'), event);
+      syncLocalCalendarUploadHint(overlay);
+    }
   }
 }
 
@@ -9905,12 +10071,12 @@ async function deleteEvent(event) {
       // verloren, sein stummes `catch` verschluckte ein 403, und er loeschte nur
       // die EIGENEN Zeilen - die per #921 an Zugewiesene verteilten blieben
       // stehen.
-      await api.delete(target.path, { keepalive });
+      await deleteUnlessGone(() => api.delete(target.path, { keepalive }));
       if (!keepalive) refreshReminders();
     },
     ...deleteViewHooks(deleteScope),
     handleError: (err) => window.yuvomi?.showToast(
-      err.data?.error ?? t('calendar.deleteError'),
+      occurrenceErrorMessage(err) ?? errorSentence(err, 'calendar.deleteError'),
       'danger',
     ),
   });
@@ -10131,12 +10297,12 @@ async function deleteThisAndFollowing(event) {
     deleteScope,
     message: t('calendar.deletedToast'),
     schedule: scheduleUndoableDelete,
-    requestDelete: ({ keepalive }) => requestCalendarOccurrenceDelete({
+    requestDelete: ({ keepalive }) => deleteUnlessGone(() => requestCalendarOccurrenceDelete({
       api, event, scope: 'following', keepalive,
-    }),
+    })),
     ...deleteViewHooks(deleteScope),
     handleError: (err) => window.yuvomi?.showToast(
-      occurrenceErrorMessage(err) ?? err.data?.error ?? t('calendar.deleteError'),
+      occurrenceErrorMessage(err) ?? errorSentence(err, 'calendar.deleteError'),
       'danger',
     ),
   });
@@ -10158,12 +10324,12 @@ async function deleteSingleOccurrence(event) {
     deleteScope,
     message: t('calendar.deletedToast'),
     schedule: scheduleUndoableDelete,
-    requestDelete: ({ keepalive }) => requestCalendarOccurrenceDelete({
+    requestDelete: ({ keepalive }) => deleteUnlessGone(() => requestCalendarOccurrenceDelete({
       api, event, scope: 'this', keepalive,
-    }),
+    })),
     ...deleteViewHooks(deleteScope),
     handleError: (err) => window.yuvomi?.showToast(
-      occurrenceErrorMessage(err) ?? err.data?.error ?? t('calendar.deleteError'),
+      occurrenceErrorMessage(err) ?? errorSentence(err, 'calendar.deleteError'),
       'danger',
     ),
   });

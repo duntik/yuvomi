@@ -13,7 +13,7 @@ const log = createLogger('CalDAV-Reminders');
 
 import * as db from '../db.js';
 import { parseVTODO } from './ics-parser.js';
-import { createCalDAVClient, supportsComponent } from '../utils/caldav-client.js';
+import { createCalDAVClient, supportsComponent, writableColumn, writableFromColumn } from '../utils/caldav-client.js';
 import { householdTimeZone, utcToWall } from '../utils/timezone.js';
 import { setItemTags, setTags } from '../utils/task-tags.js';
 import { syncTaskCompletion, recordCompletion, revokeCompletion } from './task-completions.js';
@@ -139,7 +139,7 @@ async function getReminderLists(accountId, { refresh = false, createClient: make
   // VTODO-Sammlungen bei jedem Seitenaufruf erneut das Netz.
   if (!refresh && account.reminders_discovered_at) {
     const rows = db.get().prepare(`
-      SELECT list_url, list_name, target_module, enabled
+      SELECT list_url, list_name, target_module, enabled, writable
       FROM caldav_reminder_selection
       WHERE account_id = ?
       ORDER BY list_name
@@ -150,6 +150,10 @@ async function getReminderLists(accountId, { refresh = false, createClient: make
       listName:     r.list_name,
       targetModule: r.target_module,
       enabled:      r.enabled === 1,
+      // Nimmt die Liste neue Einträge an (#1840)? null: der Server sagt es
+      // nicht. Dazu, was auf den Upload hierher wartet.
+      writable:       writableFromColumn(r.writable),
+      waitingUploads: todoOutbound.countWaitingTodoUploads(accountId, r.list_url),
     }));
   }
 
@@ -169,12 +173,16 @@ async function getReminderLists(accountId, { refresh = false, createClient: make
     const enabled      = existing ? existing.enabled : 0;
 
     db.get().prepare(`
-      INSERT INTO caldav_reminder_selection (account_id, list_url, list_name, target_module, enabled)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(account_id, list_url) DO UPDATE SET list_name = excluded.list_name
-    `).run(accountId, cal.url, name, targetModule, enabled);
+      INSERT INTO caldav_reminder_selection (account_id, list_url, list_name, target_module, enabled, writable)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(account_id, list_url) DO UPDATE SET list_name = excluded.list_name,
+                                                     writable  = excluded.writable
+    `).run(accountId, cal.url, name, targetModule, enabled, writableColumn(cal));
 
-    result.push({ listUrl: cal.url, listName: name, targetModule, enabled: enabled === 1 });
+    result.push({
+      listUrl: cal.url, listName: name, targetModule, enabled: enabled === 1,
+      writable: writableFromColumn(writableColumn(cal)),
+    });
   }
 
   db.get().prepare(`
@@ -185,6 +193,22 @@ async function getReminderLists(accountId, { refresh = false, createClient: make
 
   log.info(`Discovered ${result.length} reminder list(s) for account ${accountId}.`);
   return result;
+}
+
+/**
+ * Die Schreibrechte aus einer Auflistung in die Auswahl übernehmen (#1840),
+ * wie `rememberCalendarWritability` bei den Terminen. Eine Liste, die die
+ * Auflistung nicht nennt, bleibt, wie sie war.
+ */
+function rememberListWritability(accountId, serverCals) {
+  const update = db.get().prepare(`
+    UPDATE caldav_reminder_selection SET writable = ?
+    WHERE account_id = ? AND list_url = ?
+  `);
+  for (const cal of serverCals || []) {
+    if (!cal?.url) continue;
+    update.run(writableColumn(cal), accountId, cal.url);
+  }
 }
 
 function ensureShoppingList(sel) {
@@ -613,9 +637,11 @@ async function runSync({ createClient: makeClient } = {}) {
       // Ohne eingeschaltete Liste gibt es nichts abzurufen. Wartet aber ein
       // Löschauftrag auf eine abgewählte (#1884), fragt der Lauf trotzdem die
       // Auflistung ab: nur sie sagt, ob es die Liste noch gibt.
-      // Dasselbe für einen Umzug in eine abgewählte Liste (#1700).
+      // Dasselbe für einen Umzug in eine abgewählte Liste (#1700) und für einen
+      // Umzug AUS einer Liste dieses Kontos (#1911): sein Warten endet hier.
       const waitsForSelection = todoOutbound.deletionsWaitingForSelection(account.id).length > 0
-        || todoOutbound.movesWaitingForSelection(account.id) > 0;
+        || todoOutbound.movesWaitingForSelection(account.id) > 0
+        || todoOutbound.movesFromAccount(account.id) > 0;
       if (enabledLists.length === 0 && !waitsForSelection) continue;
 
       // Gezielte Anfragen nur an den Server dieses Kontos (`createTodoClient`).
@@ -628,6 +654,10 @@ async function runSync({ createClient: makeClient } = {}) {
           todoOutbound.dropDeletionsOfMissingLists(account.id, serverCals.map((c) => c.url));
           todoOutbound.returnMovesIntoMissingLists(account.id, serverCals.map((c) => c.url));
         }
+        // Umzüge aus den Listen dieses Kontos (#1911): auch ohne eingeschaltete
+        // Liste fällt ein Umzug ohne Ziel, und ein wartender bekommt sein Ende.
+        todoOutbound.releaseStrandedShoppingMoves(account.id);
+        todoOutbound.endWaitingShoppingMoves(account.id, serverCals.map((c) => c.url));
         reportWaitingDeletions(account);
         continue;
       }
@@ -643,11 +673,16 @@ async function runSync({ createClient: makeClient } = {}) {
         );
         continue;
       }
+      // Schreibrechte je Liste für die Zielauswahl der Formulare (#1840).
+      rememberListWritability(account.id, serverCals);
       // Löschaufträge für Listen, die der Server nicht mehr nennt, haben ihr
       // Ziel erreicht (#1884). Vor dem Lesen der Aufträge für den Abruf unten.
       todoOutbound.dropDeletionsOfMissingLists(account.id, serverCals.map((c) => c.url));
       // Ein Umzug in eine Liste, die der Server nicht mehr nennt, geht zurück (#1700).
       todoOutbound.returnMovesIntoMissingLists(account.id, serverCals.map((c) => c.url));
+      // Ein Umzug aus einer Liste, die der Server nicht mehr nennt oder die zu
+      // lange abgeschaltet ist, bekommt sein Ende (#1911).
+      todoOutbound.endWaitingShoppingMoves(account.id, serverCals.map((c) => c.url));
 
       const owner       = db.get().prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get();
       const createdBy   = owner ? owner.id : 1;
@@ -841,8 +876,14 @@ async function runSync({ createClient: makeClient } = {}) {
           // der Prune räumte jeden Einkaufsartikel des Kontos ab.
           // Scheitert das Lesen der wartenden Umzüge, geht der Fehler hoch und
           // dieser Lauf prunt gar nicht - es gibt hier keinen leeren Ersatzwert.
+          // Gelesen heisst: als Einkaufsliste gelesen. Eine inzwischen den
+          // Aufgaben zugeordnete Quelle liefert ihre UID nur an die Aufgaben
+          // (#1911), für den Einkauf bleibt sie ungelesen.
           const shielded = seenByModule.shopping.length
-            ? todoOutbound.uidsOfMovesFromUnfetchedLists(account.id, enabledLists.map((s) => s.list_url))
+            ? todoOutbound.uidsOfMovesFromUnfetchedLists(
+              account.id,
+              enabledLists.filter((s) => s.target_module === 'shopping').map((s) => s.list_url),
+            )
             : [];
           pruneRemoved(db.get(), 'shopping_items', account.id, [...seenByModule.shopping, ...shielded]);
         }

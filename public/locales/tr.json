@@ -355,6 +355,8 @@
         "customizeResetDone": "Genel bakışın yeniden haneyi izliyor.",
         "optionsFor": "{{widget}} seçenekleri",
         "optionCalendarScope": "Hangi randevular?",
+        "optionCalendarCalendars": "Hangi takvimler?",
+        "optionCalendarCalendarsHint": "Seçim yapılmazsa kutucuk tüm takvimlerdeki randevuları gösterir.",
         "optionCalendarAll": "Tüm randevular",
         "optionCalendarLimit": "Kaç randevu?",
         "optionCalendarLimitHint": "Uzun boyutlar için geçerlidir ve kartı buna göre uzatır. “{{small}}” boyutunda yalnızca sıradaki randevuları, “{{size}}” boyutunda haftayı gösterir.",
@@ -788,7 +790,11 @@
         "tickedSection": "İşaretlenenler",
         "itemBackToast": "„{{name}}” yeniden listede.",
         "itemStateOpen": "işaretlenmedi",
-        "itemAddedToast": "\"{{name}}\", \"{{category}}\" altına eklendi."
+        "itemAddedToast": "\"{{name}}\", \"{{category}}\" altına eklendi.",
+        "moveReturned": {
+            "refused": "„{{item}}” yeniden „{{back}}” listesinde: sunucu onu „{{target}}” listesinde kabul etmedi.",
+            "waited": "„{{item}}”, „{{target}}” listesine taşınmadı: „{{back}}” listesinin eşitlemesi bir haftadan uzun süredir kapalı. Liste açıldığında ürün „{{back}}” listesinde yeniden görünecek."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} malzeme",
@@ -1203,7 +1209,15 @@
         "sidebarLabel": "Takvim kenar çubuğu",
         "upNextTitle": "Sıradaki",
         "upNextEmpty": "Önümüzdeki üç haftada bir şey yok.",
-        "shiftLegend": "Vardiya açıklaması"
+        "shiftLegend": "Vardiya açıklaması",
+        "errorCalendarGone": "Bu takvim artık yok.",
+        "errorCalendarNameInvalid": "Takvime en fazla {{limit}} karakterlik bir ad verin.",
+        "errorCalendarOrderChanged": "Bu arada takvimler değişti.",
+        "errorDeleteFeedAdminOnly": "Bu takvim dışa aktarılıyor. Yalnızca bir yönetici silebilir.",
+        "errorEventGone": "Bu etkinlik artık yok.",
+        "errorSelectedCalendarGone": "Seçilen takvim artık yok.",
+        "errorSeriesNoOccurrence": "Bu tekrarla başlangıç tarihinden itibaren hiç etkinlik olmazdı.",
+        "localCalendarUploadsHint": "Bu takvimdeki etkinlikler Apple Calendar üzerinden iCloud’a yüklenir."
     },
     "noteCategories": {
         "categories": "Kategoriler",
@@ -1274,7 +1288,11 @@
         "checklistDone": "Tamamlandı",
         "checklistOpen": "Açık",
         "errorNoteGone": "Bu not artık yok.",
-        "errorSelectedCategoryGone": "Seçilen kategorilerden biri artık mevcut değil."
+        "errorSelectedCategoryGone": "Seçilen kategorilerden biri artık mevcut değil.",
+        "lockedToggle": "Düzenlemeyi kilitle",
+        "lockedBadge": "Kilitli",
+        "lockedHint": "Bu notu yalnızca sen ve yöneticiler değiştirebilir, sabitleyebilir veya silebilir - listedeki öğeleri işaretlemek de buna dahildir. Diğer herkes okumaya devam edebilir.",
+        "errorLocked": "Bu not kilitli. Yalnızca onu oluşturan kişi ve yöneticiler değiştirebilir."
     },
     "markdown": {
         "bold": "Kalın (Ctrl+B)",
@@ -1944,9 +1962,14 @@
         "themeLight": "Açık",
         "themeDark": "Koyu",
         "wallModeLabel": "Duvar modu",
-        "wallModeHint": "Bu cihazdaki başlangıç ekranını duvar tableti için sakin bir gösterime dönüştürür: saat, günün programı, bugün kimin sırası olduğu ve hava durumu - iki metreden okunacak kadar büyük, dokunmadan. 22 ile 6 arasında kararır. Yalnızca bu cihaz için geçerlidir, evdeki diğer cihazlar için değil.",
+        "wallModeHint": "Bu cihazdaki başlangıç ekranını duvar tableti için sakin bir gösterime dönüştürür: saat, günün programı, bugün kimin sırası olduğu ve hava durumu - iki metreden okunacak kadar büyük, dokunmadan. Gece saatlerinde kararır. Yalnızca bu cihaz için geçerlidir, evdeki diğer cihazlar için değil.",
         "wallModeOn": "Duvar modu açık, {{page}} sayfasında görünür.",
         "wallModeOff": "Duvar modu kapalı.",
+        "nightHoursLabel": "Gece saatleri",
+        "nightHoursHint": "Bu saatlerde duvar modu ve ekran koruyucu, evin saatine göre kararır. Yalnızca bu cihaz için geçerlidir.",
+        "nightHoursFrom": "Karartma başlangıcı",
+        "nightHoursUntil": "Karartma bitişi",
+        "nightHoursSaved": "Bu cihazdaki gece saatleri: {{from}} - {{until}}.",
         "screensaverIdleLabel": "Ekran koruyucuyu başlatma süresi",
         "screensaverIdleHint": "Fotoğraf ekran koruyucusu başlamadan önce bu cihazın dokunulmadan kalacağı süre. Yalnızca bu cihaz için geçerlidir, hanenin geri kalanı için değil. Bir yönetici Immich'i bağladığında etkinleşir.",
         "screensaverIdleSaved": "Bu cihazda ekran koruyucu bekleme süresi: {{delay}}.",
@@ -2881,6 +2904,15 @@
         "immichTestOk": "Immich bağlantısı başarılı.",
         "immichPreview": "Önizleme",
         "immichPreviewUnavailable": "Immich'ten fotoğraf yüklenemedi.",
+        "immichErrorUrlInvalid": "Sunucu URL'si geçersiz. http:// veya https:// ile başlamalıdır.",
+        "immichErrorAlbumIdInvalid": "Albüm kimliği geçersiz. Immich'te albümün adresinde bulabilirsiniz.",
+        "immichErrorApiKeyInvalid": "API anahtarı çok uzun. Anahtarı Immich'ten yeniden kopyalayın.",
+        "immichErrorNotConfigured": "Test için sunucu URL'si veya API anahtarı eksik.",
+        "immichErrorApiKeyRejected": "Immich API anahtarını reddediyor. Süresi dolmuş, iptal edilmiş veya bir izni eksik olabilir.",
+        "immichErrorStatus": "Immich bir hatayla yanıt verdi (durum {{status}}). Sunucu URL'sini kontrol edin veya daha sonra tekrar deneyin.",
+        "immichErrorUnreachable": "Immich'e ulaşılamıyor. Sunucu URL'sini ve Immich'in çalışıp çalışmadığını kontrol edin.",
+        "immichSaveFailed": "Immich yapılandırması kaydedilemedi.",
+        "immichTestFailed": "Immich bağlantısı kontrol edilemedi.",
         "backToSettings": "Ayarlara dön",
         "retry": "Yeniden dene",
         "loadError": "Ayarlar yüklenemedi.",
@@ -3366,7 +3398,14 @@
         "permCapabilityTasksReorder": "Ailenin sıralamasını değiştir",
         "permChildRoleHint": "Yeni çocuk hesapları oluşturulurken ayrıca kendi başlangıç izinlerini alır: {{list}}. Sonra bunlar ilgili üyede görünür.",
         "activeModulesHintMore": "Bir modülü yalnızca kendinde gizlemek için Modüller → Gezinme sayfasına git.",
-        "permIntroMore": "Bireysel üyeler rol varsayılanından farklı olabilir. Ayar yapılmazsa her rol tam erişime sahiptir; yöneticiler her zaman."
+        "permIntroMore": "Bireysel üyeler rol varsayılanından farklı olabilir. Ayar yapılmazsa her rol tam erişime sahiptir; yöneticiler her zaman.",
+        "preferenceSaveFailed": "Ayar kaydedilemedi.",
+        "caldavCalendarReadOnly": "Salt okunur: buraya yeni etkinlik kaydedilemez",
+        "caldavCalendarReadOnlyWaiting_one": "Salt okunur: buraya yüklenmeyi bekleyen {{count}} etkinlik ulaşmayacak",
+        "caldavCalendarReadOnlyWaiting": "Salt okunur: buraya yüklenmeyi bekleyen {{count}} etkinlik ulaşmayacak",
+        "reminderListReadOnly": "Salt okunur: buraya yeni kayıt eklenemez",
+        "reminderListReadOnlyWaiting_one": "Salt okunur: buraya yüklenmeyi bekleyen {{count}} kayıt ulaşmayacak",
+        "reminderListReadOnlyWaiting": "Salt okunur: buraya yüklenmeyi bekleyen {{count}} kayıt ulaşmayacak"
     },
     "login": {
         "tagline": "Tekrar hoş geldin. Evin tek bir yerde.",
@@ -3955,7 +3994,8 @@
             "reasonNameTooLong": "Bir dosya veya klasör adı çok uzun.",
             "reasonTooDeep": "Yol beş klasör düzeyi sınırını aşıyor.",
             "reasonParentFailed": "Üst klasör oluşturulamadı.",
-            "reasonRateLimited": "Sunucu çok fazla istek alıyor. Yüklemeyi daha sonra tekrar deneyin."
+            "reasonRateLimited": "Sunucu çok fazla istek alıyor. Yüklemeyi daha sonra tekrar deneyin.",
+            "folderGoneReplanned": "Bu yüklemeye ait bir klasör bu arada silindi. Önizleme güncel durumu gösteriyor - yüklemeyi yeniden başlatın."
         },
         "errorFolderGone": "Bu klasör artık yok.",
         "errorSelectedFolderGone": "Seçilen klasör artık yok.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} sana borçlu",
         "debtOwes": "{{from}}, {{to}} kişisine borçlu",
         "balanced": "Hesap kapalı",
-        "balancedInGroup": "{{group}}: Hesap kapalı"
+        "balancedInGroup": "{{group}}: Hesap kapalı",
+        "totalsByMember": "Kişi başına ödenen",
+        "totalsByMemberHint": "Ödenen tutar, altında kişinin kendi payı",
+        "ownShare": "Kendi payı: {{amount}}",
+        "paidLabel": "Ödenen",
+        "totalsByCategory": "Kategoriye göre",
+        "categoryFilter": "Harcamaları kategoriye göre filtrele",
+        "noExpensesInCategory": "Bu kategoride harcama yok."
     },
     "wmo": {
         "0": "Açık",
@@ -4924,6 +4971,7 @@
             "saveError": "Ölçüm kaydedilemedi.",
             "invalidValue": "Lütfen geçerli değerler girin.",
             "range": {
+                "day": "Gün",
                 "week": "Hafta",
                 "month": "Ay",
                 "year": "Yıl"
@@ -4963,6 +5011,7 @@
                 "family": "Aile"
             },
             "sparse": "Bir eğilim göstermek için ölçüm sayısı çok az.",
+            "bandValue": "{{mean}}, {{low}} ile {{high}} arası",
             "recentMeasurements": "Son ölçümler",
             "deleteMeasurement": "Ölçümü sil: {{value}} ({{date}})",
             "measurementDeleted": "Ölçüm silindi",

@@ -107,7 +107,7 @@ test('offline geht vor: ohne Netz ist auch eine 403 keine Absage', async () => {
 
 test('der Router reicht genau diese Funktion weiter und hat keine eigene', () => {
   const router = readFileSync(new URL('../public/router.js', import.meta.url), 'utf8');
-  assert.match(router, /import \{ friendlyError \} from '\/utils\/friendly-error\.js';/);
+  assert.match(router, /import \{ friendlyError, unhandledErrorSentence \} from '\/utils\/friendly-error\.js';/);
   assert.doesNotMatch(router, /function friendlyError\(/, 'router.js hat wieder eine eigene Zuordnung');
   const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
   assert.ok(sw.includes("'/utils/friendly-error.js'"), 'das Modul fehlt in der Shell-Liste des Service Workers');
@@ -317,6 +317,15 @@ test('jeder Fall hat seinen Satz in jeder Sprache, und der Server nennt ihn', ()
     // Vorrat (#1448): ein Produkt, das wieder Chargen hat, bleibt; die echte
     // Antwort misst test:pantry-routes.
     '../server/routes/pantry.js',
+    // Kalender-Verwaltung (#1909); die echte Antwort misst
+    // test:calendar-local-calendars.
+    '../server/routes/calendar/local-calendars.js', '../server/services/local-calendars.js',
+    // Termine speichern, zuruecksetzen, loeschen (#1909); die echte Antwort
+    // misst test:calendar-routes.
+    '../server/routes/calendar/crud.js',
+    // Immich-Bildschirmschoner in den Admin-Einstellungen (#1909); die echte
+    // Antwort misst test:screensaver.
+    '../server/routes/screensaver.js',
   ].map(read).join('\n').replace(/NoteCategoryInputError\([^)]*?,\s*\d+,\s*'([a-z_]+)'\)/g, "reason: '$1'");
   const routes = `${read('../server/routes/shopping.js')}\n${healthServer}\n${documentsServer}\n${recipesServer}\n${subscriptionsServer}\n${restServer}\n${wasteServer.replace(/,\s*'([a-z_]+)'\s*[),]/g, ", reason: '$1')")}\n${importCodes}`;
   return load().then(({ CASE_MESSAGES, REFUSAL_MESSAGES }) => {
@@ -365,6 +374,7 @@ test('isGone: nur die bekannten "gibt es nicht mehr"-Gruende, nie der blanke Sta
     'rewards_money_account_not_found', 'rewards_money_plan_not_found',
     'quick_links_link_not_found',
     'recipe_providers_account_not_found',
+    'calendar_calendar_not_found', 'calendar_event_not_found', 'calendar_selected_calendar_not_found',
   ].sort());
   for (const reason of GONE_REASONS) {
     assert.ok(CASE_MESSAGES.has(reason), `${reason}: ohne Satz`);
@@ -519,7 +529,8 @@ test('CASE_PARAMS: jeder Eintrag gehoert zu einem Fall, kein Name waehlt die Plu
   assert.ok(CASE_PARAMS.size >= 7);
   const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
   const server = ['../server/services/waste-import.js', '../server/services/waste-url-source.js', '../server/routes/waste/sources.js',
-    '../server/routes/health/cycle.js', '../server/routes/documents.js', '../server/routes/contacts.js'].map(read).join('\n');
+    '../server/routes/health/cycle.js', '../server/routes/documents.js', '../server/routes/contacts.js',
+    '../server/routes/screensaver.js'].map(read).join('\n');
   for (const [reason, names] of CASE_PARAMS) {
     assert.ok(CASE_MESSAGES.has(reason), `${reason}: Zahlen ohne Satz`);
     assert.ok(Array.isArray(names) && names.length > 0, reason);
@@ -570,4 +581,36 @@ test('errorSentence: der Satz der Stelle bekommt seine Werte, ein bekannter Fall
   assert.equal(errorSentence(unbekannt, 'common.errorCheckRolledBack'), 'common.errorCheckRolledBack', 'ohne Werte wie bisher');
   assert.equal(errorSentence(Object.assign(new Error('x'), { status: 0 }), 'common.errorCheckRolledBack', { name: 'Milch' }),
     'common.errorOfflineMutation', 'offline sagt seinen eigenen Satz');
+});
+
+// DER SATZ FUER DAS, WAS KEINE SEITE SELBST FAENGT (#1909): Fehlerbildschirm
+// und unbehandelte Rejection im Router. Bis hierher fragten beide
+// friendlyError, und das reichte an jeder unbekannten Antwort (400, 409) den
+// Text des Servers durch, an einem Wurf im Code dessen englische Meldung
+// ("foo is not defined") - beides als Satz der Oberflaeche. Jetzt: bekannter
+// Fall, offline, 404, 5xx, Zeitueberschreitung und Netzfehler wie bisher,
+// alles andere der unerwartete Fehler. Die rohe Meldung bleibt in den Details.
+test('unhandledErrorSentence: dieselben Faelle wie friendlyError, nie der Text des Servers (#1909)', async () => {
+  const { unhandledErrorSentence } = await load();
+  const server = (status, extra = {}) => Object.assign(new Error('Server sentence.'), { status, data: { error: 'Server sentence.', ...extra } });
+  assert.equal(unhandledErrorSentence(server(409)), 'common.unexpectedError');
+  assert.equal(unhandledErrorSentence(server(400)), 'common.unexpectedError');
+  assert.equal(unhandledErrorSentence(server(422, { reason: 'unknown_reason' })), 'common.unexpectedError');
+  assert.equal(unhandledErrorSentence(new Error('Boom')), 'common.unexpectedError');
+  assert.equal(unhandledErrorSentence(new ReferenceError('foo is not defined')), 'common.unexpectedError');
+  assert.equal(unhandledErrorSentence(undefined), 'common.unexpectedError');
+  // Was friendlyError schon sicher wusste, sagt er weiter.
+  assert.equal(unhandledErrorSentence(server(403)), 'common.errorNoPermission');
+  assert.equal(unhandledErrorSentence(server(404, { reason: 'tasks_task_not_found' })), 'tasks.errorTaskGone');
+  assert.equal(unhandledErrorSentence(server(404)), 'common.errorNotFound');
+  assert.equal(unhandledErrorSentence(server(500)), 'common.errorServer');
+  assert.equal(unhandledErrorSentence(server(429)), 'common.errorRateLimited');
+  assert.equal(unhandledErrorSentence(server(503, { reason: 'restore_in_progress' })), 'common.errorRestoreInProgress');
+  assert.equal(unhandledErrorSentence({ status: 0 }), 'common.errorOfflineMutation');
+  assert.equal(unhandledErrorSentence({ name: 'TimeoutError' }), 'common.errorTimeout');
+  assert.equal(unhandledErrorSentence(new TypeError('x is not a function')), 'common.unexpectedError');
+  assert.notEqual(unhandledErrorSentence(new TypeError('Failed to fetch')), 'Failed to fetch');
+  setOnline(false);
+  assert.equal(unhandledErrorSentence(server(409)), 'common.errorOffline');
+  assert.equal(unhandledErrorSentence({ status: 0 }), 'common.errorOfflineMutation');
 });

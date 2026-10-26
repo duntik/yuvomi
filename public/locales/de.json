@@ -373,6 +373,8 @@
         "customizeResetDone": "Deine Übersicht folgt wieder dem Haushalt.",
         "optionsFor": "Optionen für {{widget}}",
         "optionCalendarScope": "Welche Termine?",
+        "optionCalendarCalendars": "Welche Kalender?",
+        "optionCalendarCalendarsHint": "Ohne Auswahl zeigt die Kachel Termine aus allen Kalendern.",
         "optionCalendarAll": "Alle Termine",
         "optionCalendarLimit": "Wie viele Termine?",
         "optionCalendarLimitHint": "Gilt für die hohen Größen und macht die Kachel entsprechend höher. In „{{small}}“ zeigt sie nur die nächsten Termine, in „{{size}}“ die Woche.",
@@ -806,7 +808,11 @@
         "tickedSection": "Abgehakt",
         "itemBackToast": "„{{name}}“ ist wieder auf der Liste.",
         "itemStateOpen": "offen",
-        "itemAddedToast": "„{{name}}“ steht unter „{{category}}“."
+        "itemAddedToast": "„{{name}}“ steht unter „{{category}}“.",
+        "moveReturned": {
+            "refused": "„{{item}}“ steht wieder auf „{{back}}“: Der Server hat den Artikel in „{{target}}“ nicht angenommen.",
+            "waited": "„{{item}}“ wurde nicht nach „{{target}}“ verschoben: Der Abgleich von „{{back}}“ ist seit über einer Woche aus. Der Artikel erscheint wieder auf „{{back}}“, sobald die Liste eingeschaltet wird."
+        }
     },
     "meals": {
         "ingredientCount_one": "{{count}} Zutat",
@@ -1221,7 +1227,15 @@
         "sidebarLabel": "Seitenleiste des Kalenders",
         "upNextTitle": "Als Nächstes",
         "upNextEmpty": "In den nächsten drei Wochen steht nichts an.",
-        "shiftLegend": "Legende der Schichten"
+        "shiftLegend": "Legende der Schichten",
+        "errorCalendarGone": "Diesen Kalender gibt es nicht mehr.",
+        "errorCalendarNameInvalid": "Gib dem Kalender einen Namen mit höchstens {{limit}} Zeichen.",
+        "errorCalendarOrderChanged": "Die Kalender wurden inzwischen geändert.",
+        "errorDeleteFeedAdminOnly": "Dieser Kalender wird exportiert. Nur ein Admin kann ihn löschen.",
+        "errorEventGone": "Diesen Termin gibt es nicht mehr.",
+        "errorSelectedCalendarGone": "Den gewählten Kalender gibt es nicht mehr.",
+        "errorSeriesNoOccurrence": "Mit dieser Wiederholung gäbe es ab dem Startdatum keinen einzigen Termin.",
+        "localCalendarUploadsHint": "Termine in diesem Kalender werden über Apple Calendar zu iCloud hochgeladen."
     },
     "noteCategories": {
         "categories": "Kategorien",
@@ -1292,7 +1306,11 @@
         "checklistDone": "Erledigt",
         "checklistOpen": "Offen",
         "errorNoteGone": "Diese Notiz gibt es nicht mehr.",
-        "errorSelectedCategoryGone": "Eine gewählte Kategorie gibt es nicht mehr."
+        "errorSelectedCategoryGone": "Eine gewählte Kategorie gibt es nicht mehr.",
+        "lockedToggle": "Bearbeiten sperren",
+        "lockedBadge": "Gesperrt",
+        "lockedHint": "Nur du und Administratoren können diese Notiz ändern, anpinnen oder löschen - auch die Haken einer Checkliste. Alle anderen können sie weiterhin lesen.",
+        "errorLocked": "Diese Notiz ist gesperrt. Ändern können sie nur die Person, die sie angelegt hat, und Admins."
     },
     "markdown": {
         "bold": "Fett (Strg+B)",
@@ -2100,9 +2118,14 @@
         "themeLight": "Hell",
         "themeDark": "Dunkel",
         "wallModeLabel": "Wand-Modus",
-        "wallModeHint": "Zeigt die Startseite auf diesem Gerät als ruhige Anzeige fürs Wandtablet: Uhrzeit, Tagesprogramm, wer heute dran ist und das Wetter - groß genug für zwei Meter Abstand, ohne Bedienung. Zwischen 22 und 6 Uhr dunkelt sie ab. Gilt nur hier, nicht für die anderen Geräte im Haushalt.",
+        "wallModeHint": "Zeigt die Startseite auf diesem Gerät als ruhige Anzeige fürs Wandtablet: Uhrzeit, Tagesprogramm, wer heute dran ist und das Wetter - groß genug für zwei Meter Abstand, ohne Bedienung. In den Nachtstunden dunkelt sie ab. Gilt nur hier, nicht für die anderen Geräte im Haushalt.",
         "wallModeOn": "Wand-Modus an - sichtbar unter {{page}}.",
         "wallModeOff": "Wand-Modus aus.",
+        "nightHoursLabel": "Nachtstunden",
+        "nightHoursHint": "In diesen Stunden dunkeln Wand-Modus und Bildschirmschoner ab, nach der Uhr des Haushalts. Gilt nur für dieses Gerät.",
+        "nightHoursFrom": "Abdunkeln ab",
+        "nightHoursUntil": "Abdunkeln bis",
+        "nightHoursSaved": "Nachtstunden auf diesem Gerät: {{from}} bis {{until}}.",
         "screensaverIdleLabel": "Bildschirmschoner starten nach",
         "screensaverIdleHint": "So lange bleibt dieses Gerät unberührt, bevor der Foto-Bildschirmschoner startet. Gilt nur hier, nicht für die anderen Geräte im Haushalt. Wirkt erst, wenn ein Admin Immich verbunden hat.",
         "screensaverIdleSaved": "Wartezeit des Bildschirmschoners auf diesem Gerät: {{delay}}.",
@@ -2936,6 +2959,15 @@
         "immichTestOk": "Verbindung zu Immich erfolgreich hergestellt.",
         "immichPreview": "Vorschau",
         "immichPreviewUnavailable": "Ein Foto aus Immich konnte nicht geladen werden.",
+        "immichErrorUrlInvalid": "Die Server-URL ist ungültig. Sie muss mit http:// oder https:// beginnen.",
+        "immichErrorAlbumIdInvalid": "Die Album-ID ist ungültig. Sie steht in Immich in der Adresse des Albums.",
+        "immichErrorApiKeyInvalid": "Der API-Schlüssel ist zu lang. Den Schlüssel in Immich erneut kopieren.",
+        "immichErrorNotConfigured": "Für den Test fehlen die Server-URL oder der API-Schlüssel.",
+        "immichErrorApiKeyRejected": "Immich lehnt den API-Schlüssel ab. Vielleicht ist er abgelaufen, widerrufen oder ihm fehlt eine Berechtigung.",
+        "immichErrorStatus": "Immich hat mit einem Fehler geantwortet (Status {{status}}). Die Server-URL prüfen oder später erneut versuchen.",
+        "immichErrorUnreachable": "Immich ist nicht erreichbar. Die Server-URL prüfen und ob Immich läuft.",
+        "immichSaveFailed": "Die Immich-Konfiguration konnte nicht gespeichert werden.",
+        "immichTestFailed": "Die Verbindung zu Immich konnte nicht geprüft werden.",
         "backToSettings": "Zurück zu Einstellungen",
         "retry": "Erneut versuchen",
         "loadError": "Einstellungen konnten nicht geladen werden.",
@@ -3384,7 +3416,14 @@
         "permCapabilityTasksReorder": "Reihenfolge der Familie ändern",
         "permChildRoleHint": "Neue Kinderkonten bekommen beim Anlegen zusätzlich eigene Startrechte: {{list}}. Danach stehen sie beim jeweiligen Mitglied.",
         "activeModulesHintMore": "Wer ein Modul nur für sich aus der Navigation nehmen will, tut das unter Module → Navigation.",
-        "permIntroMore": "Einzelne Mitglieder können vom Rollen-Standard abweichen. Ohne Einstellung hat jede Rolle vollen Zugriff; Administratoren immer."
+        "permIntroMore": "Einzelne Mitglieder können vom Rollen-Standard abweichen. Ohne Einstellung hat jede Rolle vollen Zugriff; Administratoren immer.",
+        "preferenceSaveFailed": "Die Einstellung konnte nicht gespeichert werden.",
+        "caldavCalendarReadOnly": "Nur lesbar: neue Termine lassen sich hier nicht speichern",
+        "caldavCalendarReadOnlyWaiting_one": "Nur lesbar: {{count}} Termin, der hierher hochgeladen werden soll, kommt nicht an",
+        "caldavCalendarReadOnlyWaiting": "Nur lesbar: {{count}} Termine, die hierher hochgeladen werden sollen, kommen nicht an",
+        "reminderListReadOnly": "Nur lesbar: neue Einträge lassen sich hier nicht speichern",
+        "reminderListReadOnlyWaiting_one": "Nur lesbar: {{count}} Eintrag, der hierher hochgeladen werden soll, kommt nicht an",
+        "reminderListReadOnlyWaiting": "Nur lesbar: {{count}} Einträge, die hierher hochgeladen werden sollen, kommen nicht an"
     },
     "login": {
         "tagline": "Willkommen zurück. Dein Zuhause an einem Ort.",
@@ -4019,7 +4058,8 @@
             "reasonNameTooLong": "Ein Datei- oder Ordnername ist zu lang.",
             "reasonTooDeep": "Der Pfad überschreitet das Limit von fünf Ordnerebenen.",
             "reasonParentFailed": "Der übergeordnete Ordner konnte nicht erstellt werden.",
-            "reasonRateLimited": "Der Server erhält gerade zu viele Anfragen. Versuche den Upload später erneut."
+            "reasonRateLimited": "Der Server erhält gerade zu viele Anfragen. Versuche den Upload später erneut.",
+            "folderGoneReplanned": "Ein Ordner dieses Uploads wurde inzwischen gelöscht. Die Vorschau zeigt den aktuellen Stand - starte den Upload erneut."
         },
         "errorFolderGone": "Diesen Ordner gibt es nicht mehr.",
         "errorSelectedFolderGone": "Den gewählten Ordner gibt es nicht mehr.",
@@ -4412,7 +4452,14 @@
         "debtOwesYou": "{{name}} schuldet dir",
         "debtOwes": "{{from}} schuldet {{to}}",
         "balanced": "Ausgeglichen",
-        "balancedInGroup": "{{group}}: Ausgeglichen"
+        "balancedInGroup": "{{group}}: Ausgeglichen",
+        "totalsByMember": "Bezahlt je Person",
+        "totalsByMemberHint": "Ausgelegt, darunter der eigene Anteil",
+        "ownShare": "Eigener Anteil: {{amount}}",
+        "paidLabel": "Bezahlt",
+        "totalsByCategory": "Nach Kategorie",
+        "categoryFilter": "Ausgaben nach Kategorie filtern",
+        "noExpensesInCategory": "Keine Ausgaben in dieser Kategorie."
     },
     "wmo": {
         "0": "Klarer Himmel",
@@ -4924,6 +4971,7 @@
             "saveError": "Messwert konnte nicht gespeichert werden.",
             "invalidValue": "Bitte gültige Werte eingeben.",
             "range": {
+                "day": "Tag",
                 "week": "Woche",
                 "month": "Monat",
                 "year": "Jahr"
@@ -4963,6 +5011,7 @@
                 "family": "Familie"
             },
             "sparse": "Zu wenige Messwerte für einen Trend.",
+            "bandValue": "{{mean}}, von {{low}} bis {{high}}",
             "recentMeasurements": "Letzte Messungen",
             "deleteMeasurement": "Messung {{value}} vom {{date}} löschen",
             "measurementDeleted": "Messung gelöscht",

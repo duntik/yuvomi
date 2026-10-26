@@ -50,7 +50,7 @@ import { davFailureAction, createRefusalStop, MAX_OUTBOUND_ATTEMPTS } from './ca
 import { patchICSTodo } from '../utils/ics-patch.js';
 import {
   createCalDAVClient, collectionUrlOf, createUploadGate, sameObjectAddress, withAccountOrigin, isOriginRefusal,
-  isAccountWideRefusal,
+  isAccountWideRefusal, acceptsNewEntries,
 } from '../utils/caldav-client.js';
 import {
   ownUid, isOwnUidOfRow, ownUploadRowId, parseOwnUid, findObjectWithUid, inspectObjectAt,
@@ -62,6 +62,7 @@ import {
 import { householdTimeZone, localToUTC } from '../utils/timezone.js';
 import { loadTags, tagsKey } from '../utils/task-tags.js';
 import { runSerialized } from '../utils/sync-lock.js';
+import { noteMoveTakenBack } from './shopping-move-notices.js';
 
 const log = createLogger('CalDAV-Todo-Outbound');
 
@@ -270,12 +271,22 @@ export function detachAccountRows(accountId) {
              external_account_id = NULL,
              external_object_url = NULL,${def.table === 'shopping_items' ? `
              outbound_move          = 0,
-             outbound_move_attempts = 0,` : ''}
+             outbound_move_attempts = 0,
+             outbound_move_since    = NULL,
+             outbound_move_by       = NULL,` : ''}
              outbound_dirty      = 0,
              outbound_attempts   = 0
        WHERE external_source = 'caldav' AND external_account_id = ?
     `).run(accountId).changes;
   }
+  // Das Upload-Ziel lokaler Aufgaben trägt ebenso keinen Fremdschlüssel
+  // (#1885). Ohne Ziel bleibt die Aufgabe lokal und wird nie gesendet - wie
+  // jede Zeile ohne Konto. Einkaufsposten tragen kein eigenes Ziel: sie erben
+  // es von der Listenzuordnung, und die fällt per CASCADE mit dem Konto.
+  db.get().prepare(`
+    UPDATE tasks SET target_caldav_account_id = NULL, target_caldav_list_url = NULL
+     WHERE target_caldav_account_id = ?
+  `).run(accountId);
   return detached;
 }
 
@@ -331,7 +342,9 @@ export function releaseShoppingMirror(row) {
            outbound_dirty         = 0,
            outbound_attempts      = 0,
            outbound_move          = 0,
-           outbound_move_attempts = 0
+           outbound_move_attempts = 0,
+           outbound_move_since    = NULL,
+           outbound_move_by       = NULL
      WHERE id = ?
   `).run(row.id);
   return queued;
@@ -369,7 +382,7 @@ function shoppingMappingsOf(listId) {
  *
  * @returns {'none'|'carry'|'home'|'released'}
  */
-export function moveShoppingMirror(row, targetListId) {
+export function moveShoppingMirror(row, targetListId, movedBy = null) {
   if (!row || row.external_source !== 'caldav') return 'none';
   const from = collectionUrlOf(row.external_object_url);
   const mappings = isMirrored(row) ? shoppingMappingsOf(targetListId) : [];
@@ -380,9 +393,16 @@ export function moveShoppingMirror(row, targetListId) {
   const home = !!from && mappings.some(
     (sel) => sel.account_id === row.external_account_id && sameCollection(sel.list_url, from)
   );
-  db.get().prepare(
-    'UPDATE shopping_items SET outbound_move = ?, outbound_move_attempts = 0 WHERE id = ?'
-  ).run(home ? 0 : 1, row.id);
+  // Der Beginn zählt für die Frist eines wartenden Umzugs (#1911); ein neuer
+  // Umzug beginnt sie neu. Wer verschoben hat, bekommt die Meldung, falls der
+  // Umzug zurückgeht (#1912).
+  db.get().prepare(`
+    UPDATE shopping_items
+       SET outbound_move = ?, outbound_move_attempts = 0,
+           outbound_move_since = CASE WHEN ? THEN NULL ELSE datetime('now') END,
+           outbound_move_by = ?
+     WHERE id = ?
+  `).run(home ? 0 : 1, home ? 1 : 0, home ? null : (movedBy ?? null), row.id);
   return home ? 'home' : 'carry';
 }
 
@@ -842,6 +862,31 @@ export function recurrenceFollowupTarget(task) {
  * @param {number} listId
  * @param {number|null} [accountId] das Konto, das hochladen würde
  */
+/**
+ * Wie viele Einträge warten auf ihren Upload in diese Liste (#1840)? Für eine
+ * Aufgabenliste die Aufgaben mit ihr als Ziel, für eine Einkaufszuordnung die
+ * lokalen Artikel der zugeordneten Liste. Die Einstellungen nennen die Zahl
+ * neben einer Liste, die keine neuen Einträge annimmt.
+ */
+export function countWaitingTodoUploads(accountId, listUrl) {
+  const sel = db.get().prepare(`
+    SELECT target_module, target_list_id, enabled FROM caldav_reminder_selection
+     WHERE account_id = ? AND list_url = ?
+  `).get(accountId, listUrl);
+  if (!sel) return 0;
+  if (sel.target_module === 'shopping') {
+    if (!sel.enabled || !sel.target_list_id) return 0;
+    return db.get().prepare(`
+      SELECT COUNT(*) AS n FROM shopping_items WHERE external_source = 'local' AND list_id = ?
+    `).get(sel.target_list_id).n;
+  }
+  return db.get().prepare(`
+    SELECT COUNT(*) AS n FROM tasks
+     WHERE external_source = 'local' AND target_caldav_account_id = ?
+       AND target_caldav_list_url = ? AND parent_task_id IS NULL
+  `).get(accountId, listUrl).n;
+}
+
 export function pendingShoppingCreations(listId, accountId = null) {
   const rows = db.get().prepare(`
     SELECT * FROM shopping_items
@@ -1322,6 +1367,14 @@ function keepOwnUpload(module, uid, objectUrl) {
 }
 
 /** EINE Zeile je Liste, die in diesem Lauf abgelehnt hat - mit der Anzahl. */
+/** EINE Zeile je nur lesbarer Liste, in die etwas wartet (#1840). */
+function reportReadOnlyLists(readOnly, what) {
+  for (const [listUrl, waiting] of readOnly) {
+    log.warn(`Reminder list ${listUrl} is read-only for this account; `
+      + `${waiting} ${what} stay local until it accepts new entries.`);
+  }
+}
+
 function reportClosedLists(gate, what) {
   gate.report((listUrl, err, waiting) => log.warn(
     `Reminder list ${listUrl} is not accepting uploads (${err.message}); `
@@ -1343,6 +1396,7 @@ export async function processPendingCreations(client, accountId, module, listsBy
   if (rows.length === 0) return 0;
 
   const gate = createUploadGate();
+  const readOnly = new Map();
   let done = 0;
   for (const listed of rows) {
     // Frisch lesen, durch dieselbe Auswahl (#1881): die Liste stammt von vor
@@ -1384,6 +1438,14 @@ export async function processPendingCreations(client, accountId, module, listsBy
     // Aufgabe dieselbe Absage abholen.
     if (gate.isClosed(collection.url)) continue;
 
+    // Nimmt die Liste laut ihren Rechten keine neuen Einträge an (#1840),
+    // geht keine Anfrage hinaus, und das Ziel bleibt stehen: die Aufgabe
+    // wartet, die Einstellungen nennen sie neben der Liste.
+    if (!acceptsNewEntries(collection)) {
+      readOnly.set(collection.url, (readOnly.get(collection.url) || 0) + 1);
+      continue;
+    }
+
     try {
       // Das Ziel räumt die Buchung selbst ab, wenn die Aufgabe Spiegel wird
       // (`bookTodoUpload`) - nicht hier, nach dem await: dann stünde dort
@@ -1404,6 +1466,7 @@ export async function processPendingCreations(client, accountId, module, listsBy
       }
     }
   }
+  reportReadOnlyLists(readOnly, 'task(s)');
   reportClosedLists(gate, 'task(s)');
   return done;
 }
@@ -1431,11 +1494,18 @@ export async function processPendingCreations(client, accountId, module, listsBy
  */
 export async function processPendingShoppingCreations(client, accountId, targets, listsByUrl) {
   const gate = createUploadGate();
+  const readOnly = new Map();
   let done = 0;
   for (const { listUrl, targetListId } of targets) {
     if (!targetListId) continue;
     const collection = listsByUrl.get(listUrl);
     if (!collection) continue;
+    // Nur lesbar (#1840): die Artikel bleiben lokal und warten, siehe oben.
+    if (!acceptsNewEntries(collection)) {
+      const waiting = pendingShoppingCreations(targetListId, accountId).length;
+      if (waiting) readOnly.set(collection.url, waiting);
+      continue;
+    }
 
     for (const row of pendingShoppingCreations(targetListId, accountId)) {
       if (gate.isClosed(collection.url)) continue;
@@ -1456,6 +1526,7 @@ export async function processPendingShoppingCreations(client, accountId, targets
       }
     }
   }
+  reportReadOnlyLists(readOnly, 'shopping item(s)');
   reportClosedLists(gate, 'shopping item(s)');
   return done;
 }
@@ -1553,7 +1624,7 @@ export function returnMovesIntoMissingLists(accountId, listedUrls) {
     const mappings = shoppingMappingsOf(listId);
     if (!mappings.length || !mappings.every(missing)) continue;
     for (const row of pendingShoppingMoves(listId)) {
-      const back = returnShoppingMove(row);
+      const back = returnShoppingMove(row, 'refused');
       returned++;
       log.warn(
         `The reminder list that shopping item "${row.name}" (${row.id}) was moved to no longer exists on the server. `
@@ -1601,6 +1672,84 @@ export function movesWaitingForSelection(accountId) {
 }
 
 /**
+ * So viele Tage wartet ein Umzug auf die Server-Liste seines Objekts, solange
+ * sie nicht eingeschaltet ist (#1911). Danach geht der Artikel zurück
+ * (`endWaitingShoppingMoves`).
+ */
+export const SHOPPING_MOVE_WAIT_DAYS = 7;
+
+/**
+ * Umzüge, deren Objekt in einer Server-Liste DIESES Kontos liegt. Ein Konto
+ * ohne eingeschaltete Liste fragt der Lauf trotzdem, solange es solche gibt
+ * (#1911): sonst kämen das Ende des Wartens und `releaseStrandedShoppingMoves`
+ * dort nie an.
+ */
+export function movesFromAccount(accountId) {
+  return db.get().prepare(`
+    SELECT COUNT(*) AS n FROM shopping_items
+     WHERE external_source = 'caldav' AND external_account_id = ? AND outbound_move = 1
+  `).get(accountId).n;
+}
+
+/**
+ * Ein Umzug, der auf die Quelle wartet, bekommt ein Ende (#1911). Für die
+ * Umzüge, deren Objekt in einer Server-Liste dieses Kontos liegt:
+ *
+ *   - Die Auflistung des Servers nennt die Quelle nicht mehr: mit der Liste
+ *     ist ihr Eintrag fort, es gibt nichts mehr mitzunehmen. Der Artikel
+ *     bleibt, wo der Nutzer ihn hingestellt hat, und wird dort als neuer
+ *     Eintrag angelegt (`releaseShoppingMirror`, dann der Upload des Laufs).
+ *     Zurück auf die alte Liste ginge er nicht: deren Objekt fehlt, und der
+ *     Prune nähme die Zeile fort. Sofort, wie bei den Löschaufträgen
+ *     (`dropDeletionsOfMissingLists`); der Auftrag für das alte Objekt fällt
+ *     dort im nächsten Lauf, nennt der Server die Liste dann wieder, löscht er
+ *     es - der Artikel ist umgezogen.
+ *   - Die Quelle ist nicht (als Einkaufsliste) eingeschaltet, und der Umzug
+ *     wartet länger als `SHOPPING_MOVE_WAIT_DAYS`: der Artikel geht auf die
+ *     Liste seines Objekts zurück (`returnShoppingMove`), wie nach der
+ *     fünften Absage des Ziels. Der Eintrag bleibt, wo der Server ihn führt.
+ *
+ * `listedUrls` ist die Auflistung DIESES Laufs für dieses Konto; leer heisst
+ * "nichts gesagt" (#508), dann gilt nur die Frist.
+ *
+ * Synchron, vor dem Abruf des Kontos.
+ *
+ * @returns {{released: number, returned: number}}
+ */
+export function endWaitingShoppingMoves(accountId, listedUrls) {
+  const listed = [...(listedUrls || [])];
+  const rows = db.get().prepare(`
+    SELECT *, outbound_move_since <= datetime('now', ?) AS overdue FROM shopping_items
+     WHERE external_source = 'caldav' AND external_account_id = ? AND outbound_move = 1
+     ORDER BY id
+  `).all(`-${SHOPPING_MOVE_WAIT_DAYS} days`, accountId);
+  let released = 0;
+  let returned = 0;
+  for (const { overdue, ...row } of rows) {
+    const from = collectionUrlOf(row.external_object_url);
+    if (!from) continue;
+    if (listed.length > 0 && !listed.some((url) => sameCollection(url, from))) {
+      db.get().transaction(() => releaseShoppingMirror(row))();
+      released++;
+      log.warn(
+        `The reminder list that shopping item "${row.name}" (${row.id}) was moved away from no longer exists on the server. `
+        + 'The item stays on the list it was moved to and is added there as a new entry.'
+      );
+      continue;
+    }
+    if (overdue !== 1 || listIsSelected(accountId, from)) continue;
+    const back = returnShoppingMove(row, 'waited');
+    returned++;
+    log.warn(
+      `Shopping item "${row.name}" (${row.id}) waited more than ${SHOPPING_MOVE_WAIT_DAYS} days for its reminder list ${from}, which is not selected. `
+      + 'Its entry on the server was not touched'
+      + (back ? `, and the item is back on the list it came from (${back}).` : '.')
+    );
+  }
+  return { released, returned };
+}
+
+/**
  * Soll das Objekt dieser Zeile JETZT an genau diesen Platz mitgenommen werden?
  * Die Zeile ist Spiegel, trägt die Vormerkung, und die Liste, in der sie steht,
  * ist dieser Server-Liste dieses Kontos zugeordnet und eingeschaltet.
@@ -1610,11 +1759,16 @@ function waitsForCarryHere(now, accountId, collectionUrl) {
     && waitsForUploadHere('shopping', now, accountId, collectionUrl);
 }
 
-/** Ist diese Server-Liste für das Konto eingeschaltet? */
+/**
+ * Ist diese Server-Liste für das Konto als EINKAUFSLISTE eingeschaltet? Eine
+ * inzwischen den Aufgaben zugeordnete zählt nicht (#1911): ihr Objekt gehört
+ * dann einer Aufgabe, und der Umzug darf es dort weder lesen noch entfernen.
+ */
 function listIsSelected(accountId, listUrl) {
-  return db.get().prepare(
-    'SELECT list_url FROM caldav_reminder_selection WHERE account_id = ? AND enabled = 1'
-  ).all(accountId).some((sel) => sameCollection(sel.list_url, listUrl));
+  return db.get().prepare(`
+    SELECT list_url FROM caldav_reminder_selection
+     WHERE account_id = ? AND enabled = 1 AND target_module = 'shopping'
+  `).all(accountId).some((sel) => sameCollection(sel.list_url, listUrl));
 }
 
 /** Der Name des Objekts in seiner Collection, wie die Adresse ihn schreibt. */
@@ -1626,7 +1780,7 @@ function objectNameOf(objectUrl) {
 
 function clearShoppingMove(id) {
   db.get().prepare(
-    'UPDATE shopping_items SET outbound_move = 0, outbound_move_attempts = 0 WHERE id = ?'
+    'UPDATE shopping_items SET outbound_move = 0, outbound_move_attempts = 0, outbound_move_since = NULL, outbound_move_by = NULL WHERE id = ?'
   ).run(id);
 }
 
@@ -1638,9 +1792,13 @@ function clearShoppingMove(id) {
  * Server führt. Gibt es die Zuordnung dieser Server-Liste nicht mehr, fällt
  * nur die Vormerkung; der nächste Abruf ordnet die Zeile wie jede andere.
  *
+ * Geht die Zeile auf eine andere Liste zurück, bekommt die Person, die
+ * verschoben hat, eine Meldung an der Glocke (#1912, `noteMoveTakenBack`).
+ *
+ * @param {'refused'|'waited'} reason  warum der Umzug zurückgeht
  * @returns {number|null} die Liste, auf die die Zeile zurückging
  */
-function returnShoppingMove(row) {
+function returnShoppingMove(row, reason) {
   const from = collectionUrlOf(row.external_object_url);
   const home = from ? db.get().prepare(`
     SELECT sel.list_url, sel.target_list_id FROM caldav_reminder_selection sel
@@ -1652,8 +1810,11 @@ function returnShoppingMove(row) {
   // hier liegt kein await.
   const now = row;
   return db.get().transaction(() => {
+    // Frisch gelesen: der Aufrufer kann eine Zeile ohne die Spalte halten.
+    const movedBy = db.get().prepare('SELECT outbound_move_by FROM shopping_items WHERE id = ?').get(now.id)?.outbound_move_by ?? null;
     clearShoppingMove(now.id);
     if (!home || home.target_list_id === now.list_id) return null;
+    noteMoveTakenBack(db.get(), { movedBy, itemId: now.id, itemName: now.name, backListId: home.target_list_id, targetListId: now.list_id, reason });
     // Ans Ende der Kategorie dort, wie bei jedem Listenwechsel (Route).
     db.get().prepare(`
       UPDATE shopping_items SET list_id = ?, sort_order = COALESCE((
@@ -1721,6 +1882,7 @@ function bookShoppingCarry(sent, { accountId, collectionUrl, objectUrl }) {
              external_object_url    = ?,
              outbound_move          = 0,
              outbound_move_attempts = 0,
+             outbound_move_since    = NULL,
              outbound_dirty         = ?,
              outbound_attempts      = 0
        WHERE id = ?
@@ -1777,13 +1939,21 @@ async function removeCarriedOriginal(source, target, { row, original, from, obje
     // Nach den awaits: nur für die Zeile, die weiter an diesem Objekt hängt.
     const now = reloadRow('shopping', row.id);
     if (!there.own || !now || now.external_source !== 'caldav' || now.external_object_url !== objectUrl) return;
-    await target.updateCalendarObject({
-      calendarObject: {
-        url: objectUrl,
-        etag: there.own.etag,
-        data: carriedContent({ ...now, outbound_dirty: workedIn || now.outbound_dirty ? 1 : 0 }, again.own.data),
-      },
-    });
+    try {
+      await target.updateCalendarObject({
+        calendarObject: {
+          url: objectUrl,
+          etag: there.own.etag,
+          data: carriedContent({ ...now, outbound_dirty: workedIn || now.outbound_dirty ? 1 : 0 }, again.own.data),
+        },
+      });
+    } catch (err) {
+      // Ein Fehler am NEUEN Platz sagt nichts über den alten (#1911): auch
+      // ein 404 dort lässt die Notiz des alten stehen, sein Objekt ist dann
+      // womöglich das letzte (`confirmCarriedCopy`).
+      log.warn(`Shopping item ${row.id}: its old object changed while it was carried over, and the copy at ${objectUrl} could not be updated (${err.message}); tried again on the next run.`);
+      return;
+    }
     await source.deleteCalendarObject({ calendarObject: { url: row.external_object_url, etag: again.own.etag } });
     settleUploadAttempt(place);
     log.info(`Shopping item ${row.id}: its old object was changed while it was carried over, carried the change along.`);
@@ -1849,10 +2019,13 @@ async function carryShoppingItem(client, accountId, collection, rowId, clientFor
   }
 
   // Nach den awaits: die Zeile von jetzt.
+  // Auch die Quelle von jetzt: wurde sie während des Lesens abgeschaltet,
+  // wartet der Umzug wie vorher (#1911).
   const sent = reloadRow('shopping', rowId);
   if (!waitsForCarryHere(sent, accountId, collection.url)
       || sent.external_object_url !== listed.external_object_url
-      || sent.external_account_id !== listed.external_account_id) return 'waiting';
+      || sent.external_account_id !== listed.external_account_id
+      || !listIsSelected(sent.external_account_id, from)) return 'waiting';
 
   if (!original) {
     // Am alten Platz liegt das Objekt nicht (mehr): es gibt nichts mitzunehmen,
@@ -1882,7 +2055,10 @@ async function carryShoppingItem(client, accountId, collection, rowId, clientFor
   }
 
   const booked = bookShoppingCarry(sent, { accountId, collectionUrl: collection.url, objectUrl });
-  if (booked === 'carried') {
+  // Ist die Quelle inzwischen abgeschaltet, wird dort nichts entfernt: die
+  // Notiz des alten Platzes bleibt, und der Rest fällt, sobald sie wieder an
+  // ist (`releaseLeftoverTodoUploads`, #1911).
+  if (booked === 'carried' && listIsSelected(sent.external_account_id, from)) {
     await removeCarriedOriginal(source, client, {
       row: sent, original, from, objectUrl, collectionUrl: collection.url,
     });
@@ -1961,7 +2137,7 @@ export async function processPendingShoppingMoves(client, accountId, targets, li
         }
 
         if (now.outbound_move_attempts + 1 >= MAX_OUTBOUND_ATTEMPTS) {
-          const back = returnShoppingMove(now);
+          const back = returnShoppingMove(now, 'refused');
           log.error(
             `Giving up on moving shopping item "${now.name}" (${now.id}) to reminder list ${listUrl} after `
             + `${now.outbound_move_attempts + 1} refusal(s): ${err.message}. Its entry on the server was not touched`

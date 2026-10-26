@@ -1,11 +1,11 @@
-import { op, jsonBody, idParam, stringPathParam, DOCUMENT_LINK_REFUSAL } from '../helpers.js';
+import { op, jsonBody, idParam, stringPathParam, DOCUMENT_LINK_REFUSAL, withCaseReasons } from '../helpers.js';
 
 // Die verknuepften Dokumente einer Aufgabe gehoeren dem Dokumente-Modul (#1358).
 const TASK_DOCUMENTS_NOTE = '`document_count` counts the linked documents the caller may see; `GET /api/v1/tasks/{id}` also carries them as `documents`. '
   + 'Without access to the Documents module (for API tokens a `documents:read` scope) both are `null` - not told, which is not the same as `0` or an empty list.';
 
 export function tasksPaths() {
-  return withCaseReasons({
+  return withCaseReasons('tasks', CASE_REASONS, {
     '/api/v1/tasks': {
       // Die Filter stehen als echte Parameter da, nicht nur im Fließtext: ein
       // generierter Client und die MCP-Brücke (get_api_operation) lesen die
@@ -70,7 +70,7 @@ export function tasksPaths() {
       get: op({
         summary: 'List selectable CalDAV reminder lists for the task editor',
         tag: 'Tasks',
-        description: 'Available to every authenticated user (#695). Returns `{ data: { caldav: [{ accountId, accountName, listUrl, listName }] } }`, restricted to reminder lists the household has enabled **for tasks** - a list pointing at shopping is omitted, because a task sent there would come back as a shopping item. Carries no credentials or server URLs; account management stays admin-only. The identifier for `sync_target` on POST/PUT /tasks is `caldav:<accountId>|<listUrl>`.',
+        description: 'Available to every authenticated user (#695). Returns `{ data: { caldav: [{ accountId, accountName, listUrl, listName }] } }`, restricted to reminder lists the household has enabled **for tasks** - a list pointing at shopping is omitted, because a task sent there would come back as a shopping item - and that take new entries (#1840: a list shared read-only is omitted; one whose server does not report privileges stays). POST/PUT /tasks refuse a read-only list as a new `sync_target` with 400; a task whose stored target became read-only later keeps it and waits locally. Carries no credentials or server URLs; account management stays admin-only. The identifier for `sync_target` on POST/PUT /tasks is `caldav:<accountId>|<listUrl>`.',
       }),
     },
     '/api/v1/tasks/tags': {
@@ -160,15 +160,3 @@ const CASE_REASONS = {
   '/api/v1/tasks/{id}/comments': { get: TASK_GONE, post: TASK_GONE },
   '/api/v1/tasks/{id}/comments/{commentId}': { patch: COMMENT_GONE, delete: COMMENT_GONE },
 };
-
-function withCaseReasons(paths) {
-  for (const [path, operations] of Object.entries(CASE_REASONS)) {
-    for (const [method, reasons] of Object.entries(operations)) {
-      const operation = paths[path]?.[method];
-      if (!operation) throw new Error(`openapi tasks: ${method} ${path} is not documented`);
-      const note = `A refusal a user can reach carries a \`reason\` next to \`error\` (#1909): ${reasons}.`;
-      operation.description = operation.description ? `${operation.description}\n\n${note}` : note;
-    }
-  }
-  return paths;
-}
